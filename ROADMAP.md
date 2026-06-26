@@ -86,7 +86,29 @@ Add range-based market context and confirmation logic.
 
 ---
 
-## Phase 5 - AI Engine
+## Phase 5 - Order Flow / Footprint Engine
+Add a research-first order-flow layer for users working with Sierra Chart and CME-style footprint data.
+
+### Goals
+- Import footprint-style data from CSV exports
+- Analyze bid volume and ask volume
+- Calculate delta and cumulative delta (CVD)
+- Detect imbalances, absorption, and exhaustion
+- Build volume profile and identify Point of Control (POC)
+- Calculate Value Area High and Value Area Low
+- Study session volume behavior
+- Connect order-flow context with SMC and CRT signals
+- Provide beginner-friendly AI explanations of order-flow context
+
+### Deliverables
+- Footprint data import module
+- Order-flow analysis engine
+- Volume profile and session analysis tools
+- Order-flow research dashboard and explanation layer
+
+---
+
+## Phase 6 - AI Engine
 Move from rule-based analysis to AI-assisted decision support.
 
 ### Goals
@@ -104,7 +126,7 @@ Move from rule-based analysis to AI-assisted decision support.
 
 ---
 
-## Phase 6 - Paper Trading
+## Phase 7 - Paper Trading
 Simulate trading in a realistic environment without risking real money.
 
 ### Goals
@@ -120,7 +142,7 @@ Simulate trading in a realistic environment without risking real money.
 
 ---
 
-## Phase 7 - Live Trading
+## Phase 8 - Live Trading
 Prepare for real-market execution only after the platform is thoroughly tested.
 
 ### Goals
@@ -147,6 +169,7 @@ Prepare for real-market execution only after the platform is thoroughly tested.
 - [ ] Equity curve and drawdown analysis are available
 - [ ] Smart Money Concept analysis is integrated
 - [ ] CRT detection and confirmation logic are implemented
+- [ ] Order-flow and footprint analysis is implemented
 - [ ] AI explanation and confidence engine is working
 - [ ] Paper trading account and statistics are operational
 - [ ] Live trading infrastructure is prepared and documented
