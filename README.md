@@ -1,25 +1,64 @@
 # AI Trader Project
 
-This project is a beginner-friendly research and backtesting example for XAUUSD / Gold.
-It is designed to stay research-first, with no live execution and no broker connection at this stage.
+This project is being built as a professional AI trading platform for two distinct trading systems:
+- System A: Apex Futures account trading Gold Futures (GC) on Sierra Chart with a professional scalping style and strict daily risk controls.
+- System B: XAUUSD spot trading with a swing and intraday style focused on larger moves, runners, partial take profits, and trailing stops.
 
-## What it does
-- Loads candle data from a CSV file
-- Calculates EMA20 and EMA50 crossover signals
-- Generates simple buy/sell/hold decisions
-- Runs a very simple backtest with a 1% risk placeholder
-- Prints a final result summary
+The current focus is research-first and paper-trading-first. The long-term goal is an autonomous AI trader that can analyze markets, protect capital, explain its decisions, and scale responsibly.
 
-## Planned research direction
-The project will grow in stages toward more advanced market analysis:
-- Candle-based backtesting and performance review
-- Smart Money Concepts and CRT signal research
-- Order-flow and footprint analysis for Sierra Chart-style CSV exports
-- Beginner-friendly explanations of market context and trade ideas
-- An AI Trading Mentor that teaches the user through every decision
+## Primary mission
+- Protect capital above all else
+- Never trade when market quality, confidence, or rules are weak
+- Build a modular, understandable, testable, and expandable platform
+- Teach the user through every decision and outcome
 
-## Core concept: AI Trading Mentor
-The system will not only generate trade signals. It will act like a mentor by explaining every decision in plain language.
+## Core principles
+- Backtesting first
+- Paper trading first
+- Live trading only after validation
+- No broker connection yet
+- No trade is better than a bad trade
+- Capital protection is more important than profit
+
+## Market analysis framework
+The system will analyze markets across multiple timeframes:
+- Weekly: overall direction
+- Daily: market bias
+- 4H: structure
+- 1H: setup
+- 15M: confirmation
+- 5M: execution
+
+## Core analysis modules
+- Higher timeframe analysis
+- Smart Money Concepts (SMC)
+- Candle Range Theory (CRT)
+- Order Flow / Footprint analysis
+- News filter
+- Session filter
+- Volatility analysis
+- Market bias and execution context
+
+## Decision engine
+Every trade will pass through a validation pipeline:
+Higher Timeframe -> SMC -> CRT -> Order Flow -> Risk -> Execution
+
+If any mandatory validation fails, the system will skip the trade.
+
+## Capital protection engine
+The platform will include strict capital protection controls:
+- Maximum daily loss
+- Maximum daily profit
+- Maximum consecutive losses
+- Maximum open trades
+- News protection
+- Spread protection
+- Session protection
+- Emergency stop
+- Trade lock
+
+## AI Trading Mentor
+The platform is designed to do more than generate signals. It will act as a mentor by explaining every decision in plain language.
 
 ### AI brain modules
 1. Market Analyst
@@ -39,11 +78,11 @@ The system will not only generate trade signals. It will act like a mentor by ex
 
 3. Trading Coach
 - Explain why a trade was taken
-- Explain why a trade hit SL
-- Explain why a trade hit TP
-- Identify mistakes such as early entry, weak confirmation, bad session, and poor risk
+- Explain why a trade hit stop loss
+- Explain why a trade hit take profit
+- Identify mistakes such as early entry, weak confirmation, poor session choice, and poor risk sizing
 - Give a short lesson after each trade
-- Create a trade grade: A+, A, B, C, D
+- Create a trade grade: A+, A, B, C, or D
 
 ### Example outputs
 - Winning trade explanation
@@ -51,18 +90,47 @@ The system will not only generate trade signals. It will act like a mentor by ex
 - No-trade recommendation
 - Daily lesson
 
-## Upcoming major phase
-Phase 5 - Order Flow / Footprint Engine
+## Development order
+1. Foundation
+2. Backtesting
+3. Paper Trading
+4. Small Live
+5. Full Automation
 
-This phase will focus on research-only order-flow analysis using exported data, not live trading. It will include:
-- Footprint data import from CSV
-- Bid volume and ask volume analysis
-- Delta and cumulative delta (CVD)
-- Imbalance, absorption, and exhaustion detection
-- Volume profile, Point of Control (POC), and Value Area High/Low
-- Session volume analysis
-- Integration with SMC and CRT signals
-- AI explanations of order-flow context
+Never skip phases.
+
+## Architecture Sprint 2
+The project now includes a clean modular package structure for future expansion without implementing trading logic yet.
+
+### Package overview
+- core/: orchestration for market analysis, decisions, execution, trade management, and capital protection
+- analysis/: multi-timeframe analysis utilities
+- smc/: Smart Money Concepts analysis modules
+- crt/: Candle Range Theory analysis modules
+- orderflow/: order-flow and footprint analysis modules
+- risk/: risk validation and capital protection rules
+- broker/: broker integration abstractions
+- ai/: explainable AI modules for market analysis and coaching
+- storage/: trade journal and persistence abstractions
+- config/: configuration and settings
+- utils/: shared helper modules such as logging
+
+### Placeholder modules created
+- core/market_analyzer.py
+- core/decision_engine.py
+- analysis/timeframe_analyzer.py
+- smc/smc_engine.py
+- crt/crt_engine.py
+- orderflow/orderflow_engine.py
+- risk/risk_manager.py
+- broker/broker_adapter.py
+- ai/trading_coach.py
+- ai/market_analyst_ai.py
+- storage/trade_journal.py
+- config/settings.py
+- utils/logger.py
+
+Each module contains a docstring, a main class, type hints, and TODO comments describing future responsibilities.
 
 ## Project structure
 - src/data_loader.py: loads OHLCV-style candle data from CSV
