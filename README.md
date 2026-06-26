@@ -16,6 +16,40 @@ The project will grow in stages toward more advanced market analysis:
 - Smart Money Concepts and CRT signal research
 - Order-flow and footprint analysis for Sierra Chart-style CSV exports
 - Beginner-friendly explanations of market context and trade ideas
+- An AI Trading Mentor that teaches the user through every decision
+
+## Core concept: AI Trading Mentor
+The system will not only generate trade signals. It will act like a mentor by explaining every decision in plain language.
+
+### AI brain modules
+1. Market Analyst
+- Multi-timeframe analysis: Weekly, Daily, 4H, 1H, 15M, 5M
+- SMC
+- CRT
+- Order Flow / Footprint
+- Market bias
+
+2. Risk Manager
+- Entry validation
+- Stop loss explanation
+- Take profit logic
+- Risk per trade
+- Daily loss limit
+- No-trade conditions
+
+3. Trading Coach
+- Explain why a trade was taken
+- Explain why a trade hit SL
+- Explain why a trade hit TP
+- Identify mistakes such as early entry, weak confirmation, bad session, and poor risk
+- Give a short lesson after each trade
+- Create a trade grade: A+, A, B, C, D
+
+### Example outputs
+- Winning trade explanation
+- Losing trade explanation
+- No-trade recommendation
+- Daily lesson
 
 ## Upcoming major phase
 Phase 5 - Order Flow / Footprint Engine
@@ -58,6 +92,7 @@ The CSV should contain these columns:
 
 ## Development philosophy
 - Backtesting first
+- Paper trading first
 - Research before execution
 - No live trading yet
 - No broker connection yet

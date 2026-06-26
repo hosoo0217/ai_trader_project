@@ -9,6 +9,7 @@ Build a professional AI-assisted trading platform focused on XAUUSD (Gold), with
 - Live trading last
 - Modular architecture
 - Beginner-friendly documentation
+- Teach the user, not just generate signals
 
 ---
 
@@ -108,8 +109,41 @@ Add a research-first order-flow layer for users working with Sierra Chart and CM
 
 ---
 
-## Phase 6 - AI Engine
-Move from rule-based analysis to AI-assisted decision support.
+## Phase 6 - AI Trading Mentor
+Build an educational AI layer that explains every decision and teaches the user as the system evolves.
+
+### Core Concept
+The project will evolve into an AI Trading Mentor that does more than generate trade signals. It will explain why a signal appears, why a trade should be taken or skipped, and what the user can learn from each result.
+
+### AI Brain Modules
+#### 1. Market Analyst
+- Analyze multiple timeframes: Weekly, Daily, 4H, 1H, 15M, and 5M
+- Apply SMC logic
+- Apply CRT logic
+- Use order-flow and footprint context
+- Form a clear market bias
+
+#### 2. Risk Manager
+- Validate trade entries
+- Explain stop loss placement
+- Define take profit logic
+- Enforce risk per trade
+- Enforce daily loss limits
+- Identify no-trade conditions
+
+#### 3. Trading Coach
+- Explain why a trade was taken
+- Explain why a trade hit stop loss
+- Explain why a trade hit take profit
+- Identify mistakes such as early entry, weak confirmation, poor session choice, and poor risk sizing
+- Give a short lesson after each trade
+- Create a trade grade: A+, A, B, C, or D
+
+### Example Outputs
+- Winning trade explanation
+- Losing trade explanation
+- No-trade recommendation
+- Daily lesson
 
 ### Goals
 - Generate trade explanations
@@ -117,12 +151,14 @@ Move from rule-based analysis to AI-assisted decision support.
 - Build market context summaries
 - Analyze trading journal data
 - Suggest strategy improvements based on past performance
+- Teach the user through every decision and outcome
 
 ### Deliverables
 - AI explanation layer
 - Confidence scoring system
 - Market context engine
-- Journal-based learning and feedback tools
+- Trading coach and learning feedback tools
+- Trade review and grading system
 
 ---
 
