@@ -37,6 +37,7 @@ from orderflow.delta_cvd import DeltaCVDAnalyzer, DeltaCVDConfig
 from orderflow.imbalance import ImbalanceAnalyzer, ImbalanceConfig
 from orderflow.orderflow_context import OrderFlowContextCombiner, OrderFlowContextConfig, OrderFlowContextResult
 from orderflow.replay import OrderFlowReplayConfig, OrderFlowReplayEngine, OrderFlowReplayResult
+from orderflow.replay_report import OrderFlowReplayReport, OrderFlowReplayReportGenerator
 from orderflow.sierra_chart_importer import SierraChartImporter, SierraChartImportConfig
 from risk.risk_engine import RiskEngineConfig
 from storage.decision_trace import DecisionTracer
@@ -550,6 +551,9 @@ def _print_orderflow_replay_summary(
     print(f"- Reasons: {reasons_text}")
     print(f"- Blocking reasons: {blocks_text}")
 
+    replay_report = OrderFlowReplayReportGenerator().generate(replay_result)
+    _print_orderflow_replay_report(replay_report)
+
     if not show_steps:
         return
 
@@ -568,6 +572,28 @@ def _print_orderflow_replay_summary(
         print(f"    Absorption bias: {step.absorption_bias}")
         print(f"    Order Flow bias: {step.orderflow_bias}")
         print(f"    Confidence: {step.orderflow_confidence:.1f}")
+
+
+def _print_orderflow_replay_report(report: OrderFlowReplayReport) -> None:
+    """Print a compact replay report below the replay summary."""
+    warnings_text = "; ".join(report.warnings) if report.warnings else "None"
+    reasons_text = "; ".join(report.reasons) if report.reasons else "None"
+
+    print("\nOrder Flow Replay Report")
+    print(f"- Total steps: {report.total_steps}")
+    print(f"- Bullish steps: {report.bullish_steps}")
+    print(f"- Bearish steps: {report.bearish_steps}")
+    print(f"- Neutral steps: {report.neutral_steps}")
+    print(f"- Unknown steps: {report.unknown_steps}")
+    print(f"- Dominant bias: {report.dominant_bias}")
+    print(f"- Average confidence: {report.average_confidence:.1f}")
+    print(f"- Max confidence: {report.max_confidence:.1f}")
+    print(f"- Min confidence: {report.min_confidence:.1f}")
+    print(f"- Final bias: {report.final_bias}")
+    print(f"- Final confidence: {report.final_confidence:.1f}")
+    print(f"- Final CVD: {report.final_cvd:.2f}")
+    print(f"- Warnings: {warnings_text}")
+    print(f"- Reasons: {reasons_text}")
 
 
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:

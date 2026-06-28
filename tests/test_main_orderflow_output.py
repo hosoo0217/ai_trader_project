@@ -209,6 +209,11 @@ def test_orderflow_replay_works_with_bullish_sample_csv() -> None:
     assert "- Passed: True" in output
     assert "- Final bias: BULLISH" in output
     assert "- Final CVD:" in output
+    assert "Order Flow Replay Report" in output
+    assert "- Total steps: 1" in output
+    assert "- Bullish steps: 1" in output
+    assert "- Dominant bias: BULLISH" in output
+    assert "- Average confidence:" in output
 
 
 def test_orderflow_replay_works_with_bearish_sample_csv() -> None:
@@ -227,6 +232,9 @@ def test_orderflow_replay_works_with_bearish_sample_csv() -> None:
     assert "- Active: True" in output
     assert "- Passed: True" in output
     assert "- Final bias: BEARISH" in output
+    assert "Order Flow Replay Report" in output
+    assert "- Bearish steps: 1" in output
+    assert "- Dominant bias: BEARISH" in output
 
 
 def test_orderflow_replay_steps_print_when_requested() -> None:
@@ -267,6 +275,10 @@ def test_missing_orderflow_replay_csv_path_does_not_crash() -> None:
     assert "- Passed: False" in output
     assert "- Data quality status: INVALID" in output
     assert "Order Flow replay CSV path does not exist" in output
+    assert "Order Flow Replay Report" in output
+    assert "- Total steps: 0" in output
+    assert "- Dominant bias: UNKNOWN" in output
+    assert "- Warnings: Order Flow replay CSV path does not exist" in output
 
 
 def test_invalid_orderflow_replay_csv_does_not_crash(tmp_path) -> None:
@@ -288,3 +300,6 @@ def test_invalid_orderflow_replay_csv_does_not_crash(tmp_path) -> None:
     assert "- Active: False" in output
     assert "- Passed: False" in output
     assert "- Data quality status: EMPTY" in output
+    assert "Order Flow Replay Report" in output
+    assert "- Total steps: 0" in output
+    assert "- Dominant bias: UNKNOWN" in output
