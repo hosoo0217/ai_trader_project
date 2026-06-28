@@ -116,6 +116,12 @@ class DecisionContext:
     trading_halted: bool = False
     max_concurrent_trades: int = 1
     open_trades_count: int = 0
+    alignment_allowed: bool = True
+    alignment_status: str | None = None
+    aligned_bias: str | None = None
+    alignment_confidence_adjustment: float = 0.0
+    alignment_reasons: List[str] = field(default_factory=list)
+    alignment_blocking_reasons: List[str] = field(default_factory=list)
 
     def is_trade_allowed(self) -> bool:
         """Determine whether a new trade is allowed.

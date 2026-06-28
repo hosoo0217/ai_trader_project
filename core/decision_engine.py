@@ -89,6 +89,40 @@ class DecisionEngine:
             else:
                 direction = "NO_TRADE"
 
+        alignment_allowed = bool(getattr(context, "alignment_allowed", True))
+        alignment_status = getattr(context, "alignment_status", None)
+        aligned_bias = str(getattr(context, "aligned_bias", "") or "").upper() or None
+        alignment_adjustment = float(getattr(context, "alignment_confidence_adjustment", 0.0) or 0.0)
+        alignment_reasons = list(getattr(context, "alignment_reasons", []))
+        alignment_blocking_reasons = list(getattr(context, "alignment_blocking_reasons", []))
+
+        if not alignment_allowed:
+            return DecisionResult(
+                action="NO_TRADE",
+                allowed=False,
+                confidence=self._clamp_confidence(confidence),
+                reasons=[*reasons, "Context alignment gate blocked trading"],
+                blocking_reasons=[
+                    *blocking_reasons,
+                    f"Context alignment status: {alignment_status or 'UNKNOWN'}",
+                    *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
+                ],
+            )
+
+        if direction == "NO_TRADE" and aligned_bias == "BULLISH":
+            direction = "BUY"
+            reasons.append("Alignment bias supports BUY context")
+        elif direction == "NO_TRADE" and aligned_bias == "BEARISH":
+            direction = "SELL"
+            reasons.append("Alignment bias supports SELL context")
+
+        if alignment_adjustment != 0.0:
+            confidence = self._clamp_confidence(confidence + alignment_adjustment)
+            reasons.append(f"Alignment confidence adjustment applied: {alignment_adjustment:+.1f}")
+
+        if alignment_reasons:
+            reasons.extend([f"ALIGNMENT: {item}" for item in alignment_reasons])
+
         smc_context = getattr(context, "smc", None)
         smc_bias = str(getattr(smc_context, "smc_bias", "UNKNOWN") or "UNKNOWN").upper()
         smc_confidence = float(getattr(smc_context, "smc_confidence", 0.0) or 0.0)

@@ -12,6 +12,7 @@ from analysis.spread_filter import SpreadFilterConfig
 from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
+from core.context_alignment import ContextAlignmentConfig
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
@@ -61,6 +62,7 @@ def _run_flow(candles: pd.DataFrame, tracer: DecisionTracer | None = None):
         spread_config=SpreadFilterConfig(max_spread=3.0),
         current_spread=1.0,
         tracer=tracer,
+        alignment_config=ContextAlignmentConfig(enabled=False),
     )
 
 

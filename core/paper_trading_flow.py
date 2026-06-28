@@ -21,6 +21,7 @@ from analysis.volatility_filter import VolatilityFilter, VolatilityFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from crt.crt_engine import CRTConfig, CRTEngine, CRTResult
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionEngine, CapitalProtectionState
+from core.context_alignment import ContextAlignmentConfig, ContextAlignmentGate, ContextAlignmentResult
 from core.decision_context import DecisionContext, MarketContext, SMCContext, CRTContext, OrderFlowContext, RiskContext
 from core.decision_engine import DecisionEngine, DecisionResult
 from core.exit_simulator import ExitSimulationConfig, ExitSimulator
@@ -119,6 +120,13 @@ class PaperTradingFlowResult:
     crt_signal_type: str | None = None
     crt_reasons: List[str] = field(default_factory=list)
     crt_blocking_reasons: List[str] = field(default_factory=list)
+    alignment_checked: bool = False
+    alignment_allowed: bool = False
+    alignment_status: str | None = None
+    aligned_bias: str | None = None
+    confidence_adjustment: float = 0.0
+    alignment_reasons: List[str] = field(default_factory=list)
+    alignment_blocking_reasons: List[str] = field(default_factory=list)
 
 
 class PaperTradingFlow:
@@ -150,6 +158,7 @@ class PaperTradingFlow:
         smc_context_config: Optional[SMCContextConfig] = None,
         crt_enabled: bool = True,
         crt_config: Optional[CRTConfig] = None,
+        alignment_config: Optional[ContextAlignmentConfig] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         decision_trace = self._create_decision_trace(tracer, flow_config.symbol)
@@ -425,6 +434,14 @@ class PaperTradingFlow:
         crt_signal_type: str | None = None
         crt_reasons: List[str] = []
         crt_blocking_reasons: List[str] = []
+        alignment_checked = False
+        alignment_result: Optional[ContextAlignmentResult] = None
+        alignment_allowed = False
+        alignment_status: str | None = None
+        aligned_bias: str | None = None
+        confidence_adjustment = 0.0
+        alignment_reasons: List[str] = []
+        alignment_blocking_reasons: List[str] = []
 
         if smc_enabled:
             smc_checked = True
@@ -722,6 +739,136 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                alignment_checked=alignment_checked,
+                alignment_allowed=alignment_allowed,
+                alignment_status=alignment_status,
+                aligned_bias=aligned_bias,
+                confidence_adjustment=confidence_adjustment,
+                alignment_reasons=list(alignment_reasons),
+                alignment_blocking_reasons=list(alignment_blocking_reasons),
+                ),
+                tracer,
+                decision_trace,
+            )
+
+        # Alignment gate is a context-quality validator only. It never executes trades.
+        alignment_checked = True
+        effective_alignment_config = alignment_config or ContextAlignmentConfig(enabled=False)
+        alignment_result = ContextAlignmentGate().evaluate(
+            smc_result=smc_context_result,
+            crt_result=crt_result,
+            config=effective_alignment_config,
+        )
+        alignment_allowed = bool(alignment_result.allowed)
+        alignment_status = alignment_result.status
+        aligned_bias = alignment_result.aligned_bias
+        confidence_adjustment = float(alignment_result.confidence_adjustment)
+        alignment_reasons = list(alignment_result.reasons)
+        alignment_blocking_reasons = list(alignment_result.blocking_reasons)
+
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "CONTEXT_ALIGNMENT",
+            alignment_status or "UNKNOWN",
+            alignment_allowed,
+            reasons=list(alignment_reasons),
+            blocking_reasons=list(alignment_blocking_reasons),
+        )
+
+        if not alignment_allowed:
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=[
+                    *alignment_reasons,
+                    *[f"SMC: {item}" for item in smc_reasons],
+                    *[f"CRT: {item}" for item in crt_reasons],
+                ],
+                blocking_reasons=[
+                    *alignment_blocking_reasons,
+                    *[f"SMC: {item}" for item in smc_blocking_reasons],
+                    *[f"CRT: {item}" for item in crt_blocking_reasons],
+                ],
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Context-alignment blocked decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
+                completed=True,
+                status="NO_TRADE",
+                market_bias=primary_result.bias,
+                decision_action="NO_TRADE",
+                trade_executed=False,
+                reasons=list(alignment_reasons),
+                balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
+                session_checked=True,
+                session_allowed=True,
+                active_session=session_result.active_session,
+                session_status=session_result.status,
+                session_reasons=list(session_result.reasons),
+                session_blocking_reasons=list(session_result.blocking_reasons),
+                news_checked=True,
+                news_allowed=True,
+                news_status=news_result.status,
+                active_news_event=news_result.active_event,
+                news_reasons=list(news_result.reasons),
+                news_blocking_reasons=list(news_result.blocking_reasons),
+                volatility_checked=True,
+                volatility_allowed=True,
+                volatility_status=volatility_result.status,
+                atr=volatility_result.atr,
+                last_candle_range=volatility_result.last_candle_range,
+                volatility_reasons=list(volatility_result.reasons),
+                volatility_blocking_reasons=list(volatility_result.blocking_reasons),
+                spread_checked=True,
+                spread_allowed=True,
+                spread_status=spread_result.status,
+                spread=spread_result.spread,
+                spread_reasons=list(spread_result.reasons),
+                spread_blocking_reasons=list(spread_result.blocking_reasons),
+                safety_checked=True,
+                safety_allowed=True,
+                safety_status=safety_decision.status,
+                safety_reasons=list(safety_decision.reasons),
+                safety_blocking_reasons=list(safety_decision.blocking_reasons),
+                safety_passed_checks=list(safety_decision.passed_checks),
+                safety_failed_checks=list(safety_decision.failed_checks),
+                smc_checked=smc_checked,
+                smc_bias=smc_bias,
+                smc_confidence=smc_confidence,
+                smc_reasons=list(smc_reasons),
+                smc_blocking_reasons=list(smc_blocking_reasons),
+                crt_checked=crt_checked,
+                crt_bias=crt_bias,
+                crt_signal_type=crt_signal_type,
+                crt_reasons=list(crt_reasons),
+                crt_blocking_reasons=list(crt_blocking_reasons),
+                alignment_checked=alignment_checked,
+                alignment_allowed=alignment_allowed,
+                alignment_status=alignment_status,
+                aligned_bias=aligned_bias,
+                confidence_adjustment=confidence_adjustment,
+                alignment_reasons=list(alignment_reasons),
+                alignment_blocking_reasons=list(alignment_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
@@ -733,6 +880,7 @@ class PaperTradingFlow:
             mtf_decision,
             smc_context_result,
             crt_result,
+            alignment_result,
         )
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
@@ -754,11 +902,13 @@ class PaperTradingFlow:
                 status="BLOCKED",
                 reasons=[
                     *decision_result.reasons,
+                    *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                     *[f"SMC: {item}" for item in smc_reasons],
                     *[f"CRT: {item}" for item in crt_reasons],
                 ],
                 blocking_reasons=[
                     *decision_result.blocking_reasons,
+                    *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                     *[f"SMC: {item}" for item in smc_blocking_reasons],
                     *[f"CRT: {item}" for item in crt_blocking_reasons],
                 ],
@@ -831,6 +981,13 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                alignment_checked=alignment_checked,
+                alignment_allowed=alignment_allowed,
+                alignment_status=alignment_status,
+                aligned_bias=aligned_bias,
+                confidence_adjustment=confidence_adjustment,
+                alignment_reasons=list(alignment_reasons),
+                alignment_blocking_reasons=list(alignment_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
@@ -863,11 +1020,13 @@ class PaperTradingFlow:
                 status="BLOCKED",
                 reasons=[
                     *result_reasons,
+                    *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                     *[f"SMC: {item}" for item in smc_reasons],
                     *[f"CRT: {item}" for item in crt_reasons],
                 ],
                 blocking_reasons=[
                     *risk_blocking_reasons,
+                    *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                     *[f"SMC: {item}" for item in smc_blocking_reasons],
                     *[f"CRT: {item}" for item in crt_blocking_reasons],
                 ],
@@ -947,6 +1106,13 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                alignment_checked=alignment_checked,
+                alignment_allowed=alignment_allowed,
+                alignment_status=alignment_status,
+                aligned_bias=aligned_bias,
+                confidence_adjustment=confidence_adjustment,
+                alignment_reasons=list(alignment_reasons),
+                alignment_blocking_reasons=list(alignment_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
@@ -1007,12 +1173,14 @@ class PaperTradingFlow:
             status="EXECUTED" if trade_result.executed else "REJECTED",
             reasons=[
                 *result_reasons,
+                *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                 *[f"SMC: {item}" for item in smc_reasons],
                 *[f"CRT: {item}" for item in crt_reasons],
             ],
             blocking_reasons=[
                 *decision_result.blocking_reasons,
                 *risk_blocking_reasons,
+                *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                 *[f"SMC: {item}" for item in smc_blocking_reasons],
                 *[f"CRT: {item}" for item in crt_blocking_reasons],
             ],
@@ -1153,6 +1321,13 @@ class PaperTradingFlow:
             crt_signal_type=crt_signal_type,
             crt_reasons=list(crt_reasons),
             crt_blocking_reasons=list(crt_blocking_reasons),
+            alignment_checked=alignment_checked,
+            alignment_allowed=alignment_allowed,
+            alignment_status=alignment_status,
+            aligned_bias=aligned_bias,
+            confidence_adjustment=confidence_adjustment,
+            alignment_reasons=list(alignment_reasons),
+            alignment_blocking_reasons=list(alignment_blocking_reasons),
             ),
             tracer,
             decision_trace,
@@ -1283,6 +1458,7 @@ class PaperTradingFlow:
         mtf_decision: MultiTimeframeDecision,
         smc_context_result: Optional[SMCContextResult] = None,
         crt_result: Optional[CRTResult] = None,
+        alignment_result: Optional[ContextAlignmentResult] = None,
     ) -> DecisionContext:
         """Create a simple DecisionContext from the paper-flow analysis output."""
         last_close = float(candles["close"].iloc[-1])
@@ -1312,4 +1488,14 @@ class PaperTradingFlow:
         context.trading_halted = False
         context.max_concurrent_trades = 1
         context.open_trades_count = 0
+        context.alignment_allowed = bool(getattr(alignment_result, "allowed", True)) if alignment_result is not None else True
+        context.alignment_status = getattr(alignment_result, "status", None) if alignment_result is not None else None
+        context.aligned_bias = getattr(alignment_result, "aligned_bias", None) if alignment_result is not None else None
+        context.alignment_confidence_adjustment = (
+            float(getattr(alignment_result, "confidence_adjustment", 0.0)) if alignment_result is not None else 0.0
+        )
+        context.alignment_reasons = list(getattr(alignment_result, "reasons", [])) if alignment_result is not None else []
+        context.alignment_blocking_reasons = (
+            list(getattr(alignment_result, "blocking_reasons", [])) if alignment_result is not None else []
+        )
         return context
