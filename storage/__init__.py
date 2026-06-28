@@ -7,6 +7,7 @@ from .orderflow_replay_exporter import (
 )
 from .session_report import TradingSessionReport, TradingSessionReportGenerator
 from .session_report_exporter import SessionReportExportConfig, SessionReportExporter, SessionReportExportResult
+from .session_history import SessionHistoryConfig, SessionHistoryStore, SessionHistorySummary
 from .trade_journal import TradeJournal
 
 __all__ = [
@@ -17,6 +18,9 @@ __all__ = [
     "SessionReportExportConfig",
     "SessionReportExporter",
     "SessionReportExportResult",
+    "SessionHistoryConfig",
+    "SessionHistoryStore",
+    "SessionHistorySummary",
     "TradingSessionReport",
     "TradingSessionReportGenerator",
 ]
