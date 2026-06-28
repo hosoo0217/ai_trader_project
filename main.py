@@ -88,6 +88,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show decision trace details in output",
     )
+    parser.add_argument(
+        "--show-orderflow",
+        action="store_true",
+        help="Show detailed Order Flow context output when available",
+    )
     return parser
 
 
@@ -284,21 +289,32 @@ def _print_orderflow_summary(
     orderflow_confidence: float | None,
     orderflow_reasons: list[str],
     orderflow_blocking_reasons: list[str],
+    show_detail: bool = False,
 ) -> None:
     """Print order flow context status without requiring footprint data."""
+    bias = orderflow_bias if orderflow_bias else "UNKNOWN"
+    confidence = float(orderflow_confidence or 0.0)
+    has_context = bool(orderflow_checked and bias not in {"UNKNOWN", None} and confidence > 0.0)
+    status = "Provided" if has_context else "Not provided"
+    if bias == "NEUTRAL":
+        status = "Neutral"
+    elif orderflow_blocking_reasons:
+        status = "Conflicting or blocked"
+
     print("\nOrder Flow Context")
-    print(f"- Order Flow checked: {orderflow_checked}")
-    print(f"- Order Flow bias: {orderflow_bias if orderflow_bias else 'UNKNOWN'}")
-    confidence_text = f"{orderflow_confidence:.1f}" if orderflow_confidence is not None else "0.0"
-    print(f"- Order Flow confidence: {confidence_text}")
-    if orderflow_reasons:
-        print(f"- Order Flow reasons: {'; '.join(orderflow_reasons)}")
-    else:
-        print("- Order Flow reasons: Order Flow context not provided")
-    if orderflow_blocking_reasons:
-        print(f"- Order Flow blocking reasons: {'; '.join(orderflow_blocking_reasons)}")
-    else:
-        print("- Order Flow blocking reasons: None")
+    print(f"- Active: {has_context}")
+    print(f"- Bias: {bias}")
+    print(f"- Confidence: {confidence:.1f}")
+    print(f"- Status: {status}")
+    reason_text = "; ".join(orderflow_reasons) if orderflow_reasons else "Order Flow context not provided"
+    print(f"- Reason: {reason_text}")
+
+    if show_detail:
+        print(f"- Order Flow checked: {orderflow_checked}")
+        if orderflow_blocking_reasons:
+            print(f"- Order Flow blocking reasons: {'; '.join(orderflow_blocking_reasons)}")
+        else:
+            print("- Order Flow blocking reasons: None")
 
 
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
@@ -385,6 +401,7 @@ def _run_demo_scenario(
     current_spread: float | None,
     session_time: datetime,
     show_trace: bool,
+    show_orderflow: bool,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -469,6 +486,7 @@ def _run_demo_scenario(
         result.orderflow_confidence,
         result.orderflow_reasons,
         result.orderflow_blocking_reasons,
+        show_orderflow,
     )
 
     print("\nJournal summary")
@@ -512,6 +530,7 @@ def _run_backtest_scenario(
     current_spread: float | None,
     session_time: datetime,
     show_trace: bool,
+    show_orderflow: bool,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -613,12 +632,14 @@ def _run_backtest_scenario(
         result.spread_blocking_reasons,
     )
 
-    print("\nOrder Flow Context")
-    print("- Order Flow checked: False")
-    print("- Order Flow bias: UNKNOWN")
-    print("- Order Flow confidence: 0.0")
-    print("- Order Flow reasons: Order Flow context not provided for this backtest run")
-    print("- Order Flow blocking reasons: None")
+    _print_orderflow_summary(
+        orderflow_checked=False,
+        orderflow_bias="UNKNOWN",
+        orderflow_confidence=0.0,
+        orderflow_reasons=["Order Flow context not provided for this backtest run"],
+        orderflow_blocking_reasons=[],
+        show_detail=show_orderflow,
+    )
 
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
@@ -673,6 +694,7 @@ def main(args: list[str] | None = None) -> None:
     news_events, news_warnings = _parse_news_events(parsed_args.news_event or [])
     parsed_spread, spread_warning = _parse_spread(parsed_args.spread)
     show_trace = bool(getattr(parsed_args, "show_trace", False))
+    show_orderflow = bool(getattr(parsed_args, "show_orderflow", False))
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -731,6 +753,7 @@ def main(args: list[str] | None = None) -> None:
                     parsed_spread,
                     parsed_session_time,
                     show_trace,
+                    show_orderflow,
                 )
             else:
                 _run_backtest_scenario(
@@ -746,6 +769,7 @@ def main(args: list[str] | None = None) -> None:
                     parsed_spread,
                     parsed_session_time,
                     show_trace,
+                    show_orderflow,
                 )
             print("\n" + "=" * 40)
             print()
@@ -765,6 +789,7 @@ def main(args: list[str] | None = None) -> None:
             parsed_spread,
             parsed_session_time,
             show_trace,
+            show_orderflow,
         )
     else:
         _run_backtest_scenario(
@@ -780,6 +805,7 @@ def main(args: list[str] | None = None) -> None:
             parsed_spread,
             parsed_session_time,
             show_trace,
+            show_orderflow,
         )
 
 
