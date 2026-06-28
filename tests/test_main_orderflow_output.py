@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 
 import main
 
@@ -341,3 +342,135 @@ def test_orderflow_replay_coach_output_has_no_direct_trade_commands() -> None:
     ]
     for phrase in forbidden_phrases:
         assert phrase not in output
+
+
+def test_main_exports_orderflow_replay_report_when_flag_is_used(tmp_path) -> None:
+    report_dir = tmp_path / "reports"
+
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(report_dir),
+    )
+
+    assert "Order Flow Replay Export" in output
+    assert "- Exported: True" in output
+    assert (report_dir / "orderflow_replay_report.txt").exists()
+    assert (report_dir / "orderflow_replay_report.json").exists()
+
+
+def test_exported_orderflow_replay_txt_file_is_created(tmp_path) -> None:
+    report_dir = tmp_path / "reports"
+
+    _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(report_dir),
+    )
+
+    text_path = report_dir / "orderflow_replay_report.txt"
+    assert text_path.exists()
+    assert "Order Flow Replay Report" in text_path.read_text(encoding="utf-8")
+
+
+def test_exported_orderflow_replay_json_file_is_created(tmp_path) -> None:
+    report_dir = tmp_path / "reports"
+
+    _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(report_dir),
+    )
+
+    json_path = report_dir / "orderflow_replay_report.json"
+    assert json_path.exists()
+    assert "BULLISH" in json_path.read_text(encoding="utf-8")
+
+
+def test_export_flag_without_replay_csv_does_not_crash(tmp_path) -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(tmp_path / "reports"),
+    )
+
+    assert "Order Flow Replay Export" in output
+    assert "- Exported: False" in output
+    assert "Order Flow replay CSV is required to export report" in output
+
+
+def test_export_with_invalid_replay_csv_does_not_crash(tmp_path) -> None:
+    invalid_csv = tmp_path / "invalid_replay_export.csv"
+    invalid_csv.write_text("not,a,footprint\n1,2,3\n", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        str(invalid_csv),
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(report_dir),
+    )
+
+    assert "Order Flow Replay Export" in output
+    assert "- Exported: True" in output
+    assert (report_dir / "orderflow_replay_report.txt").exists()
+    assert (report_dir / "orderflow_replay_report.json").exists()
+
+
+def test_no_orderflow_report_steps_excludes_steps_from_export(tmp_path) -> None:
+    report_dir = tmp_path / "reports"
+
+    _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+        "--export-orderflow-report",
+        "--orderflow-report-dir",
+        str(report_dir),
+        "--no-orderflow-report-steps",
+    )
+
+    text = Path(report_dir / "orderflow_replay_report.txt").read_text(encoding="utf-8")
+    assert "Replay Steps" not in text

@@ -47,6 +47,11 @@ from orderflow.sierra_chart_importer import SierraChartImporter, SierraChartImpo
 from risk.risk_engine import RiskEngineConfig
 from storage.decision_trace import DecisionTracer
 from storage.backtest_quality import BacktestQualityChecker, BacktestQualityConfig
+from storage.orderflow_replay_exporter import (
+    OrderFlowReplayExportConfig,
+    OrderFlowReplayExporter,
+    OrderFlowReplayExportResult,
+)
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
 
@@ -133,6 +138,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--show-orderflow-replay-steps",
         action="store_true",
         help="Show each Order Flow replay step when --orderflow-replay-csv is provided",
+    )
+    parser.add_argument(
+        "--export-orderflow-report",
+        action="store_true",
+        help="Export Order Flow replay report txt/json files when --orderflow-replay-csv is provided",
+    )
+    parser.add_argument(
+        "--orderflow-report-dir",
+        default="reports",
+        help="Output folder for exported Order Flow replay reports",
+    )
+    parser.add_argument(
+        "--no-orderflow-report-steps",
+        action="store_true",
+        help="Export Order Flow replay report without detailed replay steps",
     )
     return parser
 
@@ -536,9 +556,21 @@ def _print_orderflow_summary(
 def _print_orderflow_replay_summary(
     replay_result: OrderFlowReplayResult | None,
     show_steps: bool,
+    export_report: bool = False,
+    export_config: OrderFlowReplayExportConfig | None = None,
 ) -> None:
     """Print standalone Order Flow replay output without affecting trading flow."""
     if replay_result is None:
+        if export_report:
+            _print_orderflow_replay_export(
+                OrderFlowReplayExportResult(
+                    exported=False,
+                    text_path=None,
+                    json_path=None,
+                    reasons=["Order Flow replay CSV is required to export report"],
+                    blocking_reasons=["Order Flow replay CSV is required to export report"],
+                )
+            )
         return
 
     active = bool(replay_result.passed and len(replay_result.steps) > 0)
@@ -561,6 +593,16 @@ def _print_orderflow_replay_summary(
     coach_review = OrderFlowReplayCoach().review(replay_report, OrderFlowReplayCoachConfig())
     _print_orderflow_replay_coach_review(coach_review)
 
+    if export_report:
+        resolved_export_config = export_config or OrderFlowReplayExportConfig()
+        export_result = OrderFlowReplayExporter().export_all(
+            replay_result,
+            replay_report,
+            coach_review,
+            resolved_export_config,
+        )
+        _print_orderflow_replay_export(export_result)
+
     if not show_steps:
         return
 
@@ -579,6 +621,19 @@ def _print_orderflow_replay_summary(
         print(f"    Absorption bias: {step.absorption_bias}")
         print(f"    Order Flow bias: {step.orderflow_bias}")
         print(f"    Confidence: {step.orderflow_confidence:.1f}")
+
+
+def _print_orderflow_replay_export(result: OrderFlowReplayExportResult) -> None:
+    """Print export status without interrupting the demo/backtest flow."""
+    reasons_text = "; ".join(result.reasons) if result.reasons else "None"
+    blocks_text = "; ".join(result.blocking_reasons) if result.blocking_reasons else "None"
+
+    print("\nOrder Flow Replay Export")
+    print(f"- Exported: {result.exported}")
+    print(f"- Text path: {result.text_path or 'N/A'}")
+    print(f"- JSON path: {result.json_path or 'N/A'}")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocks_text}")
 
 
 def _print_orderflow_replay_report(report: OrderFlowReplayReport) -> None:
@@ -713,6 +768,8 @@ def _run_demo_scenario(
     orderflow_csv_result: OrderFlowCsvDemoResult,
     orderflow_replay_result: OrderFlowReplayResult | None,
     show_orderflow_replay_steps: bool,
+    export_orderflow_report: bool,
+    orderflow_export_config: OrderFlowReplayExportConfig,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -831,7 +888,12 @@ def _run_demo_scenario(
     if show_trace:
         _print_decision_trace(result.trace_id, result.trace_explanation)
 
-    _print_orderflow_replay_summary(orderflow_replay_result, show_orderflow_replay_steps)
+    _print_orderflow_replay_summary(
+        orderflow_replay_result,
+        show_orderflow_replay_steps,
+        export_orderflow_report,
+        orderflow_export_config,
+    )
 
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
@@ -854,6 +916,8 @@ def _run_backtest_scenario(
     orderflow_csv_result: OrderFlowCsvDemoResult,
     orderflow_replay_result: OrderFlowReplayResult | None,
     show_orderflow_replay_steps: bool,
+    export_orderflow_report: bool,
+    orderflow_export_config: OrderFlowReplayExportConfig,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -1017,7 +1081,12 @@ def _run_backtest_scenario(
             print("\nDecision Trace")
             print("- Trace unavailable: not enough candles for a preview window")
 
-    _print_orderflow_replay_summary(orderflow_replay_result, show_orderflow_replay_steps)
+    _print_orderflow_replay_summary(
+        orderflow_replay_result,
+        show_orderflow_replay_steps,
+        export_orderflow_report,
+        orderflow_export_config,
+    )
 
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
@@ -1042,6 +1111,11 @@ def main(args: list[str] | None = None) -> None:
     orderflow_csv_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
     orderflow_replay_result = _build_orderflow_replay_from_csv(getattr(parsed_args, "orderflow_replay_csv", ""))
     show_orderflow_replay_steps = bool(getattr(parsed_args, "show_orderflow_replay_steps", False))
+    export_orderflow_report = bool(getattr(parsed_args, "export_orderflow_report", False))
+    orderflow_export_config = OrderFlowReplayExportConfig(
+        output_dir=getattr(parsed_args, "orderflow_report_dir", "reports") or "reports",
+        include_steps=not bool(getattr(parsed_args, "no_orderflow_report_steps", False)),
+    )
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -1104,6 +1178,8 @@ def main(args: list[str] | None = None) -> None:
                     orderflow_csv_result,
                     orderflow_replay_result,
                     show_orderflow_replay_steps,
+                    export_orderflow_report,
+                    orderflow_export_config,
                 )
             else:
                 _run_backtest_scenario(
@@ -1123,6 +1199,8 @@ def main(args: list[str] | None = None) -> None:
                     orderflow_csv_result,
                     orderflow_replay_result,
                     show_orderflow_replay_steps,
+                    export_orderflow_report,
+                    orderflow_export_config,
                 )
             print("\n" + "=" * 40)
             print()
@@ -1146,6 +1224,8 @@ def main(args: list[str] | None = None) -> None:
             orderflow_csv_result,
             orderflow_replay_result,
             show_orderflow_replay_steps,
+            export_orderflow_report,
+            orderflow_export_config,
         )
     else:
         _run_backtest_scenario(
@@ -1165,6 +1245,8 @@ def main(args: list[str] | None = None) -> None:
             orderflow_csv_result,
             orderflow_replay_result,
             show_orderflow_replay_steps,
+            export_orderflow_report,
+            orderflow_export_config,
         )
 
 
