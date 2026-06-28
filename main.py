@@ -5,10 +5,12 @@ import pandas as pd
 
 from ai.trade_reviewer import TradeReviewer
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
+from core.backtest_runner import BacktestConfig, BacktestRunner
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
+from risk.risk_engine import RiskEngineConfig
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
 
@@ -30,8 +32,13 @@ def _load_candles(path: Path) -> pd.DataFrame:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Create a small CLI parser for demo scenarios."""
-    parser = argparse.ArgumentParser(description="Run the AI Trader paper-trading demo")
+    """Create a small CLI parser for demo and backtest modes."""
+    parser = argparse.ArgumentParser(description="Run the AI Trader paper-trading and backtest modes")
+    parser.add_argument(
+        "--mode",
+        default="demo",
+        help="Choose execution mode: demo or backtest",
+    )
     parser.add_argument(
         "--scenario",
         default="weak",
@@ -40,18 +47,41 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_single_scenario(name: str) -> None:
-    """Run one demo scenario and print the results."""
-    print(f"Scenario: {name}")
-    print("-" * 24)
-
+def _get_scenario_data_path(name: str) -> Path:
+    """Resolve scenario name to a sample data file path."""
     scenario_files = {
         "bullish": "bullish_sample_xauusd.csv",
         "bearish": "bearish_sample_xauusd.csv",
         "weak": "weak_sample_xauusd.csv",
     }
+    return Path(__file__).resolve().parent / "data" / scenario_files.get(name, "weak_sample_xauusd.csv")
 
-    data_path = Path(__file__).resolve().parent / "data" / scenario_files.get(name, "weak_sample_xauusd.csv")
+
+def _print_performance_report(journal: TradeJournal) -> None:
+    """Print a readable performance report from journal entries."""
+    performance = PerformanceReporter().generate_report(journal)
+
+    print("\nPerformance Report")
+    print(f"- Total trades: {performance.total_trades}")
+    print(f"- Executed trades: {performance.executed_trades}")
+    print(f"- Blocked trades: {performance.blocked_trades}")
+    print(f"- Wins: {performance.wins}")
+    print(f"- Losses: {performance.losses}")
+    print(f"- Win rate: {performance.win_rate:.2f}%")
+    print(f"- Total PnL: {performance.total_pnl:.2f}")
+    if performance.profit_factor == float("inf"):
+        print("- Profit factor: INF")
+    else:
+        print(f"- Profit factor: {performance.profit_factor:.2f}")
+    print(f"- Max drawdown: {performance.max_drawdown:.2f}")
+
+
+def _run_demo_scenario(name: str) -> None:
+    """Run one demo scenario and print the results."""
+    print(f"Scenario: {name}")
+    print("-" * 24)
+
+    data_path = _get_scenario_data_path(name)
     if not data_path.exists():
         print(f"- File not found: {data_path.name}")
         print("- Safe fallback: no trade")
@@ -61,7 +91,6 @@ def _run_single_scenario(name: str) -> None:
 
     journal = TradeJournal()
     reviewer = TradeReviewer()
-    reporter = PerformanceReporter()
     flow = PaperTradingFlow()
     flow_config = PaperTradingFlowConfig()
 
@@ -102,49 +131,97 @@ def _run_single_scenario(name: str) -> None:
     else:
         print("- No journal entries were recorded.")
 
-    print("\nPerformance Report")
-    performance = reporter.generate_report(journal)
-    print(f"- Total trades: {performance.total_trades}")
-    print(f"- Executed trades: {performance.executed_trades}")
-    print(f"- Blocked trades: {performance.blocked_trades}")
-    print(f"- Wins: {performance.wins}")
-    print(f"- Losses: {performance.losses}")
-    print(f"- Win rate: {performance.win_rate:.2f}%")
-    print(f"- Total PnL: {performance.total_pnl:.2f}")
-    if performance.profit_factor == float('inf'):
-        print("- Profit factor: INF")
-    else:
-        print(f"- Profit factor: {performance.profit_factor:.2f}")
-    print(f"- Max drawdown: {performance.max_drawdown:.2f}")
+    _print_performance_report(journal)
 
     print("\nFlow explanation")
     print(f"- {flow.explain(result)}")
 
 
+def _run_backtest_scenario(name: str) -> None:
+    """Run one backtest scenario and print aggregate results."""
+    print(f"Scenario: {name}")
+    print("-" * 24)
+
+    data_path = _get_scenario_data_path(name)
+    if not data_path.exists():
+        print(f"- File not found: {data_path.name}")
+        print("- Safe fallback: no backtest run")
+        return
+
+    candles = _load_candles(data_path)
+    journal = TradeJournal()
+    broker_state = PaperBrokerState()
+    runner = BacktestRunner()
+    result = runner.run(
+        candles,
+        BacktestConfig(symbol="XAUUSD", timeframe="M5", window_size=60, step_size=5),
+        PaperTradingFlowConfig(simulate_exit=True),
+        MarketAnalyzerConfig(),
+        MultiTimeframeConfig(),
+        CapitalProtectionConfig(),
+        CapitalProtectionState(),
+        PaperBrokerConfig(),
+        broker_state,
+        RiskEngineConfig(account_balance=broker_state.balance),
+        journal,
+    )
+
+    print("\nAI Trader Backtest")
+    print(f"- Scenario: {name}")
+    print(f"- Total iterations: {result.total_iterations}")
+    print(f"- Trades executed: {result.trades_executed}")
+    print(f"- Trades blocked: {result.trades_blocked}")
+    print(f"- Final balance: {result.final_balance:.2f}")
+    print(f"- Total PnL: {result.total_pnl:.2f}")
+
+    _print_performance_report(journal)
+
+    print("\nBacktest explanation")
+    print(f"- {runner.explain(result)}")
+
+
 def main(args: list[str] | None = None) -> None:
-    """Run a simple paper-trading demo using the research-only modules."""
+    """Run demo or backtest mode using research-only modules."""
     parser = _build_parser()
     if args is None:
         parsed_args, _ = parser.parse_known_args()
     else:
         parsed_args, _ = parser.parse_known_args(args)
 
-    print("AI Trader Paper Trading Demo")
-    print("=" * 32)
-
+    mode = parsed_args.mode.lower().strip() if parsed_args.mode else "demo"
     scenario = parsed_args.scenario.lower().strip() if parsed_args.scenario else "weak"
+
+    if mode not in {"demo", "backtest"}:
+        print(f"Invalid mode: {mode}")
+        print("Safe fallback: choose --mode demo or --mode backtest")
+        return
+
+    if mode == "demo":
+        print("AI Trader Paper Trading Demo")
+        print("=" * 32)
+    else:
+        print("AI Trader Backtest")
+        print("=" * 18)
+
+    if scenario not in {"bullish", "bearish", "weak", "all"}:
+        print(f"Invalid scenario: {scenario}")
+        print("Safe fallback: choose bullish, bearish, weak, or all")
+        return
+
     if scenario == "all":
         for scenario_name in ["bullish", "bearish", "weak"]:
-            _run_single_scenario(scenario_name)
+            if mode == "demo":
+                _run_demo_scenario(scenario_name)
+            else:
+                _run_backtest_scenario(scenario_name)
+            print("\n" + "=" * 40)
             print()
         return
 
-    if scenario not in {"bullish", "bearish", "weak"}:
-        print(f"Invalid scenario: {scenario}")
-        print("Safe fallback: no trade")
-        return
-
-    _run_single_scenario(scenario)
+    if mode == "demo":
+        _run_demo_scenario(scenario)
+    else:
+        _run_backtest_scenario(scenario)
 
 
 if __name__ == "__main__":
