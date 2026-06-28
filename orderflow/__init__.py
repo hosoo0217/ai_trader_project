@@ -3,6 +3,7 @@
 from .absorption import AbsorptionAnalyzer, AbsorptionConfig, AbsorptionResult, AbsorptionSignal
 from .delta_cvd import DeltaCVDAnalyzer, DeltaCVDConfig, DeltaCVDPoint, DeltaCVDResult
 from .footprint import FootprintAnalyzer, FootprintCandle, FootprintLevel, FootprintSummary
+from .orderflow_context import OrderFlowContextCombiner, OrderFlowContextConfig, OrderFlowContextResult
 from .orderflow_engine import OrderFlowEngine
 
 __all__ = [
@@ -18,5 +19,8 @@ __all__ = [
     "DeltaCVDPoint",
     "DeltaCVDResult",
     "DeltaCVDAnalyzer",
+    "OrderFlowContextCombiner",
+    "OrderFlowContextConfig",
+    "OrderFlowContextResult",
     "OrderFlowEngine",
 ]
