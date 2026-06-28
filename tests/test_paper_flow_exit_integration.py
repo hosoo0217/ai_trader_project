@@ -7,6 +7,7 @@ from core.capital_protection import CapitalProtectionConfig, CapitalProtectionSt
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
+from risk.risk_engine import RiskEngineConfig
 from storage.trade_journal import TradeJournal
 
 
@@ -22,11 +23,11 @@ def make_flow_candles(direction: str, exit_kind: str | None = None) -> pd.DataFr
             lows[-1] = 158.0
     elif direction == "SELL":
         closes = [200.0 - index for index in range(rows)]
-        highs = [142.0 for _ in closes]
+        highs = [141.5 for _ in closes]
         lows = [100.0 for _ in closes]
         if exit_kind == "SL":
             highs[-1] = 142.0
-            lows = [100.0 for _ in closes]
+            lows = [140.5 for _ in closes]
     else:
         closes = [100.0 for _ in range(rows)]
         highs = [101.0 for _ in closes]
@@ -46,6 +47,15 @@ def make_flow_candles(direction: str, exit_kind: str | None = None) -> pd.DataFr
 def run_flow(candles: pd.DataFrame, config: PaperTradingFlowConfig, journal: TradeJournal | None = None):
     """Run the paper flow with permissive test defaults."""
     state = PaperBrokerState()
+    risk_config = RiskEngineConfig(
+        account_balance=100.0,
+        risk_per_trade_percent=1.0,
+        reward_to_risk=1.0,
+        default_stop_distance=1.0,
+        min_volume=1.0,
+        max_volume=1.0,
+        point_value=1.0,
+    )
     result = PaperTradingFlow().run_single_timeframe(
         candles,
         config,
@@ -56,6 +66,7 @@ def run_flow(candles: pd.DataFrame, config: PaperTradingFlowConfig, journal: Tra
         PaperBrokerConfig(),
         state,
         journal,
+        risk_config,
     )
     return result, state
 

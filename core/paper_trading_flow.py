@@ -21,6 +21,7 @@ from core.exit_simulator import ExitSimulationConfig, ExitSimulator
 from core.market_analyzer import MarketAnalysisResult, MarketAnalyzer, MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfig, MultiTimeframeDecision
 from core.trade_manager import TradeManager, TradeRequest
+from risk.risk_engine import RiskEngine, RiskEngineConfig
 from storage.trade_journal import TradeJournal, TradeJournalEntry
 
 
@@ -51,6 +52,13 @@ class PaperTradingFlowResult:
     balance: Optional[float] = None
     journal_recorded: bool = False
     journal_trade_id: Optional[str] = None
+    risk_checked: bool = False
+    risk_allowed: bool = False
+    risk_reasons: List[str] = field(default_factory=list)
+    risk_blocking_reasons: List[str] = field(default_factory=list)
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    volume: Optional[float] = None
     exit_simulated: bool = False
     exit_reason: Optional[str] = None
     exit_price: Optional[float] = None
@@ -71,6 +79,7 @@ class PaperTradingFlow:
         broker_config: PaperBrokerConfig,
         broker_state: PaperBrokerState,
         journal: Optional[TradeJournal] = None,
+        risk_config: Optional[RiskEngineConfig] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -285,13 +294,57 @@ class PaperTradingFlow:
                 journal_trade_id=journal_trade_id,
             )
 
+        entry_price = float(candles[flow_config.default_price_column].iloc[-1])
+        effective_risk_config = risk_config or RiskEngineConfig(
+            account_balance=float(broker_state.balance) if broker_state is not None else 10000.0
+        )
+        risk_plan = RiskEngine().create_plan(decision_result.action, entry_price, effective_risk_config)
+        risk_reasons = list(risk_plan.reasons)
+        risk_blocking_reasons = list(risk_plan.blocking_reasons)
+
+        if not risk_plan.allowed:
+            result_reasons = ["Risk engine blocked trade", *risk_reasons, *risk_blocking_reasons]
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action=decision_result.action,
+                executed=False,
+                status="BLOCKED",
+                reasons=result_reasons,
+                blocking_reasons=risk_blocking_reasons,
+                confidence=decision_result.confidence,
+                price=entry_price,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
+            return PaperTradingFlowResult(
+                completed=True,
+                status="NO_TRADE",
+                market_bias=primary_result.bias,
+                decision_action=decision_result.action,
+                trade_executed=False,
+                reasons=result_reasons,
+                balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
+                risk_checked=True,
+                risk_allowed=False,
+                risk_reasons=risk_reasons,
+                risk_blocking_reasons=risk_blocking_reasons,
+                stop_loss=risk_plan.stop_loss,
+                take_profit=risk_plan.take_profit,
+                volume=None,
+            )
+
+        risk_explanation = RiskEngine().explain(risk_plan)
         trade_request = TradeRequest(
             symbol=flow_config.symbol,
-            price=float(candles[flow_config.default_price_column].iloc[-1]),
-            volume=flow_config.default_volume,
-            stop_loss=flow_config.stop_loss,
-            take_profit=flow_config.take_profit,
-            reason=f"Paper flow {decision_result.action}",
+            price=risk_plan.entry_price,
+            volume=risk_plan.volume,
+            stop_loss=risk_plan.stop_loss,
+            take_profit=risk_plan.take_profit,
+            reason=f"Paper flow {decision_result.action}; {risk_explanation}",
         )
         paper_broker = PaperBroker()
         trade_manager = TradeManager()
@@ -303,7 +356,12 @@ class PaperTradingFlow:
             broker_state,
         )
 
-        result_reasons = [decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")]
+        result_reasons = [
+            decision_result.action,
+            *decision_result.reasons,
+            *risk_reasons,
+            *trade_result.reason.split(";"),
+        ]
         journal_trade_id = self._record_journal_entry(
             journal=journal,
             symbol=flow_config.symbol,
@@ -311,7 +369,7 @@ class PaperTradingFlow:
             executed=trade_result.executed,
             status="EXECUTED" if trade_result.executed else "REJECTED",
             reasons=result_reasons,
-            blocking_reasons=decision_result.blocking_reasons,
+            blocking_reasons=[*decision_result.blocking_reasons, *risk_blocking_reasons],
             confidence=decision_result.confidence,
             price=trade_request.price,
             volume=trade_request.volume,
@@ -366,6 +424,13 @@ class PaperTradingFlow:
             balance=broker_state.balance if broker_state else None,
             journal_recorded=journal_trade_id is not None,
             journal_trade_id=journal_trade_id,
+            risk_checked=True,
+            risk_allowed=True,
+            risk_reasons=risk_reasons,
+            risk_blocking_reasons=risk_blocking_reasons,
+            stop_loss=risk_plan.stop_loss,
+            take_profit=risk_plan.take_profit,
+            volume=risk_plan.volume,
             exit_simulated=exit_simulated,
             exit_reason=exit_reason,
             exit_price=exit_price,
