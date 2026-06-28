@@ -14,6 +14,7 @@ import pandas as pd
 
 from analysis.news_filter import NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
+from analysis.spread_filter import SpreadFilterConfig
 from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
@@ -67,6 +68,12 @@ class BacktestResult:
     last_candle_range: float | None = None
     volatility_reasons: list[str] = field(default_factory=list)
     volatility_blocking_reasons: list[str] = field(default_factory=list)
+    spread_checked: bool = False
+    spread_allowed: bool = False
+    spread_status: str | None = None
+    spread: float | None = None
+    spread_reasons: list[str] = field(default_factory=list)
+    spread_blocking_reasons: list[str] = field(default_factory=list)
 
 
 class BacktestRunner:
@@ -89,6 +96,8 @@ class BacktestRunner:
         session_time_fallback: Optional[datetime] = None,
         news_config: Optional[NewsFilterConfig] = None,
         volatility_config: Optional[VolatilityFilterConfig] = None,
+        spread_config: Optional[SpreadFilterConfig] = None,
+        current_spread: Optional[float] = None,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -167,6 +176,8 @@ class BacktestRunner:
                 window_current_time,
                 news_config,
                 volatility_config,
+                spread_config,
+                current_spread,
             )
             last_flow_result = flow_result
 
@@ -214,6 +225,12 @@ class BacktestRunner:
             last_candle_range=getattr(last_flow_result, "last_candle_range", None),
             volatility_reasons=list(getattr(last_flow_result, "volatility_reasons", [])),
             volatility_blocking_reasons=list(getattr(last_flow_result, "volatility_blocking_reasons", [])),
+            spread_checked=bool(getattr(last_flow_result, "spread_checked", False)),
+            spread_allowed=bool(getattr(last_flow_result, "spread_allowed", False)),
+            spread_status=getattr(last_flow_result, "spread_status", None),
+            spread=getattr(last_flow_result, "spread", None),
+            spread_reasons=list(getattr(last_flow_result, "spread_reasons", [])),
+            spread_blocking_reasons=list(getattr(last_flow_result, "spread_blocking_reasons", [])),
         )
 
     def _resolve_window_time(

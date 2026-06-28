@@ -7,6 +7,7 @@ import pandas as pd
 from ai.trade_reviewer import TradeReviewer
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
+from analysis.spread_filter import SpreadFilterConfig
 from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from config.trading_profiles import (
@@ -17,6 +18,7 @@ from config.trading_profiles import (
     to_paper_broker_config,
     to_risk_engine_config,
     to_session_filter_config,
+    to_spread_filter_config,
     to_volatility_filter_config,
 )
 from core.backtest_runner import BacktestConfig, BacktestRunner
@@ -74,6 +76,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Optional manual news event in NAME:TIME:IMPACT format. Repeatable.",
+    )
+    parser.add_argument(
+        "--spread",
+        default="",
+        help="Optional current spread value for spread safety checks, example: 2.0",
     )
     return parser
 
@@ -145,6 +152,23 @@ def _parse_news_events(raw_values: list[str]) -> tuple[list[NewsEvent], list[str
             events.append(event)
 
     return events, warnings
+
+
+def _parse_spread(raw_value: str) -> tuple[float | None, str | None]:
+    """Parse optional spread value and keep safe fallback behavior on errors."""
+    if raw_value is None:
+        return None, None
+
+    cleaned = str(raw_value).strip()
+    if not cleaned:
+        return None, None
+
+    try:
+        parsed = float(cleaned)
+    except ValueError:
+        return None, "Invalid --spread value. Using unknown spread safe behavior."
+
+    return parsed, None
 
 
 def _select_profile(profile_key: str) -> TradingProfile | None:
@@ -229,6 +253,25 @@ def _print_volatility_summary(
         print("- Volatility blocking reasons: None")
 
 
+def _print_spread_summary(
+    spread_status: str | None,
+    spread: float | None,
+    spread_allowed: bool,
+    spread_blocking_reasons: list[str],
+) -> None:
+    """Print spread filter status in a simple user-facing format."""
+    spread_text = f"{spread:.4f}" if spread is not None else "N/A"
+
+    print("\nSpread Filter")
+    print(f"- Spread filter status: {spread_status if spread_status else 'N/A'}")
+    print(f"- Current spread: {spread_text}")
+    print(f"- Spread allowed: {spread_allowed}")
+    if spread_blocking_reasons:
+        print(f"- Spread blocking reasons: {'; '.join(spread_blocking_reasons)}")
+    else:
+        print("- Spread blocking reasons: None")
+
+
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
     """Create broker state using the configured starting balance."""
     return PaperBroker().create_default_state(config)
@@ -274,6 +317,8 @@ def _run_demo_scenario(
     session_config: SessionFilterConfig,
     news_config: NewsFilterConfig,
     volatility_config: VolatilityFilterConfig,
+    spread_config: SpreadFilterConfig,
+    current_spread: float | None,
     session_time: datetime,
 ) -> None:
     """Run one demo scenario and print the results."""
@@ -309,6 +354,8 @@ def _run_demo_scenario(
         session_time,
         news_config,
         volatility_config,
+        spread_config,
+        current_spread,
     )
 
     print("\nMarket result")
@@ -340,6 +387,13 @@ def _run_demo_scenario(
         result.last_candle_range,
         result.volatility_allowed,
         result.volatility_blocking_reasons,
+    )
+
+    _print_spread_summary(
+        result.spread_status,
+        result.spread,
+        result.spread_allowed,
+        result.spread_blocking_reasons,
     )
 
     print("\nJournal summary")
@@ -376,6 +430,8 @@ def _run_backtest_scenario(
     session_config: SessionFilterConfig,
     news_config: NewsFilterConfig,
     volatility_config: VolatilityFilterConfig,
+    spread_config: SpreadFilterConfig,
+    current_spread: float | None,
     session_time: datetime,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
@@ -408,6 +464,8 @@ def _run_backtest_scenario(
         session_time,
         news_config,
         volatility_config,
+        spread_config,
+        current_spread,
     )
 
     print("\nAI Trader Backtest")
@@ -468,6 +526,13 @@ def _run_backtest_scenario(
         result.volatility_blocking_reasons,
     )
 
+    _print_spread_summary(
+        result.spread_status,
+        result.spread,
+        result.spread_allowed,
+        result.spread_blocking_reasons,
+    )
+
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
 
@@ -488,6 +553,7 @@ def main(args: list[str] | None = None) -> None:
     profile_key = parsed_args.profile.lower().strip() if parsed_args.profile else "safe"
     parsed_session_time, session_time_warning = _parse_session_time(parsed_args.session_time or "")
     news_events, news_warnings = _parse_news_events(parsed_args.news_event or [])
+    parsed_spread, spread_warning = _parse_spread(parsed_args.spread)
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -518,12 +584,15 @@ def main(args: list[str] | None = None) -> None:
     session_config = to_session_filter_config(selected_profile)
     news_config = to_news_filter_config(selected_profile, news_events)
     volatility_config = to_volatility_filter_config(selected_profile)
+    spread_config = to_spread_filter_config(selected_profile)
 
     _print_profile_summary(selected_profile)
     if session_time_warning:
         print(f"- Warning: {session_time_warning}")
     for warning in news_warnings:
         print(f"- Warning: {warning}")
+    if spread_warning:
+        print(f"- Warning: {spread_warning}")
     if not selected_profile.enabled:
         print("- Note: Safe profile selected. This conservative fallback keeps trading disabled.")
 
@@ -539,6 +608,8 @@ def main(args: list[str] | None = None) -> None:
                     session_config,
                     news_config,
                     volatility_config,
+                    spread_config,
+                    parsed_spread,
                     parsed_session_time,
                 )
             else:
@@ -551,6 +622,8 @@ def main(args: list[str] | None = None) -> None:
                     session_config,
                     news_config,
                     volatility_config,
+                    spread_config,
+                    parsed_spread,
                     parsed_session_time,
                 )
             print("\n" + "=" * 40)
@@ -567,6 +640,8 @@ def main(args: list[str] | None = None) -> None:
             session_config,
             news_config,
             volatility_config,
+            spread_config,
+            parsed_spread,
             parsed_session_time,
         )
     else:
@@ -579,6 +654,8 @@ def main(args: list[str] | None = None) -> None:
             session_config,
             news_config,
             volatility_config,
+            spread_config,
+            parsed_spread,
             parsed_session_time,
         )
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig, TradingSession
+from analysis.spread_filter import SpreadFilterConfig
 from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBrokerConfig
 from core.capital_protection import CapitalProtectionConfig
@@ -263,4 +264,27 @@ def to_volatility_filter_config(profile: TradingProfile) -> VolatilityFilterConf
         min_atr=999999.0,
         max_atr=0.0,
         max_last_candle_range_multiplier=1.0,
+    )
+
+
+def to_spread_filter_config(profile: TradingProfile) -> SpreadFilterConfig:
+    """Convert a TradingProfile into a SpreadFilterConfig."""
+    if profile.account_type == "FUTURES_PROP":
+        return SpreadFilterConfig(
+            enabled=True,
+            max_spread=3.0,
+            block_if_spread_unknown=False,
+        )
+
+    if profile.account_type == "SPOT_GOLD":
+        return SpreadFilterConfig(
+            enabled=True,
+            max_spread=3.0,
+            block_if_spread_unknown=True,
+        )
+
+    return SpreadFilterConfig(
+        enabled=True,
+        max_spread=0.0,
+        block_if_spread_unknown=True,
     )
