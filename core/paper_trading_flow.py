@@ -8,8 +8,8 @@ It only simulates orders in memory and never connects to a live broker.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional
+from uuid import uuid4
 
 import pandas as pd
 
@@ -20,6 +20,7 @@ from core.decision_engine import DecisionEngine, DecisionResult
 from core.market_analyzer import MarketAnalysisResult, MarketAnalyzer, MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfig, MultiTimeframeDecision
 from core.trade_manager import TradeManager, TradeRequest
+from storage.trade_journal import TradeJournal, TradeJournalEntry
 
 
 @dataclass
@@ -43,6 +44,8 @@ class PaperTradingFlowResult:
     trade_executed: bool = False
     reasons: List[str] = field(default_factory=list)
     balance: Optional[float] = None
+    journal_recorded: bool = False
+    journal_trade_id: Optional[str] = None
 
 
 class PaperTradingFlow:
@@ -58,9 +61,24 @@ class PaperTradingFlow:
         capital_state: CapitalProtectionState,
         broker_config: PaperBrokerConfig,
         broker_state: PaperBrokerState,
+        journal: Optional[TradeJournal] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         if candles is None or not isinstance(candles, pd.DataFrame):
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=["Invalid candle data"],
+                blocking_reasons=["Invalid candle data"],
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
@@ -69,10 +87,26 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=["Invalid candle data"],
                 balance=None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         required_columns = {"time", "open", "high", "low", "close"}
         if not required_columns.issubset(candles.columns):
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=["Missing required candle columns"],
+                blocking_reasons=["Missing required candle columns"],
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
@@ -81,6 +115,8 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=["Missing required candle columns"],
                 balance=None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         # Temporary simplification for v1: reuse the same candle data for all requested
@@ -98,6 +134,20 @@ class PaperTradingFlow:
         market_analyzer = MarketAnalyzer()
         market_results = market_analyzer.analyze_multi_timeframe(timeframe_data, market_config)
         if not market_results:
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=["No market analysis results"],
+                blocking_reasons=["No market analysis results"],
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
@@ -106,10 +156,26 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=["No market analysis results"],
                 balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         primary_result = market_results.get(flow_config.timeframe) or next(iter(market_results.values()))
         if primary_result.bias == "UNKNOWN":
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=["Market analysis returned UNKNOWN"],
+                blocking_reasons=["Market analysis returned UNKNOWN"],
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
@@ -118,11 +184,27 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=["Market analysis returned UNKNOWN"],
                 balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         mtf_combiner = MultiTimeframeBiasCombiner()
         mtf_decision = mtf_combiner.combine(market_results, mtf_config)
         if mtf_decision.bias in {"NO_TRADE", "WAIT"} or not mtf_decision.allowed:
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=["Multi-timeframe decision blocked trading"],
+                blocking_reasons=["Multi-timeframe decision blocked trading"],
+                confidence=mtf_decision.confidence,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
@@ -131,11 +213,27 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=["Multi-timeframe decision blocked trading"],
                 balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         capital_engine = CapitalProtectionEngine()
         capital_decision = capital_engine.evaluate(capital_config, capital_state)
         if not capital_decision.allowed:
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=capital_decision.reasons,
+                blocking_reasons=capital_decision.reasons,
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
@@ -144,12 +242,28 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=capital_decision.reasons,
                 balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         decision_context = self._build_context(candles, primary_result, mtf_decision)
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
         if decision_result.action == "NO_TRADE" or not decision_result.allowed:
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action=decision_result.action,
+                executed=False,
+                status="BLOCKED",
+                reasons=decision_result.reasons,
+                blocking_reasons=decision_result.blocking_reasons,
+                confidence=decision_result.confidence,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
             return PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
@@ -158,6 +272,8 @@ class PaperTradingFlow:
                 trade_executed=False,
                 reasons=decision_result.reasons,
                 balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
             )
 
         trade_request = TradeRequest(
@@ -175,6 +291,21 @@ class PaperTradingFlow:
             broker_state,
         )
 
+        journal_trade_id = self._record_journal_entry(
+            journal=journal,
+            symbol=flow_config.symbol,
+            action=decision_result.action,
+            executed=trade_result.executed,
+            status="EXECUTED" if trade_result.executed else "REJECTED",
+            reasons=[decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")],
+            blocking_reasons=decision_result.blocking_reasons,
+            confidence=decision_result.confidence,
+            price=trade_request.price,
+            volume=trade_request.volume,
+            stop_loss=trade_request.stop_loss,
+            take_profit=trade_request.take_profit,
+        )
+
         return PaperTradingFlowResult(
             completed=True,
             status="EXECUTED" if trade_result.executed else "REJECTED",
@@ -183,6 +314,8 @@ class PaperTradingFlow:
             trade_executed=trade_result.executed,
             reasons=[decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")],
             balance=broker_state.balance if broker_state else None,
+            journal_recorded=journal_trade_id is not None,
+            journal_trade_id=journal_trade_id,
         )
 
     def explain(self, result: PaperTradingFlowResult) -> str:
@@ -197,6 +330,43 @@ class PaperTradingFlow:
             f"Balance: {balance_text} | "
             f"Reasons: {reasons_text}"
         )
+
+    def _record_journal_entry(
+        self,
+        journal: Optional[TradeJournal],
+        symbol: str,
+        action: str,
+        executed: bool,
+        status: str,
+        reasons: List[str],
+        blocking_reasons: List[str],
+        confidence: float,
+        price: Optional[float],
+        volume: Optional[float],
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+    ) -> Optional[str]:
+        """Store a paper-flow decision in the journal when provided."""
+        if journal is None:
+            return None
+
+        entry = TradeJournalEntry(
+            trade_id=str(uuid4()),
+            symbol=symbol,
+            action=action,
+            executed=executed,
+            entry_price=price,
+            volume=volume,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            decision_confidence=confidence,
+            reasons=list(reasons),
+            blocking_reasons=list(blocking_reasons),
+            status=status,
+            pnl=None,
+        )
+        journal.add_entry(entry)
+        return entry.trade_id
 
     def _build_context(
         self,
