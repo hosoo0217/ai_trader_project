@@ -12,6 +12,7 @@ from typing import Optional
 
 import pandas as pd
 
+from analysis.news_filter import NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
@@ -52,6 +53,12 @@ class BacktestResult:
     session_status: str | None = None
     session_reasons: list[str] = field(default_factory=list)
     session_blocking_reasons: list[str] = field(default_factory=list)
+    news_checked: bool = False
+    news_allowed: bool = False
+    news_status: str | None = None
+    active_news_event: str | None = None
+    news_reasons: list[str] = field(default_factory=list)
+    news_blocking_reasons: list[str] = field(default_factory=list)
 
 
 class BacktestRunner:
@@ -72,6 +79,7 @@ class BacktestRunner:
         journal: Optional[TradeJournal],
         session_config: Optional[SessionFilterConfig] = None,
         session_time_fallback: Optional[datetime] = None,
+        news_config: Optional[NewsFilterConfig] = None,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -148,6 +156,7 @@ class BacktestRunner:
                 risk_config,
                 session_config,
                 window_current_time,
+                news_config,
             )
             last_flow_result = flow_result
 
@@ -182,6 +191,12 @@ class BacktestRunner:
             session_status=getattr(last_flow_result, "session_status", None),
             session_reasons=list(getattr(last_flow_result, "session_reasons", [])),
             session_blocking_reasons=list(getattr(last_flow_result, "session_blocking_reasons", [])),
+            news_checked=bool(getattr(last_flow_result, "news_checked", False)),
+            news_allowed=bool(getattr(last_flow_result, "news_allowed", False)),
+            news_status=getattr(last_flow_result, "news_status", None),
+            active_news_event=getattr(last_flow_result, "active_news_event", None),
+            news_reasons=list(getattr(last_flow_result, "news_reasons", [])),
+            news_blocking_reasons=list(getattr(last_flow_result, "news_blocking_reasons", [])),
         )
 
     def _resolve_window_time(

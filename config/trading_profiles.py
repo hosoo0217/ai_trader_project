@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig, TradingSession
 from broker.paper_broker import PaperBrokerConfig
 from core.capital_protection import CapitalProtectionConfig
@@ -209,4 +210,26 @@ def to_session_filter_config(profile: TradingProfile) -> SessionFilterConfig:
         ],
         block_weekends=True,
         timezone_note="All session times are UTC",
+    )
+
+
+def to_news_filter_config(profile: TradingProfile, events: list[NewsEvent] | None = None) -> NewsFilterConfig:
+    """Convert a TradingProfile into a NewsFilterConfig."""
+    prepared_events = list(events) if events is not None else []
+
+    if profile.account_type == "SAFE_DEFAULT" or not profile.enabled:
+        return NewsFilterConfig(
+            enabled=True,
+            block_high_impact=True,
+            block_medium_impact=True,
+            block_low_impact=True,
+            events=prepared_events,
+        )
+
+    return NewsFilterConfig(
+        enabled=True,
+        block_high_impact=True,
+        block_medium_impact=False,
+        block_low_impact=False,
+        events=prepared_events,
     )
