@@ -36,6 +36,7 @@ from orderflow.data_quality import (
 from orderflow.delta_cvd import DeltaCVDAnalyzer, DeltaCVDConfig
 from orderflow.imbalance import ImbalanceAnalyzer, ImbalanceConfig
 from orderflow.orderflow_context import OrderFlowContextCombiner, OrderFlowContextConfig, OrderFlowContextResult
+from orderflow.replay import OrderFlowReplayConfig, OrderFlowReplayEngine, OrderFlowReplayResult
 from orderflow.sierra_chart_importer import SierraChartImporter, SierraChartImportConfig
 from risk.risk_engine import RiskEngineConfig
 from storage.decision_trace import DecisionTracer
@@ -116,6 +117,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--orderflow-csv",
         default="",
         help="Optional sample footprint CSV path for research-only Order Flow context",
+    )
+    parser.add_argument(
+        "--orderflow-replay-csv",
+        default="",
+        help="Optional footprint CSV path for standalone Order Flow replay output",
+    )
+    parser.add_argument(
+        "--show-orderflow-replay-steps",
+        action="store_true",
+        help="Show each Order Flow replay step when --orderflow-replay-csv is provided",
     )
     return parser
 
@@ -246,6 +257,28 @@ def _build_orderflow_context_from_csv(raw_path: str) -> OrderFlowCsvDemoResult:
     context.reasons.extend(quality_result.reasons)
     context.reasons.append(importer.explain_import(candles))
     return OrderFlowCsvDemoResult(context=context, data_quality=quality_result)
+
+
+def _build_orderflow_replay_from_csv(raw_path: str) -> OrderFlowReplayResult | None:
+    """Run standalone Order Flow replay from a CSV when requested."""
+    cleaned = (raw_path or "").strip()
+    if not cleaned:
+        return None
+
+    csv_path = _resolve_orderflow_csv_path(cleaned)
+    if not csv_path.exists() or not csv_path.is_file():
+        return OrderFlowReplayResult(
+            steps=[],
+            final_bias="UNKNOWN",
+            final_confidence=0.0,
+            final_cvd=0.0,
+            data_quality_status="INVALID",
+            passed=False,
+            reasons=[f"Order Flow replay CSV not found: {cleaned}"],
+            blocking_reasons=["Order Flow replay CSV path does not exist"],
+        )
+
+    return OrderFlowReplayEngine().replay_csv(str(csv_path), OrderFlowReplayConfig())
 
 
 def _parse_session_time(raw_value: str) -> tuple[datetime, str | None]:
@@ -494,6 +527,49 @@ def _print_orderflow_summary(
         print(f"- Blocking reasons: {blocks_text}")
 
 
+def _print_orderflow_replay_summary(
+    replay_result: OrderFlowReplayResult | None,
+    show_steps: bool,
+) -> None:
+    """Print standalone Order Flow replay output without affecting trading flow."""
+    if replay_result is None:
+        return
+
+    active = bool(replay_result.passed and len(replay_result.steps) > 0)
+    reasons_text = "; ".join(replay_result.reasons) if replay_result.reasons else "None"
+    blocks_text = "; ".join(replay_result.blocking_reasons) if replay_result.blocking_reasons else "None"
+
+    print("\nOrder Flow Replay")
+    print(f"- Active: {active}")
+    print(f"- Passed: {replay_result.passed}")
+    print(f"- Data quality status: {replay_result.data_quality_status or 'N/A'}")
+    print(f"- Steps: {len(replay_result.steps)}")
+    print(f"- Final bias: {replay_result.final_bias}")
+    print(f"- Final confidence: {replay_result.final_confidence:.1f}")
+    print(f"- Final CVD: {replay_result.final_cvd:.2f}")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocks_text}")
+
+    if not show_steps:
+        return
+
+    print("- Replay steps:")
+    if not replay_result.steps:
+        print("  - None")
+        return
+
+    for step in replay_result.steps:
+        print(f"  - Index: {step.index}")
+        print(f"    Time: {step.time if step.time is not None else 'N/A'}")
+        print(f"    Candle delta: {step.candle_delta:.2f}")
+        print(f"    Cumulative delta: {step.cumulative_delta:.2f}")
+        print(f"    Delta direction: {step.delta_direction}")
+        print(f"    Imbalance bias: {step.imbalance_bias}")
+        print(f"    Absorption bias: {step.absorption_bias}")
+        print(f"    Order Flow bias: {step.orderflow_bias}")
+        print(f"    Confidence: {step.orderflow_confidence:.1f}")
+
+
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
     """Create broker state using the configured starting balance."""
     return PaperBroker().create_default_state(config)
@@ -580,6 +656,8 @@ def _run_demo_scenario(
     show_trace: bool,
     show_orderflow: bool,
     orderflow_csv_result: OrderFlowCsvDemoResult,
+    orderflow_replay_result: OrderFlowReplayResult | None,
+    show_orderflow_replay_steps: bool,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -698,6 +776,8 @@ def _run_demo_scenario(
     if show_trace:
         _print_decision_trace(result.trace_id, result.trace_explanation)
 
+    _print_orderflow_replay_summary(orderflow_replay_result, show_orderflow_replay_steps)
+
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
 
@@ -717,6 +797,8 @@ def _run_backtest_scenario(
     show_trace: bool,
     show_orderflow: bool,
     orderflow_csv_result: OrderFlowCsvDemoResult,
+    orderflow_replay_result: OrderFlowReplayResult | None,
+    show_orderflow_replay_steps: bool,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -880,6 +962,8 @@ def _run_backtest_scenario(
             print("\nDecision Trace")
             print("- Trace unavailable: not enough candles for a preview window")
 
+    _print_orderflow_replay_summary(orderflow_replay_result, show_orderflow_replay_steps)
+
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
 
@@ -901,6 +985,8 @@ def main(args: list[str] | None = None) -> None:
     show_trace = bool(getattr(parsed_args, "show_trace", False))
     show_orderflow = bool(getattr(parsed_args, "show_orderflow", False))
     orderflow_csv_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
+    orderflow_replay_result = _build_orderflow_replay_from_csv(getattr(parsed_args, "orderflow_replay_csv", ""))
+    show_orderflow_replay_steps = bool(getattr(parsed_args, "show_orderflow_replay_steps", False))
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -961,6 +1047,8 @@ def main(args: list[str] | None = None) -> None:
                     show_trace,
                     show_orderflow,
                     orderflow_csv_result,
+                    orderflow_replay_result,
+                    show_orderflow_replay_steps,
                 )
             else:
                 _run_backtest_scenario(
@@ -978,6 +1066,8 @@ def main(args: list[str] | None = None) -> None:
                     show_trace,
                     show_orderflow,
                     orderflow_csv_result,
+                    orderflow_replay_result,
+                    show_orderflow_replay_steps,
                 )
             print("\n" + "=" * 40)
             print()
@@ -999,6 +1089,8 @@ def main(args: list[str] | None = None) -> None:
             show_trace,
             show_orderflow,
             orderflow_csv_result,
+            orderflow_replay_result,
+            show_orderflow_replay_steps,
         )
     else:
         _run_backtest_scenario(
@@ -1016,6 +1108,8 @@ def main(args: list[str] | None = None) -> None:
             show_trace,
             show_orderflow,
             orderflow_csv_result,
+            orderflow_replay_result,
+            show_orderflow_replay_steps,
         )
 
 

@@ -183,3 +183,108 @@ def test_decision_trace_includes_orderflow_data_quality_fields() -> None:
     assert "orderflow_data_quality_status=PASSED" in output
     assert "orderflow_data_quality_passed=True" in output
     assert "orderflow_data_quality_blocking_reasons=None" in output
+
+
+def test_main_works_without_replay_csv() -> None:
+    output = _run_main("--mode", "demo", "--scenario", "bullish", "--profile", "apex")
+
+    assert "AI Trader Paper Trading Demo" in output
+    assert "Order Flow Replay" not in output
+
+
+def test_orderflow_replay_works_with_bullish_sample_csv() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+    )
+
+    assert "Order Flow Replay" in output
+    assert "- Active: True" in output
+    assert "- Passed: True" in output
+    assert "- Final bias: BULLISH" in output
+    assert "- Final CVD:" in output
+
+
+def test_orderflow_replay_works_with_bearish_sample_csv() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bearish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bearish.csv",
+    )
+
+    assert "Order Flow Replay" in output
+    assert "- Active: True" in output
+    assert "- Passed: True" in output
+    assert "- Final bias: BEARISH" in output
+
+
+def test_orderflow_replay_steps_print_when_requested() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sierra_chart_footprint_template.csv",
+        "--show-orderflow-replay-steps",
+    )
+
+    assert "Order Flow Replay" in output
+    assert "- Replay steps:" in output
+    assert "  - Index: 0" in output
+    assert "    Candle delta:" in output
+    assert "    Cumulative delta:" in output
+    assert "    Order Flow bias:" in output
+
+
+def test_missing_orderflow_replay_csv_path_does_not_crash() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/missing_replay.csv",
+    )
+
+    assert "Order Flow Replay" in output
+    assert "- Active: False" in output
+    assert "- Passed: False" in output
+    assert "- Data quality status: INVALID" in output
+    assert "Order Flow replay CSV path does not exist" in output
+
+
+def test_invalid_orderflow_replay_csv_does_not_crash(tmp_path) -> None:
+    invalid_csv = tmp_path / "invalid_replay.csv"
+    invalid_csv.write_text("not,a,footprint\n1,2,3\n", encoding="utf-8")
+
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        str(invalid_csv),
+    )
+
+    assert "Order Flow Replay" in output
+    assert "- Active: False" in output
+    assert "- Passed: False" in output
+    assert "- Data quality status: EMPTY" in output
