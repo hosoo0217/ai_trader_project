@@ -55,6 +55,11 @@ from storage.orderflow_replay_exporter import (
 )
 from storage.performance_report import PerformanceReporter
 from storage.session_report import TradingSessionReport, TradingSessionReportGenerator
+from storage.session_report_exporter import (
+    SessionReportExportConfig,
+    SessionReportExporter,
+    SessionReportExportResult,
+)
 from storage.trade_journal import TradeJournal
 
 
@@ -160,6 +165,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--show-session-report",
         action="store_true",
         help="Show the full trading session report for demo/backtest output",
+    )
+    parser.add_argument(
+        "--export-session-report",
+        action="store_true",
+        help="Export the full trading session report txt/json files",
+    )
+    parser.add_argument(
+        "--session-report-dir",
+        default="reports",
+        help="Output folder for exported full trading session reports",
     )
     return parser
 
@@ -753,6 +768,19 @@ def _print_full_trading_session_report(report: TradingSessionReport) -> None:
     print(f"- Warnings: {warnings_text}")
 
 
+def _print_session_report_export(result: SessionReportExportResult) -> None:
+    """Print full session report export status without crashing the run."""
+    reasons_text = "; ".join(result.reasons) if result.reasons else "None"
+    blocks_text = "; ".join(result.blocking_reasons) if result.blocking_reasons else "None"
+
+    print("\nFull Trading Session Report Export")
+    print(f"- Exported: {result.exported}")
+    print(f"- Text path: {result.text_path or 'N/A'}")
+    print(f"- JSON path: {result.json_path or 'N/A'}")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocks_text}")
+
+
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
     """Print a readable decision trace section without crashing on missing data."""
     print("\nDecision Trace")
@@ -808,6 +836,8 @@ def _run_demo_scenario(
     export_orderflow_report: bool,
     orderflow_export_config: OrderFlowReplayExportConfig,
     show_session_report: bool,
+    export_session_report: bool,
+    session_report_export_config: SessionReportExportConfig,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -928,7 +958,7 @@ def _run_demo_scenario(
     if show_trace:
         _print_decision_trace(result.trace_id, result.trace_explanation)
 
-    if show_session_report:
+    if show_session_report or export_session_report:
         result.journal_summary = summary
         result.performance_report = performance
         result.ai_coach_summary = ai_coach_summary
@@ -938,7 +968,15 @@ def _run_demo_scenario(
             scenario=name,
             profile=profile.profile_name,
         )
+    else:
+        session_report = None
+
+    if show_session_report and session_report is not None:
         _print_full_trading_session_report(session_report)
+
+    if export_session_report:
+        export_result = SessionReportExporter().export_all(session_report, session_report_export_config)
+        _print_session_report_export(export_result)
 
     _print_orderflow_replay_summary(
         orderflow_replay_result,
@@ -971,6 +1009,8 @@ def _run_backtest_scenario(
     export_orderflow_report: bool,
     orderflow_export_config: OrderFlowReplayExportConfig,
     show_session_report: bool,
+    export_session_report: bool,
+    session_report_export_config: SessionReportExportConfig,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -1134,7 +1174,7 @@ def _run_backtest_scenario(
             print("\nDecision Trace")
             print("- Trace unavailable: not enough candles for a preview window")
 
-    if show_session_report:
+    if show_session_report or export_session_report:
         backtest_report_source = SimpleNamespace(
             decision_action="BACKTEST",
             trade_executed=result.trades_executed > 0,
@@ -1159,7 +1199,15 @@ def _run_backtest_scenario(
             scenario=name,
             profile=profile.profile_name,
         )
+    else:
+        session_report = None
+
+    if show_session_report and session_report is not None:
         _print_full_trading_session_report(session_report)
+
+    if export_session_report:
+        export_result = SessionReportExporter().export_all(session_report, session_report_export_config)
+        _print_session_report_export(export_result)
 
     _print_orderflow_replay_summary(
         orderflow_replay_result,
@@ -1197,6 +1245,10 @@ def main(args: list[str] | None = None) -> None:
         include_steps=not bool(getattr(parsed_args, "no_orderflow_report_steps", False)),
     )
     show_session_report = bool(getattr(parsed_args, "show_session_report", False))
+    export_session_report = bool(getattr(parsed_args, "export_session_report", False))
+    session_report_export_config = SessionReportExportConfig(
+        output_dir=getattr(parsed_args, "session_report_dir", "reports") or "reports",
+    )
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -1262,6 +1314,8 @@ def main(args: list[str] | None = None) -> None:
                     export_orderflow_report,
                     orderflow_export_config,
                     show_session_report,
+                    export_session_report,
+                    session_report_export_config,
                 )
             else:
                 _run_backtest_scenario(
@@ -1284,6 +1338,8 @@ def main(args: list[str] | None = None) -> None:
                     export_orderflow_report,
                     orderflow_export_config,
                     show_session_report,
+                    export_session_report,
+                    session_report_export_config,
                 )
             print("\n" + "=" * 40)
             print()
@@ -1310,6 +1366,8 @@ def main(args: list[str] | None = None) -> None:
             export_orderflow_report,
             orderflow_export_config,
             show_session_report,
+            export_session_report,
+            session_report_export_config,
         )
     else:
         _run_backtest_scenario(
@@ -1332,6 +1390,8 @@ def main(args: list[str] | None = None) -> None:
             export_orderflow_report,
             orderflow_export_config,
             show_session_report,
+            export_session_report,
+            session_report_export_config,
         )
 
 

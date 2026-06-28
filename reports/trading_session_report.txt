@@ -1,0 +1,44 @@
+Full Trading Session Report
+
+Session Info
+- Session ID: 24926fa0-f721-43b0-a86b-01d4d7ad7dc3
+- Mode: demo
+- Scenario: bullish
+- Profile: Apex Futures Scalper
+
+Decision Summary
+- Final action: BUY
+- Trade executed: True
+
+Market Context
+- Market bias: BULLISH
+
+SMC / CRT / Order Flow
+- SMC bias: UNKNOWN
+- CRT bias: BULLISH
+- Order Flow bias: UNKNOWN
+
+Safety Gate
+- Safety status: SAFETY_PASSED
+- Safety passed: True
+
+Blocked Reasons
+- All SMC inputs were missing or not directional
+
+Journal Summary
+- total_entries=1; executed_trades=1; blocked_trades=0; wins=0; losses=0; total_pnl=0.0
+
+Performance Summary
+- total_trades=1; executed_trades=1; blocked_trades=0; wins=0; losses=0; breakeven=0; win_rate=0.0; total_pnl=0.0; average_win=0.0; average_loss=0.0; profit_factor=0.0; best_trade=None; worst_trade=None; max_drawdown=0.0; notes=['No closed trades yet. More testing is needed before judging performance.']
+
+AI Coach Summary
+- Trade 2b93a15c-486b-4566-a293-03bc9fcbc75f was executed with strong confidence. The position is still open or has not been fully evaluated yet.
+
+Decision Trace
+- Decision trace ID: N/A
+
+Warnings
+- None
+
+Reasons
+- BUY; Safety checks passed and bullish bias detected; ALIGNMENT: Context alignment gate disabled; SMC context is UNKNOWN; SMC: No usable SMC evidence found; CRT bias supports BUY direction; CRT: Detected 63 CRT signal(s); CRT: Latest signal: BULLISH_EXPANSION; Calculated volume is above maximum. Using max_volume; Risk plan created; BUY order accepted
