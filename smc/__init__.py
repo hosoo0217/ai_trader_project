@@ -4,6 +4,7 @@ from .bos_choch import BOSCHOCHAnalyzer, BOSCHOCHConfig, BOSCHOCHResult, Structu
 from .liquidity_sweep import LiquiditySweep, LiquiditySweepAnalyzer, LiquiditySweepConfig, LiquiditySweepResult
 from .market_structure import MarketStructureAnalyzer, MarketStructureConfig, MarketStructureResult, SwingPoint
 from .smc_engine import SMCEngine
+from .smc_context import SMCContextCombiner, SMCContextConfig, SMCContextResult
 
 __all__ = [
 	"SMCEngine",
@@ -19,4 +20,7 @@ __all__ = [
 	"LiquiditySweepConfig",
 	"LiquiditySweepResult",
 	"LiquiditySweepAnalyzer",
+	"SMCContextResult",
+	"SMCContextConfig",
+	"SMCContextCombiner",
 ]
