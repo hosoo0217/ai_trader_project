@@ -5,6 +5,7 @@ from .orderflow_replay_exporter import (
     OrderFlowReplayExporter,
     OrderFlowReplayExportResult,
 )
+from .session_report import TradingSessionReport, TradingSessionReportGenerator
 from .trade_journal import TradeJournal
 
 __all__ = [
@@ -12,4 +13,6 @@ __all__ = [
     "OrderFlowReplayExporter",
     "OrderFlowReplayExportResult",
     "TradeJournal",
+    "TradingSessionReport",
+    "TradingSessionReportGenerator",
 ]
