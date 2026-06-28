@@ -19,6 +19,7 @@ from analysis.session_filter import SessionFilter, SessionFilterConfig
 from analysis.spread_filter import SpreadFilter, SpreadFilterConfig
 from analysis.volatility_filter import VolatilityFilter, VolatilityFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
+from crt.crt_engine import CRTConfig, CRTEngine, CRTResult
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionEngine, CapitalProtectionState
 from core.decision_context import DecisionContext, MarketContext, SMCContext, CRTContext, OrderFlowContext, RiskContext
 from core.decision_engine import DecisionEngine, DecisionResult
@@ -113,6 +114,11 @@ class PaperTradingFlowResult:
     smc_confidence: Optional[float] = None
     smc_reasons: List[str] = field(default_factory=list)
     smc_blocking_reasons: List[str] = field(default_factory=list)
+    crt_checked: bool = False
+    crt_bias: str | None = None
+    crt_signal_type: str | None = None
+    crt_reasons: List[str] = field(default_factory=list)
+    crt_blocking_reasons: List[str] = field(default_factory=list)
 
 
 class PaperTradingFlow:
@@ -142,6 +148,8 @@ class PaperTradingFlow:
         smc_bos_choch_config: Optional[BOSCHOCHConfig] = None,
         smc_liquidity_sweep_config: Optional[LiquiditySweepConfig] = None,
         smc_context_config: Optional[SMCContextConfig] = None,
+        crt_enabled: bool = True,
+        crt_config: Optional[CRTConfig] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         decision_trace = self._create_decision_trace(tracer, flow_config.symbol)
@@ -411,6 +419,12 @@ class PaperTradingFlow:
         smc_confidence: Optional[float] = None
         smc_reasons: List[str] = []
         smc_blocking_reasons: List[str] = []
+        crt_checked = False
+        crt_result: Optional[CRTResult] = None
+        crt_bias: str | None = None
+        crt_signal_type: str | None = None
+        crt_reasons: List[str] = []
+        crt_blocking_reasons: List[str] = []
 
         if smc_enabled:
             smc_checked = True
@@ -476,6 +490,41 @@ class PaperTradingFlow:
                 smc_context_result.bias in {"BULLISH", "BEARISH", "NEUTRAL"},
                 reasons=list(smc_context_result.reasons),
                 blocking_reasons=list(smc_context_result.blocking_reasons),
+            )
+
+        if crt_enabled:
+            crt_checked = True
+            try:
+                crt_result = CRTEngine().analyze(candles, crt_config or CRTConfig())
+            except Exception as error:
+                crt_result = CRTResult(
+                    bias="UNKNOWN",
+                    reasons=[f"CRT engine failed safely: {error}"],
+                    blocking_reasons=["CRT engine failed safely"],
+                )
+
+            crt_bias = crt_result.bias
+            crt_signal_type = getattr(getattr(crt_result, "latest_signal", None), "signal_type", None)
+            crt_reasons = list(crt_result.reasons)
+            crt_blocking_reasons = list(crt_result.blocking_reasons)
+
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "CRT_ENGINE",
+                crt_signal_type or crt_result.bias,
+                crt_result.bias in {"BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"},
+                reasons=list(crt_result.reasons),
+                blocking_reasons=list(crt_result.blocking_reasons),
+            )
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "CRT_CONTEXT",
+                crt_result.bias,
+                crt_result.bias in {"BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"},
+                reasons=list(crt_result.reasons),
+                blocking_reasons=list(crt_result.blocking_reasons),
             )
 
         capital_engine = CapitalProtectionEngine()
@@ -594,8 +643,16 @@ class PaperTradingFlow:
                 action="NO_TRADE",
                 executed=False,
                 status="BLOCKED",
-                reasons=[*blocked_reasons, *[f"SMC: {item}" for item in smc_reasons]],
-                blocking_reasons=[*blocked_blocking_reasons, *[f"SMC: {item}" for item in smc_blocking_reasons]],
+                reasons=[
+                    *blocked_reasons,
+                    *[f"SMC: {item}" for item in smc_reasons],
+                    *[f"CRT: {item}" for item in crt_reasons],
+                ],
+                blocking_reasons=[
+                    *blocked_blocking_reasons,
+                    *[f"SMC: {item}" for item in smc_blocking_reasons],
+                    *[f"CRT: {item}" for item in crt_blocking_reasons],
+                ],
                 confidence=0.0,
                 price=None,
                 volume=None,
@@ -660,12 +717,23 @@ class PaperTradingFlow:
                 smc_confidence=smc_confidence,
                 smc_reasons=list(smc_reasons),
                 smc_blocking_reasons=list(smc_blocking_reasons),
+                crt_checked=crt_checked,
+                crt_bias=crt_bias,
+                crt_signal_type=crt_signal_type,
+                crt_reasons=list(crt_reasons),
+                crt_blocking_reasons=list(crt_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
             )
 
-        decision_context = self._build_context(candles, primary_result, mtf_decision, smc_context_result)
+        decision_context = self._build_context(
+            candles,
+            primary_result,
+            mtf_decision,
+            smc_context_result,
+            crt_result,
+        )
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
         self._trace_step(
@@ -684,8 +752,16 @@ class PaperTradingFlow:
                 action=decision_result.action,
                 executed=False,
                 status="BLOCKED",
-                reasons=[*decision_result.reasons, *[f"SMC: {item}" for item in smc_reasons]],
-                blocking_reasons=[*decision_result.blocking_reasons, *[f"SMC: {item}" for item in smc_blocking_reasons]],
+                reasons=[
+                    *decision_result.reasons,
+                    *[f"SMC: {item}" for item in smc_reasons],
+                    *[f"CRT: {item}" for item in crt_reasons],
+                ],
+                blocking_reasons=[
+                    *decision_result.blocking_reasons,
+                    *[f"SMC: {item}" for item in smc_blocking_reasons],
+                    *[f"CRT: {item}" for item in crt_blocking_reasons],
+                ],
                 confidence=decision_result.confidence,
                 price=None,
                 volume=None,
@@ -750,6 +826,11 @@ class PaperTradingFlow:
                 smc_confidence=smc_confidence,
                 smc_reasons=list(smc_reasons),
                 smc_blocking_reasons=list(smc_blocking_reasons),
+                crt_checked=crt_checked,
+                crt_bias=crt_bias,
+                crt_signal_type=crt_signal_type,
+                crt_reasons=list(crt_reasons),
+                crt_blocking_reasons=list(crt_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
@@ -780,8 +861,16 @@ class PaperTradingFlow:
                 action=decision_result.action,
                 executed=False,
                 status="BLOCKED",
-                reasons=[*result_reasons, *[f"SMC: {item}" for item in smc_reasons]],
-                blocking_reasons=[*risk_blocking_reasons, *[f"SMC: {item}" for item in smc_blocking_reasons]],
+                reasons=[
+                    *result_reasons,
+                    *[f"SMC: {item}" for item in smc_reasons],
+                    *[f"CRT: {item}" for item in crt_reasons],
+                ],
+                blocking_reasons=[
+                    *risk_blocking_reasons,
+                    *[f"SMC: {item}" for item in smc_blocking_reasons],
+                    *[f"CRT: {item}" for item in crt_blocking_reasons],
+                ],
                 confidence=decision_result.confidence,
                 price=entry_price,
                 volume=None,
@@ -853,6 +942,11 @@ class PaperTradingFlow:
                 smc_confidence=smc_confidence,
                 smc_reasons=list(smc_reasons),
                 smc_blocking_reasons=list(smc_blocking_reasons),
+                crt_checked=crt_checked,
+                crt_bias=crt_bias,
+                crt_signal_type=crt_signal_type,
+                crt_reasons=list(crt_reasons),
+                crt_blocking_reasons=list(crt_blocking_reasons),
                 ),
                 tracer,
                 decision_trace,
@@ -911,11 +1005,16 @@ class PaperTradingFlow:
             action=decision_result.action,
             executed=trade_result.executed,
             status="EXECUTED" if trade_result.executed else "REJECTED",
-            reasons=[*result_reasons, *[f"SMC: {item}" for item in smc_reasons]],
+            reasons=[
+                *result_reasons,
+                *[f"SMC: {item}" for item in smc_reasons],
+                *[f"CRT: {item}" for item in crt_reasons],
+            ],
             blocking_reasons=[
                 *decision_result.blocking_reasons,
                 *risk_blocking_reasons,
                 *[f"SMC: {item}" for item in smc_blocking_reasons],
+                *[f"CRT: {item}" for item in crt_blocking_reasons],
             ],
             confidence=decision_result.confidence,
             price=trade_request.price,
@@ -1049,6 +1148,11 @@ class PaperTradingFlow:
             smc_confidence=smc_confidence,
             smc_reasons=list(smc_reasons),
             smc_blocking_reasons=list(smc_blocking_reasons),
+            crt_checked=crt_checked,
+            crt_bias=crt_bias,
+            crt_signal_type=crt_signal_type,
+            crt_reasons=list(crt_reasons),
+            crt_blocking_reasons=list(crt_blocking_reasons),
             ),
             tracer,
             decision_trace,
@@ -1178,6 +1282,7 @@ class PaperTradingFlow:
         analysis_result: MarketAnalysisResult,
         mtf_decision: MultiTimeframeDecision,
         smc_context_result: Optional[SMCContextResult] = None,
+        crt_result: Optional[CRTResult] = None,
     ) -> DecisionContext:
         """Create a simple DecisionContext from the paper-flow analysis output."""
         last_close = float(candles["close"].iloc[-1])
@@ -1190,7 +1295,18 @@ class PaperTradingFlow:
             smc_reasons=list(getattr(smc_context_result, "reasons", [])) if smc_context_result is not None else [],
             smc_blocking_reasons=list(getattr(smc_context_result, "blocking_reasons", [])) if smc_context_result is not None else [],
         )
-        context.crt = CRTContext(confirmed=True, confidence=analysis_result.confidence / 100.0)
+        crt_bias = str(getattr(crt_result, "bias", "UNKNOWN") or "UNKNOWN") if crt_result is not None else "UNKNOWN"
+        crt_signal_type = getattr(getattr(crt_result, "latest_signal", None), "signal_type", None) if crt_result is not None else None
+        crt_reasons = list(getattr(crt_result, "reasons", [])) if crt_result is not None else []
+        crt_blocking_reasons = list(getattr(crt_result, "blocking_reasons", [])) if crt_result is not None else []
+        context.crt = CRTContext(
+            confirmed=True,
+            confidence=analysis_result.confidence / 100.0,
+            crt_bias=crt_bias,
+            crt_signal_type=crt_signal_type,
+            crt_reasons=crt_reasons,
+            crt_blocking_reasons=crt_blocking_reasons,
+        )
         context.orderflow = OrderFlowContext()
         context.risk = RiskContext(equity=10000.0, max_risk_per_trade=0.01)
         context.trading_halted = False

@@ -94,6 +94,11 @@ class DecisionEngine:
         smc_confidence = float(getattr(smc_context, "smc_confidence", 0.0) or 0.0)
         smc_reasons = list(getattr(smc_context, "smc_reasons", []))
         smc_blocking_reasons = list(getattr(smc_context, "smc_blocking_reasons", []))
+        crt_context = getattr(context, "crt", None)
+        crt_bias = str(getattr(crt_context, "crt_bias", "UNKNOWN") or "UNKNOWN").upper()
+        crt_signal_type = getattr(crt_context, "crt_signal_type", None)
+        crt_reasons = list(getattr(crt_context, "crt_reasons", []))
+        crt_blocking_reasons = list(getattr(crt_context, "crt_blocking_reasons", []))
 
         if smc_bias == "UNKNOWN":
             reasons.append("SMC context is UNKNOWN")
@@ -127,12 +132,45 @@ class DecisionEngine:
         if smc_reasons:
             reasons.extend([f"SMC: {item}" for item in smc_reasons])
 
+        if crt_bias == "UNKNOWN":
+            reasons.append("CRT context is UNKNOWN")
+        elif crt_bias == "NEUTRAL":
+            reasons.append("CRT context is NEUTRAL")
+
+        if direction == "BUY" and crt_bias == "BULLISH":
+            confidence = self._clamp_confidence(confidence + 5.0)
+            reasons.append("CRT bias supports BUY direction")
+        elif direction == "SELL" and crt_bias == "BEARISH":
+            confidence = self._clamp_confidence(confidence + 5.0)
+            reasons.append("CRT bias supports SELL direction")
+        elif direction in {"BUY", "SELL"} and crt_bias in {"BULLISH", "BEARISH"}:
+            crt_conflict = (direction == "BUY" and crt_bias == "BEARISH") or (direction == "SELL" and crt_bias == "BULLISH")
+            strong_crt_conflict = bool(crt_blocking_reasons) and crt_signal_type in {"HIGH_MANIPULATION", "LOW_MANIPULATION"}
+            if crt_conflict and strong_crt_conflict:
+                return DecisionResult(
+                    action="NO_TRADE",
+                    allowed=False,
+                    confidence=self._clamp_confidence(confidence),
+                    reasons=[*reasons, "CRT conflict blocked trade"],
+                    blocking_reasons=[
+                        *blocking_reasons,
+                        f"Strong CRT conflict with final direction ({crt_signal_type or 'NO_SIGNAL'})",
+                        *[f"CRT: {item}" for item in crt_blocking_reasons],
+                    ],
+                )
+            if crt_conflict:
+                confidence = self._clamp_confidence(confidence - 5.0)
+                reasons.append("CRT conflict reduced confidence")
+
+        if crt_reasons:
+            reasons.extend([f"CRT: {item}" for item in crt_reasons])
+
         if direction == "BUY":
             return DecisionResult(
                 action="BUY",
                 allowed=True,
                 confidence=self._clamp_confidence(confidence),
-                reasons=["Safety checks passed and bullish bias detected"],
+                reasons=["Safety checks passed and bullish bias detected", *reasons],
                 blocking_reasons=[],
             )
 
@@ -141,7 +179,7 @@ class DecisionEngine:
                 action="SELL",
                 allowed=True,
                 confidence=self._clamp_confidence(confidence),
-                reasons=["Safety checks passed and bearish bias detected"],
+                reasons=["Safety checks passed and bearish bias detected", *reasons],
                 blocking_reasons=[],
             )
 
@@ -149,7 +187,7 @@ class DecisionEngine:
             action="NO_TRADE",
             allowed=False,
             confidence=self._clamp_confidence(confidence),
-            reasons=["No clear direction detected"],
+            reasons=[*reasons, "No clear direction detected"],
             blocking_reasons=["No clear direction detected"],
         )
 

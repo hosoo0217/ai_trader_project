@@ -60,6 +60,10 @@ class CRTContext:
 
     confirmed: bool = False
     confidence: float = 0.0
+    crt_bias: str = "UNKNOWN"
+    crt_signal_type: str | None = None
+    crt_reasons: List[str] = field(default_factory=list)
+    crt_blocking_reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
