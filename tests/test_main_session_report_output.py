@@ -320,3 +320,76 @@ def test_blocked_trade_can_still_be_saved_to_history(tmp_path: Path) -> None:
     assert "- Saved: True" in output
     assert "- Blocked sessions:" in output
     assert "spread" in output.lower()
+
+
+def test_main_prints_session_history_trend_when_requested(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps(
+            [
+                {"trade_executed": True, "market_bias": "BULLISH"},
+                {"trade_executed": False, "market_bias": "BEARISH", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "NEUTRAL", "blocked_reasons": ["Spread too high"]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "Session History Trend" in output
+    assert "- Trend status:" in output
+
+
+def test_session_history_trend_output_contains_total_sessions(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "- Total sessions: 1" in output
+
+
+def test_missing_history_file_does_not_crash_session_trend(tmp_path: Path) -> None:
+    output = _run_main("--show-session-trend", "--session-history-dir", str(tmp_path / "missing_history"))
+
+    assert "Session History Trend" in output
+    assert "- Total sessions: 0" in output
+    assert "- Trend status: NOT_ENOUGH_DATA" in output
+
+
+def test_invalid_history_json_does_not_crash_session_trend(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text("{not valid json", encoding="utf-8")
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "Session History Trend" in output
+    assert "- Total sessions: 0" in output
+    assert "- Trend status: NOT_ENOUGH_DATA" in output
+
+
+def test_not_enough_data_shows_not_enough_data_status(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "- Trend status: NOT_ENOUGH_DATA" in output
+
+
+def test_existing_demo_command_still_works_without_session_trend() -> None:
+    output = _run_main("--mode", "demo", "--scenario", "bullish", "--profile", "apex")
+
+    assert "AI Trader Paper Trading Demo" in output
+    assert "Session History Trend" not in output

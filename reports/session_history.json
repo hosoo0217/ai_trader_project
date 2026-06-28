@@ -58,5 +58,65 @@
       "BUY order accepted"
     ],
     "warnings": []
+  },
+  {
+    "session_id": "eb8d998f-1f06-4557-aee0-e24a2dd8a1b5",
+    "mode": "demo",
+    "scenario": "bullish",
+    "profile": "Apex Futures Scalper",
+    "final_action": "BUY",
+    "trade_executed": true,
+    "market_bias": "BULLISH",
+    "smc_bias": "UNKNOWN",
+    "crt_bias": "BULLISH",
+    "orderflow_bias": "UNKNOWN",
+    "safety_status": "SAFETY_PASSED",
+    "safety_passed": true,
+    "blocked_reasons": [
+      "All SMC inputs were missing or not directional"
+    ],
+    "journal_summary": {
+      "total_entries": 1,
+      "executed_trades": 1,
+      "blocked_trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "total_pnl": 0.0
+    },
+    "performance_summary": {
+      "total_trades": 1,
+      "executed_trades": 1,
+      "blocked_trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "breakeven": 0,
+      "win_rate": 0.0,
+      "total_pnl": 0.0,
+      "average_win": 0.0,
+      "average_loss": 0.0,
+      "profit_factor": 0.0,
+      "best_trade": null,
+      "worst_trade": null,
+      "max_drawdown": 0.0,
+      "notes": [
+        "No closed trades yet. More testing is needed before judging performance."
+      ]
+    },
+    "ai_coach_summary": "Trade 93db9669-f460-4252-93e2-ffd6e5181980 was executed with strong confidence. The position is still open or has not been fully evaluated yet.",
+    "decision_trace_id": null,
+    "reasons": [
+      "BUY",
+      "Safety checks passed and bullish bias detected",
+      "ALIGNMENT: Context alignment gate disabled",
+      "SMC context is UNKNOWN",
+      "SMC: No usable SMC evidence found",
+      "CRT bias supports BUY direction",
+      "CRT: Detected 63 CRT signal(s)",
+      "CRT: Latest signal: BULLISH_EXPANSION",
+      "Calculated volume is above maximum. Using max_volume",
+      "Risk plan created",
+      "BUY order accepted"
+    ],
+    "warnings": []
   }
 ]

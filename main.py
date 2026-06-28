@@ -61,6 +61,7 @@ from storage.session_report_exporter import (
     SessionReportExportResult,
 )
 from storage.session_history import SessionHistoryConfig, SessionHistoryStore, SessionHistorySummary
+from storage.session_trend import SessionTrendAnalyzer, SessionTrendConfig, SessionTrendResult
 from storage.trade_journal import TradeJournal
 
 
@@ -191,6 +192,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--session-history-dir",
         default="reports",
         help="Output folder for session_history.json",
+    )
+    parser.add_argument(
+        "--show-session-trend",
+        action="store_true",
+        help="Show performance trend analysis from saved session history",
     )
     return parser
 
@@ -830,6 +836,40 @@ def _print_session_history_status(
     print(f"- Warnings: {warnings_text}")
 
 
+def _print_session_history_trend(result: SessionTrendResult) -> None:
+    """Print session-history trend analysis in beginner-readable form."""
+    blocking_counts = (
+        "; ".join(f"{reason}={count}" for reason, count in result.blocking_reason_counts.items())
+        if result.blocking_reason_counts
+        else "None"
+    )
+    reasons_text = "; ".join(result.reasons) if result.reasons else "None"
+    warnings_text = "; ".join(result.warnings) if result.warnings else "None"
+
+    print("\nSession History Trend")
+    print(f"- Total sessions: {result.total_sessions}")
+    print(f"- Executed sessions: {result.executed_sessions}")
+    print(f"- Blocked sessions: {result.blocked_sessions}")
+    print(f"- Execution rate: {result.execution_rate:.1f}%")
+    print(f"- Block rate: {result.block_rate:.1f}%")
+    print(f"- Bullish sessions: {result.bullish_sessions}")
+    print(f"- Bearish sessions: {result.bearish_sessions}")
+    print(f"- Neutral sessions: {result.neutral_sessions}")
+    print(f"- Unknown sessions: {result.unknown_sessions}")
+    print(f"- Most common blocking reason: {result.most_common_blocking_reason or 'None'}")
+    print(f"- Blocking reason counts: {blocking_counts}")
+    print(f"- Trend status: {result.trend_status}")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Warnings: {warnings_text}")
+
+
+def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
+    """Load saved session history and print trend analysis safely."""
+    history = SessionHistoryStore().load_history(session_history_config)
+    trend = SessionTrendAnalyzer().analyze(history, SessionTrendConfig())
+    _print_session_history_trend(trend)
+
+
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
     """Print a readable decision trace section without crashing on missing data."""
     print("\nDecision Trace")
@@ -1339,6 +1379,24 @@ def main(args: list[str] | None = None) -> None:
     session_history_config = SessionHistoryConfig(
         output_dir=getattr(parsed_args, "session_history_dir", "reports") or "reports",
     )
+    show_session_trend = bool(getattr(parsed_args, "show_session_trend", False))
+
+    only_showing_session_trend = (
+        show_session_trend
+        and args is not None
+        and "--mode" not in args
+        and "--scenario" not in args
+        and not save_session_history
+        and not show_session_history_summary
+        and not show_session_report
+        and not export_session_report
+        and not export_orderflow_report
+        and not getattr(parsed_args, "orderflow_replay_csv", "")
+        and not getattr(parsed_args, "orderflow_csv", "")
+    )
+    if only_showing_session_trend:
+        _show_session_trend(session_history_config)
+        return
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -1380,6 +1438,9 @@ def main(args: list[str] | None = None) -> None:
         print(f"- Warning: {spread_warning}")
     if not selected_profile.enabled:
         print("- Note: Safe profile selected. This conservative fallback keeps trading disabled.")
+
+    if show_session_trend:
+        _show_session_trend(session_history_config)
 
     if scenario == "all":
         for scenario_name in ["bullish", "bearish", "weak"]:
