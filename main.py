@@ -2,6 +2,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -53,6 +54,7 @@ from storage.orderflow_replay_exporter import (
     OrderFlowReplayExportResult,
 )
 from storage.performance_report import PerformanceReporter
+from storage.session_report import TradingSessionReport, TradingSessionReportGenerator
 from storage.trade_journal import TradeJournal
 
 
@@ -153,6 +155,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-orderflow-report-steps",
         action="store_true",
         help="Export Order Flow replay report without detailed replay steps",
+    )
+    parser.add_argument(
+        "--show-session-report",
+        action="store_true",
+        help="Show the full trading session report for demo/backtest output",
     )
     return parser
 
@@ -716,6 +723,36 @@ def _print_performance_report(journal: TradeJournal):
     return performance
 
 
+def _print_full_trading_session_report(report: TradingSessionReport) -> None:
+    """Print one beginner-readable full session report."""
+    blocked_text = "; ".join(report.blocked_reasons) if report.blocked_reasons else "None"
+    reasons_text = "; ".join(report.reasons) if report.reasons else "None"
+    warnings_text = "; ".join(report.warnings) if report.warnings else "None"
+    journal_text = report.journal_summary if report.journal_summary else "None"
+    performance_text = report.performance_summary if report.performance_summary else "None"
+
+    print("\nFull Trading Session Report")
+    print(f"- Session ID: {report.session_id}")
+    print(f"- Mode: {report.mode}")
+    print(f"- Scenario: {report.scenario or 'N/A'}")
+    print(f"- Profile: {report.profile or 'N/A'}")
+    print(f"- Final action: {report.final_action}")
+    print(f"- Trade executed: {report.trade_executed}")
+    print(f"- Market bias: {report.market_bias or 'UNKNOWN'}")
+    print(f"- SMC bias: {report.smc_bias or 'N/A'}")
+    print(f"- CRT bias: {report.crt_bias or 'N/A'}")
+    print(f"- Order Flow bias: {report.orderflow_bias or 'N/A'}")
+    print(f"- Safety status: {report.safety_status or 'N/A'}")
+    print(f"- Safety passed: {report.safety_passed}")
+    print(f"- Blocked reasons: {blocked_text}")
+    print(f"- Journal summary: {journal_text}")
+    print(f"- Performance summary: {performance_text}")
+    print(f"- AI Coach summary: {report.ai_coach_summary or 'N/A'}")
+    print(f"- Decision trace ID: {report.decision_trace_id or 'N/A'}")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Warnings: {warnings_text}")
+
+
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
     """Print a readable decision trace section without crashing on missing data."""
     print("\nDecision Trace")
@@ -770,6 +807,7 @@ def _run_demo_scenario(
     show_orderflow_replay_steps: bool,
     export_orderflow_report: bool,
     orderflow_export_config: OrderFlowReplayExportConfig,
+    show_session_report: bool,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -872,21 +910,35 @@ def _run_demo_scenario(
     print(f"- Total PnL: {summary['total_pnl']:.2f}")
 
     print("\nAI Coach review")
+    reviews = reviewer.review_journal(journal) if journal.get_all_entries() else []
     if journal.get_all_entries():
-        for review in reviewer.review_journal(journal):
+        for review in reviews:
             print(f"- {review.trade_id}: {review.grade}")
             print(f"  Summary: {review.summary}")
             print(f"  Lesson: {review.lesson}")
     else:
         print("- No journal entries were recorded.")
 
-    _print_performance_report(journal)
+    performance = _print_performance_report(journal)
+    ai_coach_summary = reviews[0].summary if reviews else None
 
     print("\nFlow explanation")
     print(f"- {flow.explain(result)}")
 
     if show_trace:
         _print_decision_trace(result.trace_id, result.trace_explanation)
+
+    if show_session_report:
+        result.journal_summary = summary
+        result.performance_report = performance
+        result.ai_coach_summary = ai_coach_summary
+        session_report = TradingSessionReportGenerator().generate_from_flow_result(
+            result,
+            mode="demo",
+            scenario=name,
+            profile=profile.profile_name,
+        )
+        _print_full_trading_session_report(session_report)
 
     _print_orderflow_replay_summary(
         orderflow_replay_result,
@@ -918,6 +970,7 @@ def _run_backtest_scenario(
     show_orderflow_replay_steps: bool,
     export_orderflow_report: bool,
     orderflow_export_config: OrderFlowReplayExportConfig,
+    show_session_report: bool,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -1081,6 +1134,33 @@ def _run_backtest_scenario(
             print("\nDecision Trace")
             print("- Trace unavailable: not enough candles for a preview window")
 
+    if show_session_report:
+        backtest_report_source = SimpleNamespace(
+            decision_action="BACKTEST",
+            trade_executed=result.trades_executed > 0,
+            market_bias="UNKNOWN",
+            smc_bias=None,
+            crt_bias=None,
+            orderflow_bias=getattr(orderflow_context_result, "bias", None) if orderflow_context_result else None,
+            safety_status=result.status,
+            safety_allowed=result.completed,
+            reasons=list(result.reasons),
+            session_blocking_reasons=list(result.session_blocking_reasons),
+            news_blocking_reasons=list(result.news_blocking_reasons),
+            volatility_blocking_reasons=list(result.volatility_blocking_reasons),
+            spread_blocking_reasons=list(result.spread_blocking_reasons),
+            journal_summary=journal.summarize(),
+            performance_report=performance,
+            ai_coach_summary="Backtest summary generated from paper-trading journal and performance report.",
+        )
+        session_report = TradingSessionReportGenerator().generate_from_flow_result(
+            backtest_report_source,
+            mode="backtest",
+            scenario=name,
+            profile=profile.profile_name,
+        )
+        _print_full_trading_session_report(session_report)
+
     _print_orderflow_replay_summary(
         orderflow_replay_result,
         show_orderflow_replay_steps,
@@ -1116,6 +1196,7 @@ def main(args: list[str] | None = None) -> None:
         output_dir=getattr(parsed_args, "orderflow_report_dir", "reports") or "reports",
         include_steps=not bool(getattr(parsed_args, "no_orderflow_report_steps", False)),
     )
+    show_session_report = bool(getattr(parsed_args, "show_session_report", False))
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -1180,6 +1261,7 @@ def main(args: list[str] | None = None) -> None:
                     show_orderflow_replay_steps,
                     export_orderflow_report,
                     orderflow_export_config,
+                    show_session_report,
                 )
             else:
                 _run_backtest_scenario(
@@ -1201,6 +1283,7 @@ def main(args: list[str] | None = None) -> None:
                     show_orderflow_replay_steps,
                     export_orderflow_report,
                     orderflow_export_config,
+                    show_session_report,
                 )
             print("\n" + "=" * 40)
             print()
@@ -1226,6 +1309,7 @@ def main(args: list[str] | None = None) -> None:
             show_orderflow_replay_steps,
             export_orderflow_report,
             orderflow_export_config,
+            show_session_report,
         )
     else:
         _run_backtest_scenario(
@@ -1247,6 +1331,7 @@ def main(args: list[str] | None = None) -> None:
             show_orderflow_replay_steps,
             export_orderflow_report,
             orderflow_export_config,
+            show_session_report,
         )
 
 
