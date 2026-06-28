@@ -4,7 +4,14 @@ from pathlib import Path
 import pandas as pd
 
 from ai.trade_reviewer import TradeReviewer
-from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
+from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
+from config.trading_profiles import (
+    TradingProfile,
+    TradingProfileFactory,
+    to_capital_protection_config,
+    to_paper_broker_config,
+    to_risk_engine_config,
+)
 from core.backtest_runner import BacktestConfig, BacktestRunner
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.market_analyzer import MarketAnalyzerConfig
@@ -45,7 +52,43 @@ def _build_parser() -> argparse.ArgumentParser:
         default="weak",
         help="Choose which sample scenario to run (bullish, bearish, weak, or all)",
     )
+    parser.add_argument(
+        "--profile",
+        default="safe",
+        help="Choose profile: apex, spot, or safe",
+    )
     return parser
+
+
+def _select_profile(profile_key: str) -> TradingProfile | None:
+    """Map a profile key to a TradingProfile object."""
+    normalized = profile_key.lower().strip()
+    profile_map = {
+        "apex": TradingProfileFactory.create_apex_futures_profile,
+        "spot": TradingProfileFactory.create_spot_gold_profile,
+        "safe": TradingProfileFactory.create_safe_default_profile,
+    }
+    creator = profile_map.get(normalized)
+    if creator is None:
+        return None
+    return creator()
+
+
+def _print_profile_summary(profile: TradingProfile) -> None:
+    """Print selected profile details for transparency."""
+    print("\nSelected Trading Profile")
+    print(f"- Profile name: {profile.profile_name}")
+    print(f"- Account type: {profile.account_type}")
+    print(f"- Symbol: {profile.symbol}")
+    print(f"- Starting balance: {profile.starting_balance:.2f}")
+    print(f"- Daily profit target: {profile.daily_profit_target:.2f}")
+    print(f"- Max daily loss: {profile.max_daily_loss:.2f}")
+    print(f"- Risk per trade percent: {profile.risk_per_trade_percent:.2f}%")
+
+
+def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
+    """Create broker state using the configured starting balance."""
+    return PaperBroker().create_default_state(config)
 
 
 def _get_scenario_data_path(name: str) -> Path:
@@ -79,7 +122,13 @@ def _print_performance_report(journal: TradeJournal):
     return performance
 
 
-def _run_demo_scenario(name: str) -> None:
+def _run_demo_scenario(
+    name: str,
+    profile: TradingProfile,
+    capital_config: CapitalProtectionConfig,
+    broker_config: PaperBrokerConfig,
+    risk_config: RiskEngineConfig,
+) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
     print("-" * 24)
@@ -95,18 +144,20 @@ def _run_demo_scenario(name: str) -> None:
     journal = TradeJournal()
     reviewer = TradeReviewer()
     flow = PaperTradingFlow()
-    flow_config = PaperTradingFlowConfig()
+    flow_config = PaperTradingFlowConfig(symbol=profile.symbol)
+    broker_state = _create_broker_state(broker_config)
 
     result = flow.run_single_timeframe(
         candles,
         flow_config,
         MarketAnalyzerConfig(),
         MultiTimeframeConfig(),
-        CapitalProtectionConfig(),
+        capital_config,
         CapitalProtectionState(),
-        PaperBrokerConfig(),
-        PaperBrokerState(),
+        broker_config,
+        broker_state,
         journal,
+        risk_config,
     )
 
     print("\nMarket result")
@@ -139,8 +190,17 @@ def _run_demo_scenario(name: str) -> None:
     print("\nFlow explanation")
     print(f"- {flow.explain(result)}")
 
+    if not profile.enabled:
+        print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
 
-def _run_backtest_scenario(name: str) -> None:
+
+def _run_backtest_scenario(
+    name: str,
+    profile: TradingProfile,
+    capital_config: CapitalProtectionConfig,
+    broker_config: PaperBrokerConfig,
+    risk_config: RiskEngineConfig,
+) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
     print("-" * 24)
@@ -153,19 +213,19 @@ def _run_backtest_scenario(name: str) -> None:
 
     candles = _load_candles(data_path)
     journal = TradeJournal()
-    broker_state = PaperBrokerState()
+    broker_state = _create_broker_state(broker_config)
     runner = BacktestRunner()
     result = runner.run(
         candles,
-        BacktestConfig(symbol="XAUUSD", timeframe="M5", window_size=60, step_size=5),
-        PaperTradingFlowConfig(simulate_exit=True),
+        BacktestConfig(symbol=profile.symbol, timeframe="M5", window_size=60, step_size=5),
+        PaperTradingFlowConfig(symbol=profile.symbol, simulate_exit=True),
         MarketAnalyzerConfig(),
         MultiTimeframeConfig(),
-        CapitalProtectionConfig(),
+        capital_config,
         CapitalProtectionState(),
-        PaperBrokerConfig(),
+        broker_config,
         broker_state,
-        RiskEngineConfig(account_balance=broker_state.balance),
+        risk_config,
         journal,
     )
 
@@ -208,6 +268,9 @@ def _run_backtest_scenario(name: str) -> None:
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
 
+    if not profile.enabled:
+        print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
+
 
 def main(args: list[str] | None = None) -> None:
     """Run demo or backtest mode using research-only modules."""
@@ -219,6 +282,7 @@ def main(args: list[str] | None = None) -> None:
 
     mode = parsed_args.mode.lower().strip() if parsed_args.mode else "demo"
     scenario = parsed_args.scenario.lower().strip() if parsed_args.scenario else "weak"
+    profile_key = parsed_args.profile.lower().strip() if parsed_args.profile else "safe"
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -237,20 +301,58 @@ def main(args: list[str] | None = None) -> None:
         print("Safe fallback: choose bullish, bearish, weak, or all")
         return
 
+    selected_profile = _select_profile(profile_key)
+    if selected_profile is None:
+        print(f"Invalid profile: {profile_key}")
+        print("Safe fallback: choose --profile apex, --profile spot, or --profile safe")
+        return
+
+    capital_config = to_capital_protection_config(selected_profile)
+    risk_config = to_risk_engine_config(selected_profile)
+    broker_config = to_paper_broker_config(selected_profile)
+
+    _print_profile_summary(selected_profile)
+    if not selected_profile.enabled:
+        print("- Note: Safe profile selected. This conservative fallback keeps trading disabled.")
+
     if scenario == "all":
         for scenario_name in ["bullish", "bearish", "weak"]:
             if mode == "demo":
-                _run_demo_scenario(scenario_name)
+                _run_demo_scenario(
+                    scenario_name,
+                    selected_profile,
+                    capital_config,
+                    broker_config,
+                    risk_config,
+                )
             else:
-                _run_backtest_scenario(scenario_name)
+                _run_backtest_scenario(
+                    scenario_name,
+                    selected_profile,
+                    capital_config,
+                    broker_config,
+                    risk_config,
+                )
             print("\n" + "=" * 40)
             print()
         return
 
     if mode == "demo":
-        _run_demo_scenario(scenario)
+        _run_demo_scenario(
+            scenario,
+            selected_profile,
+            capital_config,
+            broker_config,
+            risk_config,
+        )
     else:
-        _run_backtest_scenario(scenario)
+        _run_backtest_scenario(
+            scenario,
+            selected_profile,
+            capital_config,
+            broker_config,
+            risk_config,
+        )
 
 
 if __name__ == "__main__":
