@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from orderflow.data_quality import OrderFlowDataQualityChecker, OrderFlowDataQualityConfig
 from orderflow.footprint import FootprintAnalyzer
 from orderflow.sierra_chart_importer import (
     SierraChartImportConfig,
@@ -257,3 +258,28 @@ def test_build_resolved_column_map_returns_normalized_fields() -> None:
     assert column_map["time"] == "Date Time"
     assert column_map["bid_volume"] == "Bid Volume"
     assert column_map["ask_volume"] == "ask_volume"
+
+
+def test_sierra_chart_template_csv_imports_successfully() -> None:
+    candles = SierraChartImporter().load_csv(
+        "data/sierra_chart_footprint_template.csv",
+        SierraChartImportConfig(),
+    )
+
+    assert len(candles) == 2
+    assert len(candles[0].levels) == 3
+    assert len(candles[1].levels) == 3
+
+
+def test_sierra_chart_template_csv_passes_data_quality() -> None:
+    candles = SierraChartImporter().load_csv(
+        "data/sierra_chart_footprint_template.csv",
+        SierraChartImportConfig(),
+    )
+
+    result = OrderFlowDataQualityChecker().check(candles, OrderFlowDataQualityConfig())
+
+    assert result.passed is True
+    assert result.status == "PASSED"
+    assert result.candle_count == 2
+    assert result.total_levels == 6
