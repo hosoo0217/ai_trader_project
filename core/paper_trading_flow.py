@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from analysis.news_filter import NewsFilter, NewsFilterConfig
 from analysis.session_filter import SessionFilter, SessionFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionEngine, CapitalProtectionState
@@ -60,6 +61,12 @@ class PaperTradingFlowResult:
     session_status: Optional[str] = None
     session_reasons: List[str] = field(default_factory=list)
     session_blocking_reasons: List[str] = field(default_factory=list)
+    news_checked: bool = False
+    news_allowed: bool = False
+    news_status: Optional[str] = None
+    active_news_event: Optional[str] = None
+    news_reasons: List[str] = field(default_factory=list)
+    news_blocking_reasons: List[str] = field(default_factory=list)
     risk_checked: bool = False
     risk_allowed: bool = False
     risk_reasons: List[str] = field(default_factory=list)
@@ -90,6 +97,7 @@ class PaperTradingFlow:
         risk_config: Optional[RiskEngineConfig] = None,
         session_config: Optional[SessionFilterConfig] = None,
         current_time: Optional[datetime] = None,
+        news_config: Optional[NewsFilterConfig] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -317,6 +325,54 @@ class PaperTradingFlow:
                 session_blocking_reasons=session_blocking_reasons,
             )
 
+        effective_news_config = news_config or NewsFilterConfig()
+        news_result = NewsFilter().evaluate(effective_current_time, effective_news_config)
+        if not news_result.allowed:
+            news_reasons = list(news_result.reasons)
+            news_blocking_reasons = list(news_result.blocking_reasons)
+            blocked_reasons = [
+                f"News status: {news_result.status}",
+                *news_reasons,
+                *news_blocking_reasons,
+            ]
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=blocked_reasons,
+                blocking_reasons=news_blocking_reasons,
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
+            return PaperTradingFlowResult(
+                completed=True,
+                status="NO_TRADE",
+                market_bias=primary_result.bias,
+                decision_action="NO_TRADE",
+                trade_executed=False,
+                reasons=blocked_reasons,
+                balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
+                session_checked=True,
+                session_allowed=True,
+                active_session=session_result.active_session,
+                session_status=session_result.status,
+                session_reasons=list(session_result.reasons),
+                session_blocking_reasons=list(session_result.blocking_reasons),
+                news_checked=True,
+                news_allowed=False,
+                news_status=news_result.status,
+                active_news_event=news_result.active_event,
+                news_reasons=news_reasons,
+                news_blocking_reasons=news_blocking_reasons,
+            )
+
         decision_context = self._build_context(candles, primary_result, mtf_decision)
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
@@ -351,6 +407,12 @@ class PaperTradingFlow:
                 session_status=session_result.status,
                 session_reasons=list(session_result.reasons),
                 session_blocking_reasons=list(session_result.blocking_reasons),
+                news_checked=True,
+                news_allowed=True,
+                news_status=news_result.status,
+                active_news_event=news_result.active_event,
+                news_reasons=list(news_result.reasons),
+                news_blocking_reasons=list(news_result.blocking_reasons),
             )
 
         entry_price = float(candles[flow_config.default_price_column].iloc[-1])
@@ -400,6 +462,12 @@ class PaperTradingFlow:
                 session_status=session_result.status,
                 session_reasons=list(session_result.reasons),
                 session_blocking_reasons=list(session_result.blocking_reasons),
+                news_checked=True,
+                news_allowed=True,
+                news_status=news_result.status,
+                active_news_event=news_result.active_event,
+                news_reasons=list(news_result.reasons),
+                news_blocking_reasons=list(news_result.blocking_reasons),
             )
 
         risk_explanation = RiskEngine().explain(risk_plan)
@@ -495,6 +563,12 @@ class PaperTradingFlow:
             session_status=session_result.status,
             session_reasons=list(session_result.reasons),
             session_blocking_reasons=list(session_result.blocking_reasons),
+            news_checked=True,
+            news_allowed=True,
+            news_status=news_result.status,
+            active_news_event=news_result.active_event,
+            news_reasons=list(news_result.reasons),
+            news_blocking_reasons=list(news_result.blocking_reasons),
             risk_checked=True,
             risk_allowed=True,
             risk_reasons=risk_reasons,
