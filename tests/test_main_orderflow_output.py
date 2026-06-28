@@ -54,3 +54,79 @@ def test_show_orderflow_prints_detailed_fields() -> None:
     assert "Order Flow Context" in output
     assert "- Order Flow checked:" in output
     assert "- Order Flow blocking reasons:" in output
+
+
+def test_sample_bullish_csv_produces_active_orderflow() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        "data/sample_footprint_bullish.csv",
+    )
+
+    assert "Order Flow Context" in output
+    assert "- Active: True" in output
+    assert "- Bias: BULLISH" in output
+    assert "- Delta direction: BUYING_PRESSURE" in output
+    assert "- Imbalance bias: BULLISH" in output
+    assert "- Final CVD:" in output
+
+
+def test_sample_bearish_csv_produces_active_orderflow() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bearish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        "data/sample_footprint_bearish.csv",
+    )
+
+    assert "Order Flow Context" in output
+    assert "- Active: True" in output
+    assert "- Bias: BEARISH" in output
+    assert "- Delta direction: SELLING_PRESSURE" in output
+    assert "- Imbalance bias: BEARISH" in output
+
+
+def test_missing_orderflow_csv_path_does_not_crash() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        "data/does_not_exist.csv",
+    )
+
+    assert "Order Flow Context" in output
+    assert "- Active: False" in output
+    assert "Order Flow CSV not found" in output
+
+
+def test_invalid_orderflow_csv_does_not_crash(tmp_path) -> None:
+    invalid_csv = tmp_path / "invalid_footprint.csv"
+    invalid_csv.write_text("not,a,footprint\n1,2,3\n", encoding="utf-8")
+
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        str(invalid_csv),
+    )
+
+    assert "Order Flow Context" in output
+    assert "- Active: False" in output
+    assert "Order Flow CSV could not be imported" in output

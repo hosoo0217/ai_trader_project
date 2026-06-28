@@ -21,6 +21,7 @@ from core.capital_protection import CapitalProtectionConfig, CapitalProtectionSt
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
+from orderflow.orderflow_context import OrderFlowContextResult
 from risk.risk_engine import RiskEngineConfig
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
@@ -98,6 +99,7 @@ class BacktestRunner:
         volatility_config: Optional[VolatilityFilterConfig] = None,
         spread_config: Optional[SpreadFilterConfig] = None,
         current_spread: Optional[float] = None,
+        orderflow_context_result: Optional[OrderFlowContextResult] = None,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -178,6 +180,7 @@ class BacktestRunner:
                 volatility_config,
                 spread_config,
                 current_spread,
+                orderflow_context_result=orderflow_context_result,
             )
             last_flow_result = flow_result
 
