@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from ai.trade_reviewer import TradeReviewer
+from ai.session_trend_coach import SessionTrendCoach, SessionTrendCoachConfig, SessionTrendCoachReview
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -863,11 +864,35 @@ def _print_session_history_trend(result: SessionTrendResult) -> None:
     print(f"- Warnings: {warnings_text}")
 
 
+def _print_session_trend_coach_review(review: SessionTrendCoachReview) -> None:
+    """Print beginner-friendly coach feedback for session history trend."""
+    strengths_text = "; ".join(review.strengths) if review.strengths else "None"
+    risks_text = "; ".join(review.risks) if review.risks else "None"
+    lessons_text = "; ".join(review.lessons) if review.lessons else "None"
+    next_steps_text = "; ".join(review.next_steps) if review.next_steps else "None"
+    warnings_text = "; ".join(review.warnings) if review.warnings else "None"
+    reasons_text = "; ".join(review.reasons) if review.reasons else "None"
+
+    print("\nAI Coach Session Trend Review")
+    print(f"- Status: {review.status}")
+    print(f"- Grade: {review.grade}")
+    print(f"- Summary: {review.summary}")
+    print(f"- Trend read: {review.trend_read}")
+    print(f"- Strengths: {strengths_text}")
+    print(f"- Risks: {risks_text}")
+    print(f"- Lessons: {lessons_text}")
+    print(f"- Next steps: {next_steps_text}")
+    print(f"- Warnings: {warnings_text}")
+    print(f"- Reasons: {reasons_text}")
+
+
 def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
     """Load saved session history and print trend analysis safely."""
     history = SessionHistoryStore().load_history(session_history_config)
     trend = SessionTrendAnalyzer().analyze(history, SessionTrendConfig())
     _print_session_history_trend(trend)
+    review = SessionTrendCoach().review(trend, SessionTrendCoachConfig())
+    _print_session_trend_coach_review(review)
 
 
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:

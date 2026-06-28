@@ -340,6 +340,7 @@ def test_main_prints_session_history_trend_when_requested(tmp_path: Path) -> Non
 
     assert "Session History Trend" in output
     assert "- Trend status:" in output
+    assert "AI Coach Session Trend Review" in output
 
 
 def test_session_history_trend_output_contains_total_sessions(tmp_path: Path) -> None:
@@ -353,6 +354,28 @@ def test_session_history_trend_output_contains_total_sessions(tmp_path: Path) ->
     output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
 
     assert "- Total sessions: 1" in output
+    assert "- Status:" in output
+    assert "- Grade:" in output
+
+
+def test_session_trend_coach_output_contains_trend_read(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps(
+            [
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["News block"]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "AI Coach Session Trend Review" in output
+    assert "- Trend read:" in output
 
 
 def test_missing_history_file_does_not_crash_session_trend(tmp_path: Path) -> None:
@@ -361,6 +384,7 @@ def test_missing_history_file_does_not_crash_session_trend(tmp_path: Path) -> No
     assert "Session History Trend" in output
     assert "- Total sessions: 0" in output
     assert "- Trend status: NOT_ENOUGH_DATA" in output
+    assert "AI Coach Session Trend Review" in output
 
 
 def test_invalid_history_json_does_not_crash_session_trend(tmp_path: Path) -> None:
@@ -373,6 +397,7 @@ def test_invalid_history_json_does_not_crash_session_trend(tmp_path: Path) -> No
     assert "Session History Trend" in output
     assert "- Total sessions: 0" in output
     assert "- Trend status: NOT_ENOUGH_DATA" in output
+    assert "AI Coach Session Trend Review" in output
 
 
 def test_not_enough_data_shows_not_enough_data_status(tmp_path: Path) -> None:
@@ -386,6 +411,28 @@ def test_not_enough_data_shows_not_enough_data_status(tmp_path: Path) -> None:
     output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
 
     assert "- Trend status: NOT_ENOUGH_DATA" in output
+    assert "NOT_ENOUGH_DATA" in output
+
+
+def test_session_trend_coach_output_has_no_direct_trade_commands(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps(
+            [
+                {"trade_executed": True, "market_bias": "BULLISH"},
+                {"trade_executed": True, "market_bias": "BULLISH"},
+                {"trade_executed": True, "market_bias": "BULLISH"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir)).lower()
+
+    forbidden_phrases = ["buy now", "sell now", "enter trade", "open position", "guaranteed signal"]
+    for phrase in forbidden_phrases:
+        assert phrase not in output
 
 
 def test_existing_demo_command_still_works_without_session_trend() -> None:
