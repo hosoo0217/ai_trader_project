@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from analysis.session_filter import SessionFilterConfig, TradingSession
 from broker.paper_broker import PaperBrokerConfig
 from core.capital_protection import CapitalProtectionConfig
 from risk.risk_engine import RiskEngineConfig
@@ -180,4 +181,32 @@ def to_paper_broker_config(profile: TradingProfile) -> PaperBrokerConfig:
         allow_buy=bool(profile.allow_buy and profile.enabled),
         allow_sell=bool(profile.allow_sell and profile.enabled),
         max_open_positions=max(0, profile.max_open_positions),
+    )
+
+
+def to_session_filter_config(profile: TradingProfile) -> SessionFilterConfig:
+    """Convert a TradingProfile into a SessionFilterConfig."""
+    if profile.account_type == "SAFE_DEFAULT" or not profile.enabled:
+        return SessionFilterConfig(
+            enabled=True,
+            allowed_sessions=[
+                TradingSession(name="London", start_hour_utc=7, end_hour_utc=16, enabled=False),
+                TradingSession(name="New York", start_hour_utc=13, end_hour_utc=21, enabled=False),
+                TradingSession(name="London New York Overlap", start_hour_utc=13, end_hour_utc=16, enabled=False),
+                TradingSession(name="Asian", start_hour_utc=0, end_hour_utc=6, enabled=False),
+            ],
+            block_weekends=True,
+            timezone_note="All session times are UTC",
+        )
+
+    return SessionFilterConfig(
+        enabled=True,
+        allowed_sessions=[
+            TradingSession(name="London", start_hour_utc=7, end_hour_utc=16, enabled=True),
+            TradingSession(name="New York", start_hour_utc=13, end_hour_utc=21, enabled=True),
+            TradingSession(name="London New York Overlap", start_hour_utc=13, end_hour_utc=16, enabled=True),
+            TradingSession(name="Asian", start_hour_utc=0, end_hour_utc=6, enabled=False),
+        ],
+        block_weekends=True,
+        timezone_note="All session times are UTC",
     )

@@ -1,9 +1,11 @@
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from ai.trade_reviewer import TradeReviewer
+from analysis.session_filter import SessionFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from config.trading_profiles import (
     TradingProfile,
@@ -11,6 +13,7 @@ from config.trading_profiles import (
     to_capital_protection_config,
     to_paper_broker_config,
     to_risk_engine_config,
+    to_session_filter_config,
 )
 from core.backtest_runner import BacktestConfig, BacktestRunner
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
@@ -57,7 +60,35 @@ def _build_parser() -> argparse.ArgumentParser:
         default="safe",
         help="Choose profile: apex, spot, or safe",
     )
+    parser.add_argument(
+        "--session-time",
+        default="",
+        help="Optional UTC time override, example: 2026-06-28T14:00:00Z",
+    )
     return parser
+
+
+def _parse_session_time(raw_value: str) -> tuple[datetime, str | None]:
+    """Parse optional session time string and return safe UTC fallback on errors."""
+    if not raw_value:
+        return datetime.now(timezone.utc), None
+
+    cleaned = raw_value.strip()
+    if not cleaned:
+        return datetime.now(timezone.utc), None
+
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return datetime.now(timezone.utc), "Invalid --session-time format. Using current UTC fallback."
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc), "Naive --session-time provided. Treating it as UTC."
+
+    return parsed.astimezone(timezone.utc), None
 
 
 def _select_profile(profile_key: str) -> TradingProfile | None:
@@ -84,6 +115,23 @@ def _print_profile_summary(profile: TradingProfile) -> None:
     print(f"- Daily profit target: {profile.daily_profit_target:.2f}")
     print(f"- Max daily loss: {profile.max_daily_loss:.2f}")
     print(f"- Risk per trade percent: {profile.risk_per_trade_percent:.2f}%")
+
+
+def _print_session_summary(
+    session_status: str | None,
+    active_session: str | None,
+    session_allowed: bool,
+    session_blocking_reasons: list[str],
+) -> None:
+    """Print session filter status in a simple user-facing format."""
+    print("\nSession Filter")
+    print(f"- Session filter status: {session_status if session_status else 'N/A'}")
+    print(f"- Active session: {active_session if active_session else 'None'}")
+    print(f"- Session allowed: {session_allowed}")
+    if session_blocking_reasons:
+        print(f"- Session blocking reasons: {'; '.join(session_blocking_reasons)}")
+    else:
+        print("- Session blocking reasons: None")
 
 
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
@@ -128,6 +176,8 @@ def _run_demo_scenario(
     capital_config: CapitalProtectionConfig,
     broker_config: PaperBrokerConfig,
     risk_config: RiskEngineConfig,
+    session_config: SessionFilterConfig,
+    session_time: datetime,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -158,6 +208,8 @@ def _run_demo_scenario(
         broker_state,
         journal,
         risk_config,
+        session_config,
+        session_time,
     )
 
     print("\nMarket result")
@@ -168,6 +220,13 @@ def _run_demo_scenario(
 
     if result.reasons:
         print(f"- Reasons: {'; '.join(result.reasons)}")
+
+    _print_session_summary(
+        result.session_status,
+        result.active_session,
+        result.session_allowed,
+        result.session_blocking_reasons,
+    )
 
     print("\nJournal summary")
     summary = journal.summarize()
@@ -200,6 +259,8 @@ def _run_backtest_scenario(
     capital_config: CapitalProtectionConfig,
     broker_config: PaperBrokerConfig,
     risk_config: RiskEngineConfig,
+    session_config: SessionFilterConfig,
+    session_time: datetime,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -227,6 +288,8 @@ def _run_backtest_scenario(
         broker_state,
         risk_config,
         journal,
+        session_config,
+        session_time,
     )
 
     print("\nAI Trader Backtest")
@@ -265,6 +328,13 @@ def _run_backtest_scenario(
     print(f"- Warnings: {warnings_text}")
     print(f"- Recommendation: {recommendation}")
 
+    _print_session_summary(
+        result.session_status,
+        result.active_session,
+        result.session_allowed,
+        result.session_blocking_reasons,
+    )
+
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
 
@@ -283,6 +353,7 @@ def main(args: list[str] | None = None) -> None:
     mode = parsed_args.mode.lower().strip() if parsed_args.mode else "demo"
     scenario = parsed_args.scenario.lower().strip() if parsed_args.scenario else "weak"
     profile_key = parsed_args.profile.lower().strip() if parsed_args.profile else "safe"
+    parsed_session_time, session_time_warning = _parse_session_time(parsed_args.session_time or "")
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -310,8 +381,11 @@ def main(args: list[str] | None = None) -> None:
     capital_config = to_capital_protection_config(selected_profile)
     risk_config = to_risk_engine_config(selected_profile)
     broker_config = to_paper_broker_config(selected_profile)
+    session_config = to_session_filter_config(selected_profile)
 
     _print_profile_summary(selected_profile)
+    if session_time_warning:
+        print(f"- Warning: {session_time_warning}")
     if not selected_profile.enabled:
         print("- Note: Safe profile selected. This conservative fallback keeps trading disabled.")
 
@@ -324,6 +398,8 @@ def main(args: list[str] | None = None) -> None:
                     capital_config,
                     broker_config,
                     risk_config,
+                    session_config,
+                    parsed_session_time,
                 )
             else:
                 _run_backtest_scenario(
@@ -332,6 +408,8 @@ def main(args: list[str] | None = None) -> None:
                     capital_config,
                     broker_config,
                     risk_config,
+                    session_config,
+                    parsed_session_time,
                 )
             print("\n" + "=" * 40)
             print()
@@ -344,6 +422,8 @@ def main(args: list[str] | None = None) -> None:
             capital_config,
             broker_config,
             risk_config,
+            session_config,
+            parsed_session_time,
         )
     else:
         _run_backtest_scenario(
@@ -352,6 +432,8 @@ def main(args: list[str] | None = None) -> None:
             capital_config,
             broker_config,
             risk_config,
+            session_config,
+            parsed_session_time,
         )
 
 

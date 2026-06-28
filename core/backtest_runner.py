@@ -7,10 +7,12 @@ collects high-level backtest metrics. It is simulation-only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
 
+from analysis.session_filter import SessionFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.market_analyzer import MarketAnalyzerConfig
@@ -44,6 +46,12 @@ class BacktestResult:
     final_balance: float
     total_pnl: float
     reasons: list[str] = field(default_factory=list)
+    session_checked: bool = False
+    session_allowed: bool = False
+    active_session: str | None = None
+    session_status: str | None = None
+    session_reasons: list[str] = field(default_factory=list)
+    session_blocking_reasons: list[str] = field(default_factory=list)
 
 
 class BacktestRunner:
@@ -62,6 +70,8 @@ class BacktestRunner:
         broker_state: PaperBrokerState,
         risk_config: RiskEngineConfig,
         journal: Optional[TradeJournal],
+        session_config: Optional[SessionFilterConfig] = None,
+        session_time_fallback: Optional[datetime] = None,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -105,6 +115,8 @@ class BacktestRunner:
         iterations = 0
         executed = 0
         blocked = 0
+        last_flow_result = None
+        time_parse_fallback_used = False
 
         effective_flow_config = replace(
             flow_config,
@@ -118,6 +130,11 @@ class BacktestRunner:
                 break
 
             window = candles.iloc[start : start + backtest_config.window_size].copy()
+            window_current_time = self._resolve_window_time(window, session_time_fallback)
+            if window_current_time is None:
+                time_parse_fallback_used = True
+                window_current_time = datetime.now(timezone.utc)
+
             flow_result = flow.run_single_timeframe(
                 window,
                 effective_flow_config,
@@ -129,7 +146,10 @@ class BacktestRunner:
                 broker_state,
                 target_journal,
                 risk_config,
+                session_config,
+                window_current_time,
             )
+            last_flow_result = flow_result
 
             iterations += 1
             if flow_result.trade_executed:
@@ -142,6 +162,8 @@ class BacktestRunner:
             "Backtest completed",
             f"Journal entries: {performance.total_trades}",
         ]
+        if time_parse_fallback_used:
+            reasons.append("Session time parse fallback to current UTC was used")
         if backtest_config.max_iterations is not None and iterations >= backtest_config.max_iterations:
             reasons.append("Stopped at max_iterations")
 
@@ -154,7 +176,34 @@ class BacktestRunner:
             final_balance=float(broker_state.balance),
             total_pnl=float(performance.total_pnl),
             reasons=reasons,
+            session_checked=bool(getattr(last_flow_result, "session_checked", False)),
+            session_allowed=bool(getattr(last_flow_result, "session_allowed", False)),
+            active_session=getattr(last_flow_result, "active_session", None),
+            session_status=getattr(last_flow_result, "session_status", None),
+            session_reasons=list(getattr(last_flow_result, "session_reasons", [])),
+            session_blocking_reasons=list(getattr(last_flow_result, "session_blocking_reasons", [])),
         )
+
+    def _resolve_window_time(
+        self,
+        window: pd.DataFrame,
+        session_time_fallback: Optional[datetime],
+    ) -> Optional[datetime]:
+        """Resolve session time from the last candle in a window.
+
+        Returns a timezone-aware UTC datetime when possible.
+        """
+        if "time" in window.columns and not window.empty:
+            parsed = pd.to_datetime(window["time"].iloc[-1], errors="coerce", utc=True)
+            if not pd.isna(parsed):
+                return parsed.to_pydatetime()
+
+        if session_time_fallback is not None:
+            if session_time_fallback.tzinfo is None:
+                return session_time_fallback.replace(tzinfo=timezone.utc)
+            return session_time_fallback.astimezone(timezone.utc)
+
+        return None
 
     def explain(self, result: BacktestResult) -> str:
         """Return a readable summary of the backtest result."""
