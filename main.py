@@ -11,6 +11,7 @@ from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
 from risk.risk_engine import RiskEngineConfig
+from storage.backtest_quality import BacktestQualityChecker, BacktestQualityConfig
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
 
@@ -57,7 +58,7 @@ def _get_scenario_data_path(name: str) -> Path:
     return Path(__file__).resolve().parent / "data" / scenario_files.get(name, "weak_sample_xauusd.csv")
 
 
-def _print_performance_report(journal: TradeJournal) -> None:
+def _print_performance_report(journal: TradeJournal):
     """Print a readable performance report from journal entries."""
     performance = PerformanceReporter().generate_report(journal)
 
@@ -74,6 +75,8 @@ def _print_performance_report(journal: TradeJournal) -> None:
     else:
         print(f"- Profit factor: {performance.profit_factor:.2f}")
     print(f"- Max drawdown: {performance.max_drawdown:.2f}")
+
+    return performance
 
 
 def _run_demo_scenario(name: str) -> None:
@@ -173,8 +176,34 @@ def _run_backtest_scenario(name: str) -> None:
     print(f"- Trades blocked: {result.trades_blocked}")
     print(f"- Final balance: {result.final_balance:.2f}")
     print(f"- Total PnL: {result.total_pnl:.2f}")
+    print("- Note: research-only simulation, not live trading")
 
-    _print_performance_report(journal)
+    performance = _print_performance_report(journal)
+
+    quality = BacktestQualityChecker().evaluate(
+        result,
+        performance,
+        BacktestQualityConfig(),
+    )
+
+    failures_text = "; ".join(quality.failures) if quality.failures else "None"
+    warnings_text = "; ".join(quality.warnings) if quality.warnings else "None"
+    if quality.grade == "INSUFFICIENT_DATA":
+        recommendation = "Needs more data"
+    elif not quality.passed:
+        recommendation = "Not ready for live trading"
+    elif quality.grade == "GOOD":
+        recommendation = "Promising but needs paper testing"
+    else:
+        recommendation = "Good research result, still not live-ready"
+
+    print("\nBacktest Quality Check")
+    print(f"- Grade: {quality.grade}")
+    print(f"- Score: {quality.score:.1f}")
+    print(f"- Passed: {quality.passed}")
+    print(f"- Failures: {failures_text}")
+    print(f"- Warnings: {warnings_text}")
+    print(f"- Recommendation: {recommendation}")
 
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
