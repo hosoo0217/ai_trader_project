@@ -3,6 +3,7 @@
 import pandas as pd
 
 from analysis.session_filter import SessionFilterConfig
+from analysis.spread_filter import SpreadFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.exit_simulator import ExitSimulationConfig
@@ -53,6 +54,8 @@ def run_flow(
         journal,
         risk_config,
         SessionFilterConfig(enabled=False),
+        spread_config=SpreadFilterConfig(max_spread=3.0),
+        current_spread=1.0,
     )
     return result, state
 
