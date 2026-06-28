@@ -7,7 +7,7 @@ brokers, or exchanges.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -26,6 +26,62 @@ class SierraChartImportConfig:
     price_column: str = "price"
     bid_volume_column: str = "bid_volume"
     ask_volume_column: str = "ask_volume"
+    time_aliases: list[str] = field(default_factory=lambda: ["time", "datetime", "date_time", "timestamp", "Date Time", "DateTime"])
+    open_aliases: list[str] = field(default_factory=lambda: ["open", "Open"])
+    high_aliases: list[str] = field(default_factory=lambda: ["high", "High"])
+    low_aliases: list[str] = field(default_factory=lambda: ["low", "Low"])
+    close_aliases: list[str] = field(default_factory=lambda: ["close", "Close", "last", "Last"])
+    price_aliases: list[str] = field(default_factory=lambda: ["price", "Price", "level", "Level"])
+    bid_volume_aliases: list[str] = field(
+        default_factory=lambda: ["bid_volume", "Bid Volume", "BidVolume", "bid", "Bid", "bid_vol"]
+    )
+    ask_volume_aliases: list[str] = field(
+        default_factory=lambda: ["ask_volume", "Ask Volume", "AskVolume", "ask", "Ask", "ask_vol"]
+    )
+
+
+def normalize_column_name(name: object) -> str:
+    """Normalize headers by ignoring case, spaces, and underscores."""
+    return str(name).strip().lower().replace(" ", "").replace("_", "")
+
+
+def resolve_column(dataframe_columns: object, aliases: list[str]) -> str | None:
+    """Find the first DataFrame column matching one of the aliases safely."""
+    try:
+        columns = list(dataframe_columns)
+    except TypeError:
+        return None
+
+    normalized_columns = {normalize_column_name(column): str(column) for column in columns}
+    for alias in aliases:
+        resolved = normalized_columns.get(normalize_column_name(alias))
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def build_resolved_column_map(dataframe: pd.DataFrame, config: SierraChartImportConfig) -> dict[str, str]:
+    """Resolve DataFrame columns into the normalized footprint field names."""
+    if dataframe is None or not isinstance(dataframe, pd.DataFrame):
+        return {}
+
+    alias_map = {
+        "time": [config.time_column, *config.time_aliases],
+        "open": [config.open_column, *config.open_aliases],
+        "high": [config.high_column, *config.high_aliases],
+        "low": [config.low_column, *config.low_aliases],
+        "close": [config.close_column, *config.close_aliases],
+        "price": [config.price_column, *config.price_aliases],
+        "bid_volume": [config.bid_volume_column, *config.bid_volume_aliases],
+        "ask_volume": [config.ask_volume_column, *config.ask_volume_aliases],
+    }
+
+    resolved: dict[str, str] = {}
+    for field_name, aliases in alias_map.items():
+        column = resolve_column(dataframe.columns, aliases)
+        if column is not None:
+            resolved[field_name] = column
+    return resolved
 
 
 class SierraChartImporter:
@@ -46,27 +102,19 @@ class SierraChartImporter:
         if dataframe.empty:
             return []
 
-        required_columns = [
-            config.time_column,
-            config.open_column,
-            config.high_column,
-            config.low_column,
-            config.close_column,
-            config.price_column,
-            config.bid_volume_column,
-            config.ask_volume_column,
-        ]
-        if not set(required_columns).issubset(dataframe.columns):
+        column_map = build_resolved_column_map(dataframe, config)
+        required_fields = {"time", "open", "high", "low", "close", "price", "bid_volume", "ask_volume"}
+        if not required_fields.issubset(column_map):
             return []
 
         candles: list[FootprintCandle] = []
 
-        grouped = dataframe.groupby(config.time_column, sort=False, dropna=False)
+        grouped = dataframe.groupby(column_map["time"], sort=False, dropna=False)
         for group_time, group in grouped:
-            open_values = pd.to_numeric(group[config.open_column], errors="coerce")
-            high_values = pd.to_numeric(group[config.high_column], errors="coerce")
-            low_values = pd.to_numeric(group[config.low_column], errors="coerce")
-            close_values = pd.to_numeric(group[config.close_column], errors="coerce")
+            open_values = pd.to_numeric(group[column_map["open"]], errors="coerce")
+            high_values = pd.to_numeric(group[column_map["high"]], errors="coerce")
+            low_values = pd.to_numeric(group[column_map["low"]], errors="coerce")
+            close_values = pd.to_numeric(group[column_map["close"]], errors="coerce")
 
             first_open = self._first_valid(open_values)
             max_high = self._safe_max(high_values)
@@ -76,9 +124,9 @@ class SierraChartImporter:
                 # Skip malformed candle groups rather than crashing import.
                 continue
 
-            price_values = pd.to_numeric(group[config.price_column], errors="coerce")
-            bid_values = pd.to_numeric(group[config.bid_volume_column], errors="coerce")
-            ask_values = pd.to_numeric(group[config.ask_volume_column], errors="coerce")
+            price_values = pd.to_numeric(group[column_map["price"]], errors="coerce")
+            bid_values = pd.to_numeric(group[column_map["bid_volume"]], errors="coerce")
+            ask_values = pd.to_numeric(group[column_map["ask_volume"]], errors="coerce")
 
             levels: list[FootprintLevel] = []
             for index in range(len(group)):

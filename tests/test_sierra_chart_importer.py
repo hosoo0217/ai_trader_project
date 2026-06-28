@@ -5,7 +5,13 @@ from __future__ import annotations
 import pandas as pd
 
 from orderflow.footprint import FootprintAnalyzer
-from orderflow.sierra_chart_importer import SierraChartImportConfig, SierraChartImporter
+from orderflow.sierra_chart_importer import (
+    SierraChartImportConfig,
+    SierraChartImporter,
+    build_resolved_column_map,
+    normalize_column_name,
+    resolve_column,
+)
 
 
 def _sample_dataframe() -> pd.DataFrame:
@@ -148,3 +154,106 @@ def test_load_csv_imports_data(tmp_path) -> None:
     candles = SierraChartImporter().load_csv(str(path), SierraChartImportConfig())
 
     assert len(candles) == 2
+
+
+def test_existing_sample_csv_still_imports_correctly() -> None:
+    path = "data/sample_footprint_bullish.csv"
+
+    candles = SierraChartImporter().load_csv(path, SierraChartImportConfig())
+
+    assert len(candles) == 1
+    assert len(candles[0].levels) == 4
+    assert candles[0].delta() > 0.0
+
+
+def test_uppercase_column_names_import_correctly() -> None:
+    dataframe = _sample_dataframe().rename(
+        columns={
+            "time": "TIMESTAMP",
+            "open": "OPEN",
+            "high": "HIGH",
+            "low": "LOW",
+            "close": "CLOSE",
+            "price": "PRICE",
+            "bid_volume": "BID_VOLUME",
+            "ask_volume": "ASK_VOLUME",
+        }
+    )
+
+    candles = SierraChartImporter().from_dataframe(dataframe, SierraChartImportConfig())
+
+    assert len(candles) == 2
+    assert candles[0].delta() == 40.0
+
+
+def test_sierra_style_column_names_import_correctly() -> None:
+    dataframe = _sample_dataframe().rename(
+        columns={
+            "time": "Date Time",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Last",
+            "price": "Price",
+            "bid_volume": "Bid Volume",
+            "ask_volume": "Ask Volume",
+        }
+    )
+
+    candles = SierraChartImporter().from_dataframe(dataframe, SierraChartImportConfig())
+
+    assert len(candles) == 2
+    assert candles[0].close == 101.0
+    assert candles[1].delta() == -30.0
+
+
+def test_mixed_case_columns_import_correctly() -> None:
+    dataframe = _sample_dataframe().rename(
+        columns={
+            "time": "DateTime",
+            "open": "Open",
+            "high": "HIGH",
+            "low": "low",
+            "close": "last",
+            "price": "Level",
+            "bid_volume": "Bid",
+            "ask_volume": "ask_vol",
+        }
+    )
+
+    candles = SierraChartImporter().from_dataframe(dataframe, SierraChartImportConfig())
+
+    assert len(candles) == 2
+    assert candles[0].levels[0].price == 100.0
+    assert candles[0].levels[0].bid_volume == 10.0
+    assert candles[0].levels[0].ask_volume == 20.0
+
+
+def test_missing_required_alias_columns_returns_empty_list() -> None:
+    dataframe = _sample_dataframe().drop(columns=["ask_volume"])
+
+    candles = SierraChartImporter().from_dataframe(dataframe, SierraChartImportConfig())
+
+    assert candles == []
+
+
+def test_normalization_ignores_spaces_and_underscores() -> None:
+    assert normalize_column_name(" Bid Volume ") == "bidvolume"
+    assert normalize_column_name("bid_volume") == "bidvolume"
+    assert normalize_column_name("BID VOLUME") == "bidvolume"
+
+
+def test_resolve_column_ignores_spaces_underscores_and_case() -> None:
+    resolved = resolve_column(["Date Time", "Bid Volume"], ["date_time"])
+
+    assert resolved == "Date Time"
+
+
+def test_build_resolved_column_map_returns_normalized_fields() -> None:
+    dataframe = _sample_dataframe().rename(columns={"time": "Date Time", "bid_volume": "Bid Volume"})
+
+    column_map = build_resolved_column_map(dataframe, SierraChartImportConfig())
+
+    assert column_map["time"] == "Date Time"
+    assert column_map["bid_volume"] == "Bid Volume"
+    assert column_map["ask_volume"] == "ask_volume"

@@ -17,7 +17,7 @@ These can be analyzed by FootprintAnalyzer.
 
 ## Expected CSV Columns (v1)
 
-The v1 importer expects these columns:
+The importer maps CSV columns into these normalized fields:
 - time
 - open
 - high
@@ -27,7 +27,9 @@ The v1 importer expects these columns:
 - bid_volume
 - ask_volume
 
-Column names can be remapped with SierraChartImportConfig.
+Column names can be remapped with `SierraChartImportConfig`, and common aliases
+such as `Date Time`, `Bid Volume`, `Ask Volume`, `Last`, and `Level` are resolved
+safely. See `docs/sierra_chart_csv_format_mapping.md` for the full alias list.
 
 ## Mapping Rules
 
