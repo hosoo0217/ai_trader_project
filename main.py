@@ -9,6 +9,7 @@ from core.capital_protection import CapitalProtectionConfig, CapitalProtectionSt
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
+from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
 
 
@@ -60,6 +61,7 @@ def _run_single_scenario(name: str) -> None:
 
     journal = TradeJournal()
     reviewer = TradeReviewer()
+    reporter = PerformanceReporter()
     flow = PaperTradingFlow()
     flow_config = PaperTradingFlowConfig()
 
@@ -99,6 +101,21 @@ def _run_single_scenario(name: str) -> None:
             print(f"  Lesson: {review.lesson}")
     else:
         print("- No journal entries were recorded.")
+
+    print("\nPerformance Report")
+    performance = reporter.generate_report(journal)
+    print(f"- Total trades: {performance.total_trades}")
+    print(f"- Executed trades: {performance.executed_trades}")
+    print(f"- Blocked trades: {performance.blocked_trades}")
+    print(f"- Wins: {performance.wins}")
+    print(f"- Losses: {performance.losses}")
+    print(f"- Win rate: {performance.win_rate:.2f}%")
+    print(f"- Total PnL: {performance.total_pnl:.2f}")
+    if performance.profit_factor == float('inf'):
+        print("- Profit factor: INF")
+    else:
+        print(f"- Profit factor: {performance.profit_factor:.2f}")
+    print(f"- Max drawdown: {performance.max_drawdown:.2f}")
 
     print("\nFlow explanation")
     print(f"- {flow.explain(result)}")
