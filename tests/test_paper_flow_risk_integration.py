@@ -2,6 +2,7 @@
 
 import pandas as pd
 
+from analysis.session_filter import SessionFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.exit_simulator import ExitSimulationConfig
@@ -51,6 +52,7 @@ def run_flow(
         state,
         journal,
         risk_config,
+        SessionFilterConfig(enabled=False),
     )
     return result, state
 
