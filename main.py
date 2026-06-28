@@ -60,6 +60,7 @@ from storage.session_report_exporter import (
     SessionReportExporter,
     SessionReportExportResult,
 )
+from storage.session_history import SessionHistoryConfig, SessionHistoryStore, SessionHistorySummary
 from storage.trade_journal import TradeJournal
 
 
@@ -175,6 +176,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--session-report-dir",
         default="reports",
         help="Output folder for exported full trading session reports",
+    )
+    parser.add_argument(
+        "--save-session-history",
+        action="store_true",
+        help="Save the full trading session report into session history",
+    )
+    parser.add_argument(
+        "--show-session-history-summary",
+        action="store_true",
+        help="Show a summary of saved full trading session reports",
+    )
+    parser.add_argument(
+        "--session-history-dir",
+        default="reports",
+        help="Output folder for session_history.json",
     )
     return parser
 
@@ -781,6 +797,39 @@ def _print_session_report_export(result: SessionReportExportResult) -> None:
     print(f"- Blocking reasons: {blocks_text}")
 
 
+def _print_session_history_status(
+    saved: bool,
+    history_config: SessionHistoryConfig,
+    summary: SessionHistorySummary | None,
+    reasons: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> None:
+    """Print session history save/summary details."""
+    history_path = Path(history_config.output_dir) / history_config.history_filename
+    reasons_text = "; ".join(reasons or []) if reasons else "None"
+    warnings_text = "; ".join(warnings or []) if warnings else "None"
+    common_blocks = (
+        "; ".join(f"{reason}={count}" for reason, count in summary.common_blocking_reasons.items())
+        if summary is not None and summary.common_blocking_reasons
+        else "None"
+    )
+
+    print("\nBacktest Session History")
+    print(f"- Saved: {saved}")
+    print(f"- History path: {history_path}")
+    if summary is not None:
+        print(f"- Total sessions: {summary.total_sessions}")
+        print(f"- Executed sessions: {summary.executed_sessions}")
+        print(f"- Blocked sessions: {summary.blocked_sessions}")
+        print(f"- Common blocking reasons: {common_blocks}")
+        if summary.reasons:
+            reasons_text = "; ".join(summary.reasons)
+        if summary.warnings:
+            warnings_text = "; ".join(summary.warnings)
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Warnings: {warnings_text}")
+
+
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
     """Print a readable decision trace section without crashing on missing data."""
     print("\nDecision Trace")
@@ -838,6 +887,9 @@ def _run_demo_scenario(
     show_session_report: bool,
     export_session_report: bool,
     session_report_export_config: SessionReportExportConfig,
+    save_session_history: bool,
+    show_session_history_summary: bool,
+    session_history_config: SessionHistoryConfig,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -958,7 +1010,7 @@ def _run_demo_scenario(
     if show_trace:
         _print_decision_trace(result.trace_id, result.trace_explanation)
 
-    if show_session_report or export_session_report:
+    if show_session_report or export_session_report or save_session_history or show_session_history_summary:
         result.journal_summary = summary
         result.performance_report = performance
         result.ai_coach_summary = ai_coach_summary
@@ -977,6 +1029,21 @@ def _run_demo_scenario(
     if export_session_report:
         export_result = SessionReportExporter().export_all(session_report, session_report_export_config)
         _print_session_report_export(export_result)
+
+    if save_session_history or show_session_history_summary:
+        store = SessionHistoryStore()
+        saved = False
+        reasons = ["Session history summary requested"] if show_session_history_summary else []
+        warnings: list[str] = []
+        if save_session_history:
+            saved = store.append_report(session_report, session_history_config)
+            if saved:
+                reasons.append("Session report saved to history")
+            else:
+                warnings.append("Session report could not be saved to history")
+        history = store.load_history(session_history_config)
+        history_summary = store.summarize(history) if (show_session_history_summary or save_session_history) else None
+        _print_session_history_status(saved, session_history_config, history_summary, reasons, warnings)
 
     _print_orderflow_replay_summary(
         orderflow_replay_result,
@@ -1011,6 +1078,9 @@ def _run_backtest_scenario(
     show_session_report: bool,
     export_session_report: bool,
     session_report_export_config: SessionReportExportConfig,
+    save_session_history: bool,
+    show_session_history_summary: bool,
+    session_history_config: SessionHistoryConfig,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -1174,7 +1244,7 @@ def _run_backtest_scenario(
             print("\nDecision Trace")
             print("- Trace unavailable: not enough candles for a preview window")
 
-    if show_session_report or export_session_report:
+    if show_session_report or export_session_report or save_session_history or show_session_history_summary:
         backtest_report_source = SimpleNamespace(
             decision_action="BACKTEST",
             trade_executed=result.trades_executed > 0,
@@ -1208,6 +1278,21 @@ def _run_backtest_scenario(
     if export_session_report:
         export_result = SessionReportExporter().export_all(session_report, session_report_export_config)
         _print_session_report_export(export_result)
+
+    if save_session_history or show_session_history_summary:
+        store = SessionHistoryStore()
+        saved = False
+        reasons = ["Session history summary requested"] if show_session_history_summary else []
+        warnings: list[str] = []
+        if save_session_history:
+            saved = store.append_report(session_report, session_history_config)
+            if saved:
+                reasons.append("Session report saved to history")
+            else:
+                warnings.append("Session report could not be saved to history")
+        history = store.load_history(session_history_config)
+        history_summary = store.summarize(history) if (show_session_history_summary or save_session_history) else None
+        _print_session_history_status(saved, session_history_config, history_summary, reasons, warnings)
 
     _print_orderflow_replay_summary(
         orderflow_replay_result,
@@ -1248,6 +1333,11 @@ def main(args: list[str] | None = None) -> None:
     export_session_report = bool(getattr(parsed_args, "export_session_report", False))
     session_report_export_config = SessionReportExportConfig(
         output_dir=getattr(parsed_args, "session_report_dir", "reports") or "reports",
+    )
+    save_session_history = bool(getattr(parsed_args, "save_session_history", False))
+    show_session_history_summary = bool(getattr(parsed_args, "show_session_history_summary", False))
+    session_history_config = SessionHistoryConfig(
+        output_dir=getattr(parsed_args, "session_history_dir", "reports") or "reports",
     )
 
     if mode not in {"demo", "backtest"}:
@@ -1316,6 +1406,9 @@ def main(args: list[str] | None = None) -> None:
                     show_session_report,
                     export_session_report,
                     session_report_export_config,
+                    save_session_history,
+                    show_session_history_summary,
+                    session_history_config,
                 )
             else:
                 _run_backtest_scenario(
@@ -1340,6 +1433,9 @@ def main(args: list[str] | None = None) -> None:
                     show_session_report,
                     export_session_report,
                     session_report_export_config,
+                    save_session_history,
+                    show_session_history_summary,
+                    session_history_config,
                 )
             print("\n" + "=" * 40)
             print()
@@ -1368,6 +1464,9 @@ def main(args: list[str] | None = None) -> None:
             show_session_report,
             export_session_report,
             session_report_export_config,
+            save_session_history,
+            show_session_history_summary,
+            session_history_config,
         )
     else:
         _run_backtest_scenario(
@@ -1392,6 +1491,9 @@ def main(args: list[str] | None = None) -> None:
             show_session_report,
             export_session_report,
             session_report_export_config,
+            save_session_history,
+            show_session_history_summary,
+            session_history_config,
         )
 
 
