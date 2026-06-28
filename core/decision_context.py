@@ -43,6 +43,10 @@ class SMCContext:
     order_blocks_hit: bool = False
     liquidity_structure_clear: bool = False
     bias: int = 0
+    smc_bias: str = "UNKNOWN"
+    smc_confidence: float = 0.0
+    smc_reasons: List[str] = field(default_factory=list)
+    smc_blocking_reasons: List[str] = field(default_factory=list)
 
 
 @dataclass

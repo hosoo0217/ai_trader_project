@@ -89,6 +89,44 @@ class DecisionEngine:
             else:
                 direction = "NO_TRADE"
 
+        smc_context = getattr(context, "smc", None)
+        smc_bias = str(getattr(smc_context, "smc_bias", "UNKNOWN") or "UNKNOWN").upper()
+        smc_confidence = float(getattr(smc_context, "smc_confidence", 0.0) or 0.0)
+        smc_reasons = list(getattr(smc_context, "smc_reasons", []))
+        smc_blocking_reasons = list(getattr(smc_context, "smc_blocking_reasons", []))
+
+        if smc_bias == "UNKNOWN":
+            reasons.append("SMC context is UNKNOWN")
+        elif smc_bias == "NEUTRAL":
+            reasons.append("SMC context is NEUTRAL")
+
+        if direction == "BUY" and smc_bias == "BULLISH":
+            confidence = self._clamp_confidence(confidence + 5.0)
+            reasons.append("SMC bias supports BUY direction")
+        elif direction == "SELL" and smc_bias == "BEARISH":
+            confidence = self._clamp_confidence(confidence + 5.0)
+            reasons.append("SMC bias supports SELL direction")
+        elif direction in {"BUY", "SELL"} and smc_bias in {"BULLISH", "BEARISH"}:
+            smc_conflict = (direction == "BUY" and smc_bias == "BEARISH") or (direction == "SELL" and smc_bias == "BULLISH")
+            if smc_conflict and smc_confidence >= 60.0:
+                return DecisionResult(
+                    action="NO_TRADE",
+                    allowed=False,
+                    confidence=self._clamp_confidence(confidence),
+                    reasons=[*reasons, "SMC conflict blocked trade"],
+                    blocking_reasons=[
+                        *blocking_reasons,
+                        "Strong SMC conflict with final direction",
+                        *[f"SMC: {item}" for item in smc_blocking_reasons],
+                    ],
+                )
+            if smc_conflict:
+                confidence = self._clamp_confidence(confidence - 10.0)
+                reasons.append("SMC conflict reduced confidence")
+
+        if smc_reasons:
+            reasons.extend([f"SMC: {item}" for item in smc_reasons])
+
         if direction == "BUY":
             return DecisionResult(
                 action="BUY",
