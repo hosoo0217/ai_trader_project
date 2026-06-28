@@ -28,6 +28,7 @@ from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfi
 from core.safety_gate import SafetyGate
 from core.trade_manager import TradeManager, TradeRequest
 from risk.risk_engine import RiskEngine, RiskEngineConfig
+from storage.decision_trace import DecisionTrace, DecisionTracer
 from storage.trade_journal import TradeJournal, TradeJournalEntry
 
 
@@ -101,6 +102,8 @@ class PaperTradingFlowResult:
     exit_reason: Optional[str] = None
     exit_price: Optional[float] = None
     pnl: Optional[float] = None
+    trace_id: Optional[str] = None
+    trace_explanation: Optional[str] = None
 
 
 class PaperTradingFlow:
@@ -124,8 +127,10 @@ class PaperTradingFlow:
         volatility_config: Optional[VolatilityFilterConfig] = None,
         spread_config: Optional[SpreadFilterConfig] = None,
         current_spread: Optional[float] = None,
+        tracer: Optional[DecisionTracer] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
+        decision_trace = self._create_decision_trace(tracer, flow_config.symbol)
         if candles is None or not isinstance(candles, pd.DataFrame):
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
@@ -141,7 +146,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Invalid candle data decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
                 market_bias="UNKNOWN",
@@ -151,6 +167,9 @@ class PaperTradingFlow:
                 balance=None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
+                ),
+                tracer,
+                decision_trace,
             )
 
         required_columns = {"time", "open", "high", "low", "close"}
@@ -169,7 +188,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Missing-column decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
                 market_bias="UNKNOWN",
@@ -179,6 +209,9 @@ class PaperTradingFlow:
                 balance=None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
+                ),
+                tracer,
+                decision_trace,
             )
 
         # Temporary simplification for v1: reuse the same candle data for all requested
@@ -196,6 +229,15 @@ class PaperTradingFlow:
         market_analyzer = MarketAnalyzer()
         market_results = market_analyzer.analyze_multi_timeframe(timeframe_data, market_config)
         if not market_results:
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "MARKET_ANALYZER",
+                "NO_RESULTS",
+                False,
+                reasons=["No market analysis results"],
+                blocking_reasons=["No market analysis results"],
+            )
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
                 symbol=flow_config.symbol,
@@ -210,7 +252,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["No-market-analysis decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
                 market_bias="UNKNOWN",
@@ -220,10 +273,22 @@ class PaperTradingFlow:
                 balance=broker_state.balance if broker_state else None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
+                ),
+                tracer,
+                decision_trace,
             )
 
         primary_result = market_results.get(flow_config.timeframe) or next(iter(market_results.values()))
         if primary_result.bias == "UNKNOWN":
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "MARKET_ANALYZER",
+                "UNKNOWN",
+                False,
+                reasons=["Market analysis returned UNKNOWN"],
+                blocking_reasons=["Market analysis returned UNKNOWN"],
+            )
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
                 symbol=flow_config.symbol,
@@ -238,7 +303,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Unknown-bias decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=False,
                 status="REJECTED",
                 market_bias="UNKNOWN",
@@ -248,10 +324,32 @@ class PaperTradingFlow:
                 balance=broker_state.balance if broker_state else None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
+                ),
+                tracer,
+                decision_trace,
             )
+
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "MARKET_ANALYZER",
+            primary_result.bias,
+            True,
+            reasons=list(getattr(primary_result, "reasons", [])),
+            blocking_reasons=list(getattr(primary_result, "blocking_reasons", [])),
+        )
 
         mtf_combiner = MultiTimeframeBiasCombiner()
         mtf_decision = mtf_combiner.combine(market_results, mtf_config)
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "MULTI_TIMEFRAME",
+            mtf_decision.bias,
+            bool(mtf_decision.allowed and mtf_decision.bias not in {"NO_TRADE", "WAIT"}),
+            reasons=list(getattr(mtf_decision, "reasons", [])),
+            blocking_reasons=list(getattr(mtf_decision, "blocking_reasons", [])),
+        )
         if mtf_decision.bias in {"NO_TRADE", "WAIT"} or not mtf_decision.allowed:
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
@@ -267,7 +365,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Multi-timeframe blocked decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
                 market_bias=primary_result.bias,
@@ -277,10 +386,22 @@ class PaperTradingFlow:
                 balance=broker_state.balance if broker_state else None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
+                ),
+                tracer,
+                decision_trace,
             )
 
         capital_engine = CapitalProtectionEngine()
         capital_decision = capital_engine.evaluate(capital_config, capital_state)
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "CAPITAL_PROTECTION",
+            capital_decision.status,
+            bool(capital_decision.allowed),
+            reasons=list(getattr(capital_decision, "reasons", [])),
+            blocking_reasons=list(getattr(capital_decision, "reasons", [])) if not capital_decision.allowed else [],
+        )
 
         effective_current_time = current_time if current_time is not None else datetime.now(timezone.utc)
         session_result = None
@@ -291,18 +412,54 @@ class PaperTradingFlow:
         if capital_decision.allowed:
             effective_session_config = session_config or SessionFilterConfig()
             session_result = SessionFilter().evaluate(effective_current_time, effective_session_config)
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "SESSION_FILTER",
+                str(getattr(session_result, "status", "UNKNOWN")),
+                bool(getattr(session_result, "allowed", False)),
+                reasons=list(getattr(session_result, "reasons", [])),
+                blocking_reasons=list(getattr(session_result, "blocking_reasons", [])),
+            )
 
         if session_result is not None and session_result.allowed:
             effective_news_config = news_config or NewsFilterConfig()
             news_result = NewsFilter().evaluate(effective_current_time, effective_news_config)
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "NEWS_FILTER",
+                str(getattr(news_result, "status", "UNKNOWN")),
+                bool(getattr(news_result, "allowed", False)),
+                reasons=list(getattr(news_result, "reasons", [])),
+                blocking_reasons=list(getattr(news_result, "blocking_reasons", [])),
+            )
 
         if news_result is not None and news_result.allowed:
             effective_volatility_config = volatility_config or VolatilityFilterConfig()
             volatility_result = VolatilityFilter().evaluate(candles, effective_volatility_config)
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "VOLATILITY_FILTER",
+                str(getattr(volatility_result, "status", "UNKNOWN")),
+                bool(getattr(volatility_result, "allowed", False)),
+                reasons=list(getattr(volatility_result, "reasons", [])),
+                blocking_reasons=list(getattr(volatility_result, "blocking_reasons", [])),
+            )
 
         if volatility_result is not None and volatility_result.allowed:
             effective_spread_config = spread_config or SpreadFilterConfig()
             spread_result = SpreadFilter().evaluate(current_spread, effective_spread_config)
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "SPREAD_FILTER",
+                str(getattr(spread_result, "status", "UNKNOWN")),
+                bool(getattr(spread_result, "allowed", False)),
+                reasons=list(getattr(spread_result, "reasons", [])),
+                blocking_reasons=list(getattr(spread_result, "blocking_reasons", [])),
+            )
 
         safety_decision = SafetyGate().evaluate(
             session_result=session_result,
@@ -310,6 +467,15 @@ class PaperTradingFlow:
             volatility_result=volatility_result,
             spread_result=spread_result,
             capital_decision=capital_decision,
+        )
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "SAFETY_GATE",
+            safety_decision.status,
+            bool(safety_decision.allowed),
+            reasons=list(getattr(safety_decision, "reasons", [])),
+            blocking_reasons=list(getattr(safety_decision, "blocking_reasons", [])),
         )
 
         if not safety_decision.allowed:
@@ -349,7 +515,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Safety blocked decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
                 market_bias=primary_result.bias,
@@ -391,11 +568,23 @@ class PaperTradingFlow:
                 safety_blocking_reasons=list(safety_decision.blocking_reasons),
                 safety_passed_checks=list(safety_decision.passed_checks),
                 safety_failed_checks=list(safety_decision.failed_checks),
+                ),
+                tracer,
+                decision_trace,
             )
 
         decision_context = self._build_context(candles, primary_result, mtf_decision)
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "DECISION_ENGINE",
+            decision_result.action,
+            bool(decision_result.allowed and decision_result.action in {"BUY", "SELL"}),
+            reasons=list(getattr(decision_result, "reasons", [])),
+            blocking_reasons=list(getattr(decision_result, "blocking_reasons", [])),
+        )
         if decision_result.action == "NO_TRADE" or not decision_result.allowed:
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
@@ -411,7 +600,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Decision-engine blocked decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
                 market_bias=primary_result.bias,
@@ -453,6 +653,9 @@ class PaperTradingFlow:
                 safety_blocking_reasons=list(safety_decision.blocking_reasons),
                 safety_passed_checks=list(safety_decision.passed_checks),
                 safety_failed_checks=list(safety_decision.failed_checks),
+                ),
+                tracer,
+                decision_trace,
             )
 
         entry_price = float(candles[flow_config.default_price_column].iloc[-1])
@@ -462,6 +665,15 @@ class PaperTradingFlow:
         risk_plan = RiskEngine().create_plan(decision_result.action, entry_price, effective_risk_config)
         risk_reasons = list(risk_plan.reasons)
         risk_blocking_reasons = list(risk_plan.blocking_reasons)
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "RISK_ENGINE",
+            "RISK_ALLOWED" if risk_plan.allowed else "RISK_BLOCKED",
+            bool(risk_plan.allowed),
+            reasons=list(risk_reasons),
+            blocking_reasons=list(risk_blocking_reasons),
+        )
 
         if not risk_plan.allowed:
             result_reasons = ["Risk engine blocked trade", *risk_reasons, *risk_blocking_reasons]
@@ -479,7 +691,18 @@ class PaperTradingFlow:
                 stop_loss=None,
                 take_profit=None,
             )
-            return PaperTradingFlowResult(
+            if journal is not None:
+                self._trace_step(
+                    tracer,
+                    decision_trace,
+                    "JOURNAL",
+                    "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                    journal_trade_id is not None,
+                    reasons=["Risk-engine blocked decision recorded"],
+                    blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+                )
+            return self._finalize_trace_result(
+                PaperTradingFlowResult(
                 completed=True,
                 status="NO_TRADE",
                 market_bias=primary_result.bias,
@@ -528,6 +751,9 @@ class PaperTradingFlow:
                 safety_blocking_reasons=list(safety_decision.blocking_reasons),
                 safety_passed_checks=list(safety_decision.passed_checks),
                 safety_failed_checks=list(safety_decision.failed_checks),
+                ),
+                tracer,
+                decision_trace,
             )
 
         risk_explanation = RiskEngine().explain(risk_plan)
@@ -547,6 +773,28 @@ class PaperTradingFlow:
             paper_broker,
             broker_config,
             broker_state,
+        )
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "TRADE_MANAGER",
+            trade_result.status,
+            bool(trade_result.executed),
+            reasons=[trade_result.reason],
+            blocking_reasons=[] if trade_result.executed else [trade_result.reason],
+        )
+        broker_result = getattr(trade_result, "broker_result", None)
+        broker_status = str(getattr(broker_result, "status", "NOT_CALLED"))
+        broker_reason = str(getattr(broker_result, "reason", "Broker was not called"))
+        broker_allowed = bool(getattr(broker_result, "accepted", False))
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "PAPER_BROKER",
+            broker_status,
+            broker_allowed,
+            reasons=[broker_reason],
+            blocking_reasons=[] if broker_allowed else [broker_reason],
         )
 
         result_reasons = [
@@ -569,6 +817,16 @@ class PaperTradingFlow:
             stop_loss=trade_request.stop_loss,
             take_profit=trade_request.take_profit,
         )
+        if journal is not None:
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "JOURNAL",
+                "RECORDED" if journal_trade_id is not None else "NOT_RECORDED",
+                journal_trade_id is not None,
+                reasons=["Trade decision recorded in journal"],
+                blocking_reasons=[] if journal_trade_id is not None else ["Journal entry was not recorded"],
+            )
 
         exit_simulated = False
         exit_reason = None
@@ -583,6 +841,15 @@ class PaperTradingFlow:
             exit_reason = exit_result.exit_reason
             exit_price = exit_result.exit_price
             pnl = exit_result.pnl
+            self._trace_step(
+                tracer,
+                decision_trace,
+                "EXIT_SIMULATOR",
+                "EXITED" if exit_result.exited else "NOT_EXITED",
+                bool(exit_result.exited),
+                reasons=list(getattr(exit_result, "reasons", [])),
+                blocking_reasons=[] if exit_result.exited else ["Exit conditions not met"],
+            )
             result_reasons.append(f"Exit simulation result: {exit_result.exit_reason}")
             result_reasons.extend(exit_result.reasons)
 
@@ -604,10 +871,21 @@ class PaperTradingFlow:
                         exit_price=exit_result.exit_price,
                         pnl=exit_result.pnl,
                     )
+                    if journal is not None and journal_trade_id is not None:
+                        self._trace_step(
+                            tracer,
+                            decision_trace,
+                            "JOURNAL",
+                            "EXIT_UPDATED",
+                            True,
+                            reasons=["Journal exit was updated"],
+                            blocking_reasons=[],
+                        )
                 else:
                     result_reasons.append(close_result.reason)
 
-        return PaperTradingFlowResult(
+        return self._finalize_trace_result(
+            PaperTradingFlowResult(
             completed=True,
             status=final_status,
             market_bias=primary_result.bias,
@@ -660,6 +938,9 @@ class PaperTradingFlow:
             exit_reason=exit_reason,
             exit_price=exit_price,
             pnl=pnl,
+            ),
+            tracer,
+            decision_trace,
         )
 
     def explain(self, result: PaperTradingFlowResult) -> str:
@@ -678,9 +959,55 @@ class PaperTradingFlow:
             f"Safety status: {safety_status} | "
             f"Safety failed checks: {failed_checks} | "
             f"Safety blocking reasons: {safety_blocks} | "
+            f"Trace ID: {result.trace_id or 'N/A'} | "
             f"Balance: {balance_text} | "
             f"Reasons: {reasons_text}"
         )
+
+    def _create_decision_trace(self, tracer: Optional[DecisionTracer], symbol: str) -> Optional[DecisionTrace]:
+        """Create a trace when tracing is enabled."""
+        if tracer is None:
+            return None
+        return tracer.create_trace(symbol=symbol)
+
+    def _trace_step(
+        self,
+        tracer: Optional[DecisionTracer],
+        trace: Optional[DecisionTrace],
+        step_name: str,
+        status: str,
+        allowed: bool,
+        reasons: Optional[List[str]] = None,
+        blocking_reasons: Optional[List[str]] = None,
+    ) -> None:
+        """Append one safe trace step when tracing is enabled."""
+        if tracer is None or trace is None:
+            return
+        tracer.add_step(
+            trace=trace,
+            step_name=step_name,
+            status=status,
+            allowed=allowed,
+            reasons=reasons,
+            blocking_reasons=blocking_reasons,
+        )
+
+    def _finalize_trace_result(
+        self,
+        result: PaperTradingFlowResult,
+        tracer: Optional[DecisionTracer],
+        trace: Optional[DecisionTrace],
+    ) -> PaperTradingFlowResult:
+        """Attach final trace metadata to a result when available."""
+        if tracer is None or trace is None:
+            return result
+
+        trace.final_action = result.decision_action if result.decision_action else "NO_TRADE"
+        trace.final_allowed = bool(result.trade_executed and result.decision_action in {"BUY", "SELL"})
+
+        result.trace_id = trace.trace_id
+        result.trace_explanation = tracer.explain_trace(trace)
+        return result
 
     def _record_journal_entry(
         self,
