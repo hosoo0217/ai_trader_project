@@ -16,6 +16,7 @@ import pandas as pd
 
 from analysis.news_filter import NewsFilter, NewsFilterConfig
 from analysis.session_filter import SessionFilter, SessionFilterConfig
+from analysis.volatility_filter import VolatilityFilter, VolatilityFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionEngine, CapitalProtectionState
 from core.decision_context import DecisionContext, MarketContext, SMCContext, CRTContext, OrderFlowContext, RiskContext
@@ -67,6 +68,13 @@ class PaperTradingFlowResult:
     active_news_event: Optional[str] = None
     news_reasons: List[str] = field(default_factory=list)
     news_blocking_reasons: List[str] = field(default_factory=list)
+    volatility_checked: bool = False
+    volatility_allowed: bool = False
+    volatility_status: Optional[str] = None
+    atr: Optional[float] = None
+    last_candle_range: Optional[float] = None
+    volatility_reasons: List[str] = field(default_factory=list)
+    volatility_blocking_reasons: List[str] = field(default_factory=list)
     risk_checked: bool = False
     risk_allowed: bool = False
     risk_reasons: List[str] = field(default_factory=list)
@@ -98,6 +106,7 @@ class PaperTradingFlow:
         session_config: Optional[SessionFilterConfig] = None,
         current_time: Optional[datetime] = None,
         news_config: Optional[NewsFilterConfig] = None,
+        volatility_config: Optional[VolatilityFilterConfig] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -373,6 +382,61 @@ class PaperTradingFlow:
                 news_blocking_reasons=news_blocking_reasons,
             )
 
+        effective_volatility_config = volatility_config or VolatilityFilterConfig()
+        volatility_result = VolatilityFilter().evaluate(candles, effective_volatility_config)
+        if not volatility_result.allowed:
+            volatility_reasons = list(volatility_result.reasons)
+            volatility_blocking_reasons = list(volatility_result.blocking_reasons)
+            blocked_reasons = [
+                f"Volatility status: {volatility_result.status}",
+                *volatility_reasons,
+                *volatility_blocking_reasons,
+            ]
+            journal_trade_id = self._record_journal_entry(
+                journal=journal,
+                symbol=flow_config.symbol,
+                action="NO_TRADE",
+                executed=False,
+                status="BLOCKED",
+                reasons=blocked_reasons,
+                blocking_reasons=volatility_blocking_reasons,
+                confidence=0.0,
+                price=None,
+                volume=None,
+                stop_loss=None,
+                take_profit=None,
+            )
+            return PaperTradingFlowResult(
+                completed=True,
+                status="NO_TRADE",
+                market_bias=primary_result.bias,
+                decision_action="NO_TRADE",
+                trade_executed=False,
+                reasons=blocked_reasons,
+                balance=broker_state.balance if broker_state else None,
+                journal_recorded=journal_trade_id is not None,
+                journal_trade_id=journal_trade_id,
+                session_checked=True,
+                session_allowed=True,
+                active_session=session_result.active_session,
+                session_status=session_result.status,
+                session_reasons=list(session_result.reasons),
+                session_blocking_reasons=list(session_result.blocking_reasons),
+                news_checked=True,
+                news_allowed=True,
+                news_status=news_result.status,
+                active_news_event=news_result.active_event,
+                news_reasons=list(news_result.reasons),
+                news_blocking_reasons=list(news_result.blocking_reasons),
+                volatility_checked=True,
+                volatility_allowed=False,
+                volatility_status=volatility_result.status,
+                atr=volatility_result.atr,
+                last_candle_range=volatility_result.last_candle_range,
+                volatility_reasons=volatility_reasons,
+                volatility_blocking_reasons=volatility_blocking_reasons,
+            )
+
         decision_context = self._build_context(candles, primary_result, mtf_decision)
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
@@ -413,6 +477,13 @@ class PaperTradingFlow:
                 active_news_event=news_result.active_event,
                 news_reasons=list(news_result.reasons),
                 news_blocking_reasons=list(news_result.blocking_reasons),
+                volatility_checked=True,
+                volatility_allowed=True,
+                volatility_status=volatility_result.status,
+                atr=volatility_result.atr,
+                last_candle_range=volatility_result.last_candle_range,
+                volatility_reasons=list(volatility_result.reasons),
+                volatility_blocking_reasons=list(volatility_result.blocking_reasons),
             )
 
         entry_price = float(candles[flow_config.default_price_column].iloc[-1])
@@ -468,6 +539,13 @@ class PaperTradingFlow:
                 active_news_event=news_result.active_event,
                 news_reasons=list(news_result.reasons),
                 news_blocking_reasons=list(news_result.blocking_reasons),
+                volatility_checked=True,
+                volatility_allowed=True,
+                volatility_status=volatility_result.status,
+                atr=volatility_result.atr,
+                last_candle_range=volatility_result.last_candle_range,
+                volatility_reasons=list(volatility_result.reasons),
+                volatility_blocking_reasons=list(volatility_result.blocking_reasons),
             )
 
         risk_explanation = RiskEngine().explain(risk_plan)
@@ -569,6 +647,13 @@ class PaperTradingFlow:
             active_news_event=news_result.active_event,
             news_reasons=list(news_result.reasons),
             news_blocking_reasons=list(news_result.blocking_reasons),
+            volatility_checked=True,
+            volatility_allowed=True,
+            volatility_status=volatility_result.status,
+            atr=volatility_result.atr,
+            last_candle_range=volatility_result.last_candle_range,
+            volatility_reasons=list(volatility_result.reasons),
+            volatility_blocking_reasons=list(volatility_result.blocking_reasons),
             risk_checked=True,
             risk_allowed=True,
             risk_reasons=risk_reasons,
