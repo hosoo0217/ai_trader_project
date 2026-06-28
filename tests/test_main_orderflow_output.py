@@ -214,6 +214,11 @@ def test_orderflow_replay_works_with_bullish_sample_csv() -> None:
     assert "- Bullish steps: 1" in output
     assert "- Dominant bias: BULLISH" in output
     assert "- Average confidence:" in output
+    assert "AI Coach Order Flow Replay Review" in output
+    assert "- Status:" in output
+    assert "- Grade:" in output
+    assert "- Market read:" in output
+    assert "Order Flow supports bullish context" in output
 
 
 def test_orderflow_replay_works_with_bearish_sample_csv() -> None:
@@ -235,6 +240,11 @@ def test_orderflow_replay_works_with_bearish_sample_csv() -> None:
     assert "Order Flow Replay Report" in output
     assert "- Bearish steps: 1" in output
     assert "- Dominant bias: BEARISH" in output
+    assert "AI Coach Order Flow Replay Review" in output
+    assert "- Status:" in output
+    assert "- Grade:" in output
+    assert "- Market read:" in output
+    assert "Order Flow supports bearish context" in output
 
 
 def test_orderflow_replay_steps_print_when_requested() -> None:
@@ -279,6 +289,9 @@ def test_missing_orderflow_replay_csv_path_does_not_crash() -> None:
     assert "- Total steps: 0" in output
     assert "- Dominant bias: UNKNOWN" in output
     assert "- Warnings: Order Flow replay CSV path does not exist" in output
+    assert "AI Coach Order Flow Replay Review" in output
+    assert "- Status: NO_USABLE_ORDERFLOW" in output
+    assert "- Grade: F" in output
 
 
 def test_invalid_orderflow_replay_csv_does_not_crash(tmp_path) -> None:
@@ -303,3 +316,28 @@ def test_invalid_orderflow_replay_csv_does_not_crash(tmp_path) -> None:
     assert "Order Flow Replay Report" in output
     assert "- Total steps: 0" in output
     assert "- Dominant bias: UNKNOWN" in output
+    assert "AI Coach Order Flow Replay Review" in output
+    assert "- Status: NO_USABLE_ORDERFLOW" in output
+
+
+def test_orderflow_replay_coach_output_has_no_direct_trade_commands() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-replay-csv",
+        "data/sample_footprint_bullish.csv",
+    ).lower()
+
+    forbidden_phrases = [
+        "buy now",
+        "sell now",
+        "enter trade",
+        "open position",
+        "guaranteed signal",
+    ]
+    for phrase in forbidden_phrases:
+        assert phrase not in output

@@ -27,6 +27,11 @@ from core.capital_protection import CapitalProtectionConfig, CapitalProtectionSt
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
+from ai.orderflow_replay_coach import (
+    OrderFlowReplayCoach,
+    OrderFlowReplayCoachConfig,
+    OrderFlowReplayCoachReview,
+)
 from orderflow.absorption import AbsorptionAnalyzer, AbsorptionConfig
 from orderflow.data_quality import (
     OrderFlowDataQualityChecker,
@@ -553,6 +558,8 @@ def _print_orderflow_replay_summary(
 
     replay_report = OrderFlowReplayReportGenerator().generate(replay_result)
     _print_orderflow_replay_report(replay_report)
+    coach_review = OrderFlowReplayCoach().review(replay_report, OrderFlowReplayCoachConfig())
+    _print_orderflow_replay_coach_review(coach_review)
 
     if not show_steps:
         return
@@ -592,6 +599,28 @@ def _print_orderflow_replay_report(report: OrderFlowReplayReport) -> None:
     print(f"- Final bias: {report.final_bias}")
     print(f"- Final confidence: {report.final_confidence:.1f}")
     print(f"- Final CVD: {report.final_cvd:.2f}")
+    print(f"- Warnings: {warnings_text}")
+    print(f"- Reasons: {reasons_text}")
+
+
+def _print_orderflow_replay_coach_review(review: OrderFlowReplayCoachReview) -> None:
+    """Print beginner-friendly coach feedback for the replay report."""
+    strengths_text = "; ".join(review.strengths) if review.strengths else "None"
+    risks_text = "; ".join(review.risks) if review.risks else "None"
+    lessons_text = "; ".join(review.lessons) if review.lessons else "None"
+    next_steps_text = "; ".join(review.next_steps) if review.next_steps else "None"
+    warnings_text = "; ".join(review.warnings) if review.warnings else "None"
+    reasons_text = "; ".join(review.reasons) if review.reasons else "None"
+
+    print("\nAI Coach Order Flow Replay Review")
+    print(f"- Status: {review.status}")
+    print(f"- Grade: {review.grade}")
+    print(f"- Summary: {review.summary}")
+    print(f"- Market read: {review.market_read}")
+    print(f"- Strengths: {strengths_text}")
+    print(f"- Risks: {risks_text}")
+    print(f"- Lessons: {lessons_text}")
+    print(f"- Next steps: {next_steps_text}")
     print(f"- Warnings: {warnings_text}")
     print(f"- Reasons: {reasons_text}")
 
