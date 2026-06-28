@@ -25,6 +25,7 @@ from core.decision_engine import DecisionEngine, DecisionResult
 from core.exit_simulator import ExitSimulationConfig, ExitSimulator
 from core.market_analyzer import MarketAnalysisResult, MarketAnalyzer, MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfig, MultiTimeframeDecision
+from core.safety_gate import SafetyGate
 from core.trade_manager import TradeManager, TradeRequest
 from risk.risk_engine import RiskEngine, RiskEngineConfig
 from storage.trade_journal import TradeJournal, TradeJournalEntry
@@ -82,6 +83,13 @@ class PaperTradingFlowResult:
     spread: Optional[float] = None
     spread_reasons: List[str] = field(default_factory=list)
     spread_blocking_reasons: List[str] = field(default_factory=list)
+    safety_checked: bool = False
+    safety_allowed: bool = False
+    safety_status: Optional[str] = None
+    safety_reasons: List[str] = field(default_factory=list)
+    safety_blocking_reasons: List[str] = field(default_factory=list)
+    safety_passed_checks: List[str] = field(default_factory=list)
+    safety_failed_checks: List[str] = field(default_factory=list)
     risk_checked: bool = False
     risk_allowed: bool = False
     risk_reasons: List[str] = field(default_factory=list)
@@ -273,189 +281,60 @@ class PaperTradingFlow:
 
         capital_engine = CapitalProtectionEngine()
         capital_decision = capital_engine.evaluate(capital_config, capital_state)
-        if not capital_decision.allowed:
-            journal_trade_id = self._record_journal_entry(
-                journal=journal,
-                symbol=flow_config.symbol,
-                action="NO_TRADE",
-                executed=False,
-                status="BLOCKED",
-                reasons=capital_decision.reasons,
-                blocking_reasons=capital_decision.reasons,
-                confidence=0.0,
-                price=None,
-                volume=None,
-                stop_loss=None,
-                take_profit=None,
-            )
-            return PaperTradingFlowResult(
-                completed=True,
-                status="NO_TRADE",
-                market_bias=primary_result.bias,
-                decision_action="NO_TRADE",
-                trade_executed=False,
-                reasons=capital_decision.reasons,
-                balance=broker_state.balance if broker_state else None,
-                journal_recorded=journal_trade_id is not None,
-                journal_trade_id=journal_trade_id,
-            )
 
-        effective_session_config = session_config or SessionFilterConfig()
         effective_current_time = current_time if current_time is not None else datetime.now(timezone.utc)
-        session_result = SessionFilter().evaluate(effective_current_time, effective_session_config)
-        if not session_result.allowed:
-            session_reasons = list(session_result.reasons)
-            session_blocking_reasons = list(session_result.blocking_reasons)
-            blocked_reasons = [
-                f"Session status: {session_result.status}",
-                *session_reasons,
-                *session_blocking_reasons,
-            ]
-            journal_trade_id = self._record_journal_entry(
-                journal=journal,
-                symbol=flow_config.symbol,
-                action="NO_TRADE",
-                executed=False,
-                status="BLOCKED",
-                reasons=blocked_reasons,
-                blocking_reasons=session_blocking_reasons,
-                confidence=0.0,
-                price=None,
-                volume=None,
-                stop_loss=None,
-                take_profit=None,
-            )
-            return PaperTradingFlowResult(
-                completed=True,
-                status="NO_TRADE",
-                market_bias=primary_result.bias,
-                decision_action="NO_TRADE",
-                trade_executed=False,
-                reasons=blocked_reasons,
-                balance=broker_state.balance if broker_state else None,
-                journal_recorded=journal_trade_id is not None,
-                journal_trade_id=journal_trade_id,
-                session_checked=True,
-                session_allowed=False,
-                active_session=session_result.active_session,
-                session_status=session_result.status,
-                session_reasons=session_reasons,
-                session_blocking_reasons=session_blocking_reasons,
-            )
+        session_result = None
+        news_result = None
+        volatility_result = None
+        spread_result = None
 
-        effective_news_config = news_config or NewsFilterConfig()
-        news_result = NewsFilter().evaluate(effective_current_time, effective_news_config)
-        if not news_result.allowed:
-            news_reasons = list(news_result.reasons)
-            news_blocking_reasons = list(news_result.blocking_reasons)
-            blocked_reasons = [
-                f"News status: {news_result.status}",
-                *news_reasons,
-                *news_blocking_reasons,
-            ]
-            journal_trade_id = self._record_journal_entry(
-                journal=journal,
-                symbol=flow_config.symbol,
-                action="NO_TRADE",
-                executed=False,
-                status="BLOCKED",
-                reasons=blocked_reasons,
-                blocking_reasons=news_blocking_reasons,
-                confidence=0.0,
-                price=None,
-                volume=None,
-                stop_loss=None,
-                take_profit=None,
-            )
-            return PaperTradingFlowResult(
-                completed=True,
-                status="NO_TRADE",
-                market_bias=primary_result.bias,
-                decision_action="NO_TRADE",
-                trade_executed=False,
-                reasons=blocked_reasons,
-                balance=broker_state.balance if broker_state else None,
-                journal_recorded=journal_trade_id is not None,
-                journal_trade_id=journal_trade_id,
-                session_checked=True,
-                session_allowed=True,
-                active_session=session_result.active_session,
-                session_status=session_result.status,
-                session_reasons=list(session_result.reasons),
-                session_blocking_reasons=list(session_result.blocking_reasons),
-                news_checked=True,
-                news_allowed=False,
-                news_status=news_result.status,
-                active_news_event=news_result.active_event,
-                news_reasons=news_reasons,
-                news_blocking_reasons=news_blocking_reasons,
-            )
+        if capital_decision.allowed:
+            effective_session_config = session_config or SessionFilterConfig()
+            session_result = SessionFilter().evaluate(effective_current_time, effective_session_config)
 
-        effective_volatility_config = volatility_config or VolatilityFilterConfig()
-        volatility_result = VolatilityFilter().evaluate(candles, effective_volatility_config)
-        if not volatility_result.allowed:
-            volatility_reasons = list(volatility_result.reasons)
-            volatility_blocking_reasons = list(volatility_result.blocking_reasons)
-            blocked_reasons = [
-                f"Volatility status: {volatility_result.status}",
-                *volatility_reasons,
-                *volatility_blocking_reasons,
-            ]
-            journal_trade_id = self._record_journal_entry(
-                journal=journal,
-                symbol=flow_config.symbol,
-                action="NO_TRADE",
-                executed=False,
-                status="BLOCKED",
-                reasons=blocked_reasons,
-                blocking_reasons=volatility_blocking_reasons,
-                confidence=0.0,
-                price=None,
-                volume=None,
-                stop_loss=None,
-                take_profit=None,
-            )
-            return PaperTradingFlowResult(
-                completed=True,
-                status="NO_TRADE",
-                market_bias=primary_result.bias,
-                decision_action="NO_TRADE",
-                trade_executed=False,
-                reasons=blocked_reasons,
-                balance=broker_state.balance if broker_state else None,
-                journal_recorded=journal_trade_id is not None,
-                journal_trade_id=journal_trade_id,
-                session_checked=True,
-                session_allowed=True,
-                active_session=session_result.active_session,
-                session_status=session_result.status,
-                session_reasons=list(session_result.reasons),
-                session_blocking_reasons=list(session_result.blocking_reasons),
-                news_checked=True,
-                news_allowed=True,
-                news_status=news_result.status,
-                active_news_event=news_result.active_event,
-                news_reasons=list(news_result.reasons),
-                news_blocking_reasons=list(news_result.blocking_reasons),
-                volatility_checked=True,
-                volatility_allowed=False,
-                volatility_status=volatility_result.status,
-                atr=volatility_result.atr,
-                last_candle_range=volatility_result.last_candle_range,
-                volatility_reasons=volatility_reasons,
-                volatility_blocking_reasons=volatility_blocking_reasons,
-            )
+        if session_result is not None and session_result.allowed:
+            effective_news_config = news_config or NewsFilterConfig()
+            news_result = NewsFilter().evaluate(effective_current_time, effective_news_config)
 
-        effective_spread_config = spread_config or SpreadFilterConfig()
-        spread_result = SpreadFilter().evaluate(current_spread, effective_spread_config)
-        if not spread_result.allowed:
-            spread_reasons = list(spread_result.reasons)
-            spread_blocking_reasons = list(spread_result.blocking_reasons)
+        if news_result is not None and news_result.allowed:
+            effective_volatility_config = volatility_config or VolatilityFilterConfig()
+            volatility_result = VolatilityFilter().evaluate(candles, effective_volatility_config)
+
+        if volatility_result is not None and volatility_result.allowed:
+            effective_spread_config = spread_config or SpreadFilterConfig()
+            spread_result = SpreadFilter().evaluate(current_spread, effective_spread_config)
+
+        safety_decision = SafetyGate().evaluate(
+            session_result=session_result,
+            news_result=news_result,
+            volatility_result=volatility_result,
+            spread_result=spread_result,
+            capital_decision=capital_decision,
+        )
+
+        if not safety_decision.allowed:
+            safety_status_reasons: List[str] = []
+            if "CAPITAL_PROTECTION" in safety_decision.failed_checks:
+                safety_status_reasons.append(f"Capital protection status: {capital_decision.status}")
+            if "SESSION" in safety_decision.failed_checks and session_result is not None:
+                safety_status_reasons.append(f"Session status: {session_result.status}")
+            if "NEWS" in safety_decision.failed_checks and news_result is not None:
+                safety_status_reasons.append(f"News status: {news_result.status}")
+            if "VOLATILITY" in safety_decision.failed_checks and volatility_result is not None:
+                safety_status_reasons.append(f"Volatility status: {volatility_result.status}")
+            if "SPREAD" in safety_decision.failed_checks and spread_result is not None:
+                safety_status_reasons.append(f"Spread status: {spread_result.status}")
+
             blocked_reasons = [
-                f"Spread status: {spread_result.status}",
-                *spread_reasons,
-                *spread_blocking_reasons,
+                *safety_status_reasons,
+                *list(safety_decision.reasons),
+                *list(safety_decision.blocking_reasons),
             ]
+            blocked_blocking_reasons = [
+                *safety_status_reasons,
+                *list(safety_decision.blocking_reasons),
+            ]
+
             journal_trade_id = self._record_journal_entry(
                 journal=journal,
                 symbol=flow_config.symbol,
@@ -463,7 +342,7 @@ class PaperTradingFlow:
                 executed=False,
                 status="BLOCKED",
                 reasons=blocked_reasons,
-                blocking_reasons=spread_blocking_reasons,
+                blocking_reasons=blocked_blocking_reasons,
                 confidence=0.0,
                 price=None,
                 volume=None,
@@ -480,31 +359,38 @@ class PaperTradingFlow:
                 balance=broker_state.balance if broker_state else None,
                 journal_recorded=journal_trade_id is not None,
                 journal_trade_id=journal_trade_id,
-                session_checked=True,
-                session_allowed=True,
-                active_session=session_result.active_session,
-                session_status=session_result.status,
-                session_reasons=list(session_result.reasons),
-                session_blocking_reasons=list(session_result.blocking_reasons),
-                news_checked=True,
-                news_allowed=True,
-                news_status=news_result.status,
-                active_news_event=news_result.active_event,
-                news_reasons=list(news_result.reasons),
-                news_blocking_reasons=list(news_result.blocking_reasons),
-                volatility_checked=True,
-                volatility_allowed=True,
-                volatility_status=volatility_result.status,
-                atr=volatility_result.atr,
-                last_candle_range=volatility_result.last_candle_range,
-                volatility_reasons=list(volatility_result.reasons),
-                volatility_blocking_reasons=list(volatility_result.blocking_reasons),
-                spread_checked=True,
-                spread_allowed=False,
-                spread_status=spread_result.status,
-                spread=spread_result.spread,
-                spread_reasons=spread_reasons,
-                spread_blocking_reasons=spread_blocking_reasons,
+                session_checked=session_result is not None,
+                session_allowed=bool(getattr(session_result, "allowed", False)),
+                active_session=getattr(session_result, "active_session", None),
+                session_status=getattr(session_result, "status", None),
+                session_reasons=list(getattr(session_result, "reasons", [])),
+                session_blocking_reasons=list(getattr(session_result, "blocking_reasons", [])),
+                news_checked=news_result is not None,
+                news_allowed=bool(getattr(news_result, "allowed", False)),
+                news_status=getattr(news_result, "status", None),
+                active_news_event=getattr(news_result, "active_event", None),
+                news_reasons=list(getattr(news_result, "reasons", [])),
+                news_blocking_reasons=list(getattr(news_result, "blocking_reasons", [])),
+                volatility_checked=volatility_result is not None,
+                volatility_allowed=bool(getattr(volatility_result, "allowed", False)),
+                volatility_status=getattr(volatility_result, "status", None),
+                atr=getattr(volatility_result, "atr", None),
+                last_candle_range=getattr(volatility_result, "last_candle_range", None),
+                volatility_reasons=list(getattr(volatility_result, "reasons", [])),
+                volatility_blocking_reasons=list(getattr(volatility_result, "blocking_reasons", [])),
+                spread_checked=spread_result is not None,
+                spread_allowed=bool(getattr(spread_result, "allowed", False)),
+                spread_status=getattr(spread_result, "status", None),
+                spread=getattr(spread_result, "spread", None),
+                spread_reasons=list(getattr(spread_result, "reasons", [])),
+                spread_blocking_reasons=list(getattr(spread_result, "blocking_reasons", [])),
+                safety_checked=True,
+                safety_allowed=False,
+                safety_status=safety_decision.status,
+                safety_reasons=list(safety_decision.reasons),
+                safety_blocking_reasons=list(safety_decision.blocking_reasons),
+                safety_passed_checks=list(safety_decision.passed_checks),
+                safety_failed_checks=list(safety_decision.failed_checks),
             )
 
         decision_context = self._build_context(candles, primary_result, mtf_decision)
@@ -560,6 +446,13 @@ class PaperTradingFlow:
                 spread=spread_result.spread,
                 spread_reasons=list(spread_result.reasons),
                 spread_blocking_reasons=list(spread_result.blocking_reasons),
+                safety_checked=True,
+                safety_allowed=True,
+                safety_status=safety_decision.status,
+                safety_reasons=list(safety_decision.reasons),
+                safety_blocking_reasons=list(safety_decision.blocking_reasons),
+                safety_passed_checks=list(safety_decision.passed_checks),
+                safety_failed_checks=list(safety_decision.failed_checks),
             )
 
         entry_price = float(candles[flow_config.default_price_column].iloc[-1])
@@ -628,6 +521,13 @@ class PaperTradingFlow:
                 spread=spread_result.spread,
                 spread_reasons=list(spread_result.reasons),
                 spread_blocking_reasons=list(spread_result.blocking_reasons),
+                safety_checked=True,
+                safety_allowed=True,
+                safety_status=safety_decision.status,
+                safety_reasons=list(safety_decision.reasons),
+                safety_blocking_reasons=list(safety_decision.blocking_reasons),
+                safety_passed_checks=list(safety_decision.passed_checks),
+                safety_failed_checks=list(safety_decision.failed_checks),
             )
 
         risk_explanation = RiskEngine().explain(risk_plan)
@@ -742,6 +642,13 @@ class PaperTradingFlow:
             spread=spread_result.spread,
             spread_reasons=list(spread_result.reasons),
             spread_blocking_reasons=list(spread_result.blocking_reasons),
+            safety_checked=True,
+            safety_allowed=True,
+            safety_status=safety_decision.status,
+            safety_reasons=list(safety_decision.reasons),
+            safety_blocking_reasons=list(safety_decision.blocking_reasons),
+            safety_passed_checks=list(safety_decision.passed_checks),
+            safety_failed_checks=list(safety_decision.failed_checks),
             risk_checked=True,
             risk_allowed=True,
             risk_reasons=risk_reasons,
@@ -759,11 +666,18 @@ class PaperTradingFlow:
         """Create a readable summary of the paper flow result."""
         reasons_text = "; ".join(result.reasons) if result.reasons else "No reasons provided"
         balance_text = f"{result.balance:.2f}" if result.balance is not None else "N/A"
+        safety_status = result.safety_status if result.safety_status is not None else "N/A"
+        failed_checks = ", ".join(result.safety_failed_checks) if result.safety_failed_checks else "None"
+        safety_blocks = "; ".join(result.safety_blocking_reasons) if result.safety_blocking_reasons else "None"
         return (
             f"Paper flow status: {result.status} | "
             f"Market bias: {result.market_bias} | "
             f"Decision: {result.decision_action} | "
             f"Trade executed: {result.trade_executed} | "
+            f"Safety passed: {result.safety_allowed} | "
+            f"Safety status: {safety_status} | "
+            f"Safety failed checks: {failed_checks} | "
+            f"Safety blocking reasons: {safety_blocks} | "
             f"Balance: {balance_text} | "
             f"Reasons: {reasons_text}"
         )
