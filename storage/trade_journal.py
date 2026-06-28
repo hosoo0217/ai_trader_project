@@ -28,6 +28,8 @@ class TradeJournalEntry:
     blocking_reasons: List[str] = field(default_factory=list)
     status: str = "RECORD"
     pnl: Optional[float] = None
+    exit_reason: Optional[str] = None
+    exit_price: Optional[float] = None
 
 
 class TradeJournal:
@@ -40,6 +42,25 @@ class TradeJournal:
     def add_entry(self, entry: TradeJournalEntry) -> None:
         """Add a new entry to the journal."""
         self._entries.append(entry)
+
+    def update_exit(
+        self,
+        trade_id: str,
+        status: str,
+        exit_reason: str,
+        exit_price: Optional[float],
+        pnl: Optional[float],
+    ) -> bool:
+        """Attach simulated exit details to an existing trade entry."""
+        for entry in self._entries:
+            if entry.trade_id == trade_id:
+                entry.status = status
+                entry.exit_reason = exit_reason
+                entry.exit_price = exit_price
+                entry.pnl = pnl
+                entry.reasons.append(f"Exit simulation: {exit_reason}")
+                return True
+        return False
 
     def get_all_entries(self) -> List[TradeJournalEntry]:
         """Return all recorded entries."""

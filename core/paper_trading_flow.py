@@ -17,6 +17,7 @@ from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionEngine, CapitalProtectionState
 from core.decision_context import DecisionContext, MarketContext, SMCContext, CRTContext, OrderFlowContext, RiskContext
 from core.decision_engine import DecisionEngine, DecisionResult
+from core.exit_simulator import ExitSimulationConfig, ExitSimulator
 from core.market_analyzer import MarketAnalysisResult, MarketAnalyzer, MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfig, MultiTimeframeDecision
 from core.trade_manager import TradeManager, TradeRequest
@@ -31,6 +32,10 @@ class PaperTradingFlowConfig:
     timeframe: str = "M5"
     default_volume: float = 1.0
     default_price_column: str = "close"
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    simulate_exit: bool = False
+    exit_simulation_config: ExitSimulationConfig = field(default_factory=ExitSimulationConfig)
 
 
 @dataclass
@@ -46,6 +51,10 @@ class PaperTradingFlowResult:
     balance: Optional[float] = None
     journal_recorded: bool = False
     journal_trade_id: Optional[str] = None
+    exit_simulated: bool = False
+    exit_reason: Optional[str] = None
+    exit_price: Optional[float] = None
+    pnl: Optional[float] = None
 
 
 class PaperTradingFlow:
@@ -280,24 +289,28 @@ class PaperTradingFlow:
             symbol=flow_config.symbol,
             price=float(candles[flow_config.default_price_column].iloc[-1]),
             volume=flow_config.default_volume,
+            stop_loss=flow_config.stop_loss,
+            take_profit=flow_config.take_profit,
             reason=f"Paper flow {decision_result.action}",
         )
+        paper_broker = PaperBroker()
         trade_manager = TradeManager()
         trade_result = trade_manager.process_decision(
             decision_result,
             trade_request,
-            PaperBroker(),
+            paper_broker,
             broker_config,
             broker_state,
         )
 
+        result_reasons = [decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")]
         journal_trade_id = self._record_journal_entry(
             journal=journal,
             symbol=flow_config.symbol,
             action=decision_result.action,
             executed=trade_result.executed,
             status="EXECUTED" if trade_result.executed else "REJECTED",
-            reasons=[decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")],
+            reasons=result_reasons,
             blocking_reasons=decision_result.blocking_reasons,
             confidence=decision_result.confidence,
             price=trade_request.price,
@@ -306,16 +319,57 @@ class PaperTradingFlow:
             take_profit=trade_request.take_profit,
         )
 
+        exit_simulated = False
+        exit_reason = None
+        exit_price = None
+        pnl = None
+        final_status = "EXECUTED" if trade_result.executed else "REJECTED"
+
+        if trade_result.executed and flow_config.simulate_exit:
+            position = getattr(getattr(trade_result, "broker_result", None), "position", None)
+            exit_result = ExitSimulator().simulate_exit(position, candles, flow_config.exit_simulation_config)
+            exit_simulated = True
+            exit_reason = exit_result.exit_reason
+            exit_price = exit_result.exit_price
+            pnl = exit_result.pnl
+            result_reasons.append(f"Exit simulation result: {exit_result.exit_reason}")
+            result_reasons.extend(exit_result.reasons)
+
+            if exit_result.exited and exit_result.exit_price is not None and position is not None:
+                close_result = paper_broker.close_position(
+                    broker_state,
+                    position.position_id,
+                    exit_result.exit_price,
+                    exit_result.exit_reason,
+                )
+                result_reasons.append(f"Exit simulation: {exit_result.exit_reason}")
+                if close_result.accepted:
+                    final_status = "CLOSED"
+                    self._update_journal_exit(
+                        journal=journal,
+                        trade_id=journal_trade_id,
+                        status="CLOSED",
+                        exit_reason=exit_result.exit_reason,
+                        exit_price=exit_result.exit_price,
+                        pnl=exit_result.pnl,
+                    )
+                else:
+                    result_reasons.append(close_result.reason)
+
         return PaperTradingFlowResult(
             completed=True,
-            status="EXECUTED" if trade_result.executed else "REJECTED",
+            status=final_status,
             market_bias=primary_result.bias,
             decision_action=decision_result.action,
             trade_executed=trade_result.executed,
-            reasons=[decision_result.action, *decision_result.reasons, *trade_result.reason.split(";")],
+            reasons=result_reasons,
             balance=broker_state.balance if broker_state else None,
             journal_recorded=journal_trade_id is not None,
             journal_trade_id=journal_trade_id,
+            exit_simulated=exit_simulated,
+            exit_reason=exit_reason,
+            exit_price=exit_price,
+            pnl=pnl,
         )
 
     def explain(self, result: PaperTradingFlowResult) -> str:
@@ -367,6 +421,21 @@ class PaperTradingFlow:
         )
         journal.add_entry(entry)
         return entry.trade_id
+
+    def _update_journal_exit(
+        self,
+        journal: Optional[TradeJournal],
+        trade_id: Optional[str],
+        status: str,
+        exit_reason: str,
+        exit_price: Optional[float],
+        pnl: Optional[float],
+    ) -> None:
+        """Update the original journal entry after a simulated close."""
+        if journal is None or trade_id is None:
+            return
+
+        journal.update_exit(trade_id, status, exit_reason, exit_price, pnl)
 
     def _build_context(
         self,
