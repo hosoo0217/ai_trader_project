@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig, TradingSession
+from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBrokerConfig
 from core.capital_protection import CapitalProtectionConfig
 from risk.risk_engine import RiskEngineConfig
@@ -232,4 +233,34 @@ def to_news_filter_config(profile: TradingProfile, events: list[NewsEvent] | Non
         block_medium_impact=False,
         block_low_impact=False,
         events=prepared_events,
+    )
+
+
+def to_volatility_filter_config(profile: TradingProfile) -> VolatilityFilterConfig:
+    """Convert a TradingProfile into a VolatilityFilterConfig."""
+    if profile.account_type == "FUTURES_PROP":
+        return VolatilityFilterConfig(
+            enabled=True,
+            atr_period=14,
+            min_atr=0.5,
+            max_atr=80.0,
+            max_last_candle_range_multiplier=3.0,
+        )
+
+    if profile.account_type == "SPOT_GOLD":
+        return VolatilityFilterConfig(
+            enabled=True,
+            atr_period=14,
+            min_atr=0.3,
+            max_atr=120.0,
+            max_last_candle_range_multiplier=3.5,
+        )
+
+    # Safe default: intentionally impossible ATR range to block trading by default.
+    return VolatilityFilterConfig(
+        enabled=True,
+        atr_period=14,
+        min_atr=999999.0,
+        max_atr=0.0,
+        max_last_candle_range_multiplier=1.0,
     )

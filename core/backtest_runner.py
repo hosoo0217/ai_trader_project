@@ -14,6 +14,7 @@ import pandas as pd
 
 from analysis.news_filter import NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
+from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBrokerConfig, PaperBrokerState
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.market_analyzer import MarketAnalyzerConfig
@@ -59,6 +60,13 @@ class BacktestResult:
     active_news_event: str | None = None
     news_reasons: list[str] = field(default_factory=list)
     news_blocking_reasons: list[str] = field(default_factory=list)
+    volatility_checked: bool = False
+    volatility_allowed: bool = False
+    volatility_status: str | None = None
+    atr: float | None = None
+    last_candle_range: float | None = None
+    volatility_reasons: list[str] = field(default_factory=list)
+    volatility_blocking_reasons: list[str] = field(default_factory=list)
 
 
 class BacktestRunner:
@@ -80,6 +88,7 @@ class BacktestRunner:
         session_config: Optional[SessionFilterConfig] = None,
         session_time_fallback: Optional[datetime] = None,
         news_config: Optional[NewsFilterConfig] = None,
+        volatility_config: Optional[VolatilityFilterConfig] = None,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -157,6 +166,7 @@ class BacktestRunner:
                 session_config,
                 window_current_time,
                 news_config,
+                volatility_config,
             )
             last_flow_result = flow_result
 
@@ -197,6 +207,13 @@ class BacktestRunner:
             active_news_event=getattr(last_flow_result, "active_news_event", None),
             news_reasons=list(getattr(last_flow_result, "news_reasons", [])),
             news_blocking_reasons=list(getattr(last_flow_result, "news_blocking_reasons", [])),
+            volatility_checked=bool(getattr(last_flow_result, "volatility_checked", False)),
+            volatility_allowed=bool(getattr(last_flow_result, "volatility_allowed", False)),
+            volatility_status=getattr(last_flow_result, "volatility_status", None),
+            atr=getattr(last_flow_result, "atr", None),
+            last_candle_range=getattr(last_flow_result, "last_candle_range", None),
+            volatility_reasons=list(getattr(last_flow_result, "volatility_reasons", [])),
+            volatility_blocking_reasons=list(getattr(last_flow_result, "volatility_blocking_reasons", [])),
         )
 
     def _resolve_window_time(

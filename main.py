@@ -7,6 +7,7 @@ import pandas as pd
 from ai.trade_reviewer import TradeReviewer
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
+from analysis.volatility_filter import VolatilityFilterConfig
 from broker.paper_broker import PaperBroker, PaperBrokerConfig, PaperBrokerState
 from config.trading_profiles import (
     TradingProfile,
@@ -16,6 +17,7 @@ from config.trading_profiles import (
     to_paper_broker_config,
     to_risk_engine_config,
     to_session_filter_config,
+    to_volatility_filter_config,
 )
 from core.backtest_runner import BacktestConfig, BacktestRunner
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
@@ -205,6 +207,28 @@ def _print_news_summary(
         print("- News blocking reasons: None")
 
 
+def _print_volatility_summary(
+    volatility_status: str | None,
+    atr: float | None,
+    last_candle_range: float | None,
+    volatility_allowed: bool,
+    volatility_blocking_reasons: list[str],
+) -> None:
+    """Print volatility filter status in a simple user-facing format."""
+    atr_text = f"{atr:.4f}" if atr is not None else "N/A"
+    range_text = f"{last_candle_range:.4f}" if last_candle_range is not None else "N/A"
+
+    print("\nVolatility Filter")
+    print(f"- Volatility filter status: {volatility_status if volatility_status else 'N/A'}")
+    print(f"- ATR: {atr_text}")
+    print(f"- Last candle range: {range_text}")
+    print(f"- Volatility allowed: {volatility_allowed}")
+    if volatility_blocking_reasons:
+        print(f"- Volatility blocking reasons: {'; '.join(volatility_blocking_reasons)}")
+    else:
+        print("- Volatility blocking reasons: None")
+
+
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
     """Create broker state using the configured starting balance."""
     return PaperBroker().create_default_state(config)
@@ -249,6 +273,7 @@ def _run_demo_scenario(
     risk_config: RiskEngineConfig,
     session_config: SessionFilterConfig,
     news_config: NewsFilterConfig,
+    volatility_config: VolatilityFilterConfig,
     session_time: datetime,
 ) -> None:
     """Run one demo scenario and print the results."""
@@ -283,6 +308,7 @@ def _run_demo_scenario(
         session_config,
         session_time,
         news_config,
+        volatility_config,
     )
 
     print("\nMarket result")
@@ -306,6 +332,14 @@ def _run_demo_scenario(
         result.active_news_event,
         result.news_allowed,
         result.news_blocking_reasons,
+    )
+
+    _print_volatility_summary(
+        result.volatility_status,
+        result.atr,
+        result.last_candle_range,
+        result.volatility_allowed,
+        result.volatility_blocking_reasons,
     )
 
     print("\nJournal summary")
@@ -341,6 +375,7 @@ def _run_backtest_scenario(
     risk_config: RiskEngineConfig,
     session_config: SessionFilterConfig,
     news_config: NewsFilterConfig,
+    volatility_config: VolatilityFilterConfig,
     session_time: datetime,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
@@ -372,6 +407,7 @@ def _run_backtest_scenario(
         session_config,
         session_time,
         news_config,
+        volatility_config,
     )
 
     print("\nAI Trader Backtest")
@@ -424,6 +460,14 @@ def _run_backtest_scenario(
         result.news_blocking_reasons,
     )
 
+    _print_volatility_summary(
+        result.volatility_status,
+        result.atr,
+        result.last_candle_range,
+        result.volatility_allowed,
+        result.volatility_blocking_reasons,
+    )
+
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
 
@@ -473,6 +517,7 @@ def main(args: list[str] | None = None) -> None:
     broker_config = to_paper_broker_config(selected_profile)
     session_config = to_session_filter_config(selected_profile)
     news_config = to_news_filter_config(selected_profile, news_events)
+    volatility_config = to_volatility_filter_config(selected_profile)
 
     _print_profile_summary(selected_profile)
     if session_time_warning:
@@ -493,6 +538,7 @@ def main(args: list[str] | None = None) -> None:
                     risk_config,
                     session_config,
                     news_config,
+                    volatility_config,
                     parsed_session_time,
                 )
             else:
@@ -504,6 +550,7 @@ def main(args: list[str] | None = None) -> None:
                     risk_config,
                     session_config,
                     news_config,
+                    volatility_config,
                     parsed_session_time,
                 )
             print("\n" + "=" * 40)
@@ -519,6 +566,7 @@ def main(args: list[str] | None = None) -> None:
             risk_config,
             session_config,
             news_config,
+            volatility_config,
             parsed_session_time,
         )
     else:
@@ -530,6 +578,7 @@ def main(args: list[str] | None = None) -> None:
             risk_config,
             session_config,
             news_config,
+            volatility_config,
             parsed_session_time,
         )
 
