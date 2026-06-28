@@ -27,6 +27,7 @@ from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
 from risk.risk_engine import RiskEngineConfig
+from storage.decision_trace import DecisionTracer
 from storage.backtest_quality import BacktestQualityChecker, BacktestQualityConfig
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
@@ -81,6 +82,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--spread",
         default="",
         help="Optional current spread value for spread safety checks, example: 2.0",
+    )
+    parser.add_argument(
+        "--show-trace",
+        action="store_true",
+        help="Show decision trace details in output",
     )
     return parser
 
@@ -308,6 +314,41 @@ def _print_performance_report(journal: TradeJournal):
     return performance
 
 
+def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
+    """Print a readable decision trace section without crashing on missing data."""
+    print("\nDecision Trace")
+    if not trace_id and not trace_explanation:
+        print("- Trace not available")
+        return
+
+    segments = [segment.strip() for segment in (trace_explanation or "").split(" | ") if segment.strip()]
+    parsed: dict[str, str] = {}
+    for segment in segments:
+        if ":" not in segment:
+            continue
+        key, value = segment.split(":", 1)
+        parsed[key.strip()] = value.strip()
+
+    trace_id_text = trace_id or parsed.get("Decision trace ID") or "N/A"
+    final_action = parsed.get("Final action", "NO_TRADE")
+    final_allowed = parsed.get("Final allowed", "False")
+    steps_text = parsed.get("Steps", "None")
+    blocking_text = parsed.get("Blocking reasons", "None")
+
+    print(f"- Trace ID: {trace_id_text}")
+    print(f"- Final action: {final_action}")
+    print(f"- Final allowed: {final_allowed}")
+
+    print("- Steps:")
+    if steps_text == "None":
+        print("  - None")
+    else:
+        for raw_step in [item.strip() for item in steps_text.split(" || ") if item.strip()]:
+            print(f"  - {raw_step}")
+
+    print(f"- Blocking reasons: {blocking_text}")
+
+
 def _run_demo_scenario(
     name: str,
     profile: TradingProfile,
@@ -320,6 +361,7 @@ def _run_demo_scenario(
     spread_config: SpreadFilterConfig,
     current_spread: float | None,
     session_time: datetime,
+    show_trace: bool,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -336,6 +378,7 @@ def _run_demo_scenario(
     journal = TradeJournal()
     reviewer = TradeReviewer()
     flow = PaperTradingFlow()
+    tracer = DecisionTracer() if show_trace else None
     flow_config = PaperTradingFlowConfig(symbol=profile.symbol)
     broker_state = _create_broker_state(broker_config)
 
@@ -356,6 +399,7 @@ def _run_demo_scenario(
         volatility_config,
         spread_config,
         current_spread,
+        tracer,
     )
 
     print("\nMarket result")
@@ -417,6 +461,9 @@ def _run_demo_scenario(
     print("\nFlow explanation")
     print(f"- {flow.explain(result)}")
 
+    if show_trace:
+        _print_decision_trace(result.trace_id, result.trace_explanation)
+
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
 
@@ -433,6 +480,7 @@ def _run_backtest_scenario(
     spread_config: SpreadFilterConfig,
     current_spread: float | None,
     session_time: datetime,
+    show_trace: bool,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -476,6 +524,7 @@ def _run_backtest_scenario(
     print(f"- Final balance: {result.final_balance:.2f}")
     print(f"- Total PnL: {result.total_pnl:.2f}")
     print("- Note: research-only simulation, not live trading")
+    print("- Note: decision tracing is available with --show-trace")
 
     performance = _print_performance_report(journal)
 
@@ -536,6 +585,37 @@ def _run_backtest_scenario(
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")
 
+    if show_trace:
+        last_window_size = 60
+        if len(candles) >= last_window_size:
+            last_window = candles.iloc[-last_window_size:].copy()
+            tracer = DecisionTracer()
+            preview_flow = PaperTradingFlow()
+            preview_result = preview_flow.run_single_timeframe(
+                last_window,
+                PaperTradingFlowConfig(symbol=profile.symbol, simulate_exit=True),
+                MarketAnalyzerConfig(),
+                MultiTimeframeConfig(),
+                capital_config,
+                CapitalProtectionState(),
+                broker_config,
+                _create_broker_state(broker_config),
+                None,
+                risk_config,
+                session_config,
+                session_time,
+                news_config,
+                volatility_config,
+                spread_config,
+                current_spread,
+                tracer,
+            )
+            print("\nDecision Trace (Last Iteration)")
+            _print_decision_trace(preview_result.trace_id, preview_result.trace_explanation)
+        else:
+            print("\nDecision Trace")
+            print("- Trace unavailable: not enough candles for a preview window")
+
     if not profile.enabled:
         print("- Safe profile is a conservative fallback. Trading is intentionally blocked.")
 
@@ -554,6 +634,7 @@ def main(args: list[str] | None = None) -> None:
     parsed_session_time, session_time_warning = _parse_session_time(parsed_args.session_time or "")
     news_events, news_warnings = _parse_news_events(parsed_args.news_event or [])
     parsed_spread, spread_warning = _parse_spread(parsed_args.spread)
+    show_trace = bool(getattr(parsed_args, "show_trace", False))
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -611,6 +692,7 @@ def main(args: list[str] | None = None) -> None:
                     spread_config,
                     parsed_spread,
                     parsed_session_time,
+                    show_trace,
                 )
             else:
                 _run_backtest_scenario(
@@ -625,6 +707,7 @@ def main(args: list[str] | None = None) -> None:
                     spread_config,
                     parsed_spread,
                     parsed_session_time,
+                    show_trace,
                 )
             print("\n" + "=" * 40)
             print()
@@ -643,6 +726,7 @@ def main(args: list[str] | None = None) -> None:
             spread_config,
             parsed_spread,
             parsed_session_time,
+            show_trace,
         )
     else:
         _run_backtest_scenario(
@@ -657,6 +741,7 @@ def main(args: list[str] | None = None) -> None:
             spread_config,
             parsed_spread,
             parsed_session_time,
+            show_trace,
         )
 
 
