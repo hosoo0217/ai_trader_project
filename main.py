@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +28,11 @@ from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
 from orderflow.absorption import AbsorptionAnalyzer, AbsorptionConfig
+from orderflow.data_quality import (
+    OrderFlowDataQualityChecker,
+    OrderFlowDataQualityConfig,
+    OrderFlowDataQualityResult,
+)
 from orderflow.delta_cvd import DeltaCVDAnalyzer, DeltaCVDConfig
 from orderflow.imbalance import ImbalanceAnalyzer, ImbalanceConfig
 from orderflow.orderflow_context import OrderFlowContextCombiner, OrderFlowContextConfig, OrderFlowContextResult
@@ -36,6 +42,14 @@ from storage.decision_trace import DecisionTracer
 from storage.backtest_quality import BacktestQualityChecker, BacktestQualityConfig
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
+
+
+@dataclass
+class OrderFlowCsvDemoResult:
+    """Order Flow context plus CSV data-quality status for CLI output."""
+
+    context: OrderFlowContextResult | None = None
+    data_quality: OrderFlowDataQualityResult | None = None
 
 
 def _load_candles(path: Path) -> pd.DataFrame:
@@ -120,6 +134,60 @@ def _unknown_orderflow_context(reason: str) -> OrderFlowContextResult:
     )
 
 
+def _quality_result(
+    status: str,
+    passed: bool,
+    reason: str,
+    blocking_reason: str | None = None,
+) -> OrderFlowDataQualityResult:
+    """Build a small data-quality result for CSV load failures."""
+    return OrderFlowDataQualityResult(
+        passed=passed,
+        status=status,
+        candle_count=0,
+        total_levels=0,
+        invalid_levels=0,
+        invalid_level_ratio=0.0,
+        reasons=[reason],
+        blocking_reasons=[blocking_reason] if blocking_reason else [],
+    )
+
+
+def _orderflow_context_blocked_by_quality(
+    reason: str,
+    quality_result: OrderFlowDataQualityResult,
+) -> OrderFlowContextResult:
+    """Build an inactive Order Flow context when data quality blocks the CSV."""
+    blocking_reasons = list(quality_result.blocking_reasons)
+    if not blocking_reasons:
+        blocking_reasons = [reason]
+
+    return OrderFlowContextResult(
+        bias="UNKNOWN",
+        confidence=0.0,
+        delta_direction=None,
+        imbalance_bias=None,
+        absorption_bias=None,
+        final_cvd=None,
+        reasons=[
+            reason,
+            *_orderflow_quality_trace_reasons(quality_result),
+            *list(quality_result.reasons),
+        ],
+        blocking_reasons=blocking_reasons,
+    )
+
+
+def _orderflow_quality_trace_reasons(quality_result: OrderFlowDataQualityResult) -> list[str]:
+    """Create simple key=value lines that also show up in decision trace."""
+    blocking_text = "; ".join(quality_result.blocking_reasons) if quality_result.blocking_reasons else "None"
+    return [
+        f"orderflow_data_quality_status={quality_result.status}",
+        f"orderflow_data_quality_passed={quality_result.passed}",
+        f"orderflow_data_quality_blocking_reasons={blocking_text}",
+    ]
+
+
 def _resolve_orderflow_csv_path(raw_path: str) -> Path:
     """Resolve user-provided CSV paths relative to the project folder."""
     path = Path(raw_path).expanduser()
@@ -128,7 +196,7 @@ def _resolve_orderflow_csv_path(raw_path: str) -> Path:
     return Path(__file__).resolve().parent / path
 
 
-def _build_orderflow_context_from_csv(raw_path: str) -> OrderFlowContextResult | None:
+def _build_orderflow_context_from_csv(raw_path: str) -> OrderFlowCsvDemoResult:
     """Load a footprint CSV and convert it into one Order Flow context.
 
     This is intentionally offline-only: it reads a CSV from disk and never
@@ -136,16 +204,32 @@ def _build_orderflow_context_from_csv(raw_path: str) -> OrderFlowContextResult |
     """
     cleaned = (raw_path or "").strip()
     if not cleaned:
-        return None
+        return OrderFlowCsvDemoResult()
 
     csv_path = _resolve_orderflow_csv_path(cleaned)
     if not csv_path.exists() or not csv_path.is_file():
-        return _unknown_orderflow_context(f"Order Flow CSV not found: {cleaned}")
+        quality_result = _quality_result(
+            status="INVALID",
+            passed=False,
+            reason=f"Order Flow CSV not found: {cleaned}",
+            blocking_reason="Order Flow CSV path does not exist",
+        )
+        return OrderFlowCsvDemoResult(
+            context=_orderflow_context_blocked_by_quality(f"Order Flow CSV not found: {cleaned}", quality_result),
+            data_quality=quality_result,
+        )
 
     importer = SierraChartImporter()
     candles = importer.load_csv(str(csv_path), SierraChartImportConfig())
-    if not candles:
-        return _unknown_orderflow_context(f"Order Flow CSV could not be imported: {csv_path.name}")
+    quality_result = OrderFlowDataQualityChecker().check(candles, OrderFlowDataQualityConfig())
+    if quality_result.status in {"FAILED", "EMPTY", "INVALID"} or not quality_result.passed:
+        reason = f"Order Flow CSV blocked by data quality: {csv_path.name}"
+        if not candles:
+            reason = f"Order Flow CSV could not be imported: {csv_path.name}"
+        return OrderFlowCsvDemoResult(
+            context=_orderflow_context_blocked_by_quality(reason, quality_result),
+            data_quality=quality_result,
+        )
 
     latest_candle = candles[-1]
     delta_result = DeltaCVDAnalyzer().analyze(candles, DeltaCVDConfig())
@@ -158,8 +242,10 @@ def _build_orderflow_context_from_csv(raw_path: str) -> OrderFlowContextResult |
         OrderFlowContextConfig(),
     )
     context.reasons.insert(0, f"Loaded Order Flow CSV: {csv_path.name}")
+    context.reasons.extend(_orderflow_quality_trace_reasons(quality_result))
+    context.reasons.extend(quality_result.reasons)
     context.reasons.append(importer.explain_import(candles))
-    return context
+    return OrderFlowCsvDemoResult(context=context, data_quality=quality_result)
 
 
 def _parse_session_time(raw_value: str) -> tuple[datetime, str | None]:
@@ -360,6 +446,7 @@ def _print_orderflow_summary(
     imbalance_bias: str | None = None,
     absorption_bias: str | None = None,
     final_cvd: float | None = None,
+    data_quality: OrderFlowDataQualityResult | None = None,
 ) -> None:
     """Print order flow context status without requiring footprint data."""
     bias = orderflow_bias if orderflow_bias else "UNKNOWN"
@@ -392,6 +479,19 @@ def _print_orderflow_summary(
             print(f"- Order Flow blocking reasons: {'; '.join(orderflow_blocking_reasons)}")
         else:
             print("- Order Flow blocking reasons: None")
+
+    if data_quality is not None:
+        print("\nOrder Flow Data Quality")
+        print(f"- Status: {data_quality.status}")
+        print(f"- Passed: {data_quality.passed}")
+        print(f"- Candle count: {data_quality.candle_count}")
+        print(f"- Total levels: {data_quality.total_levels}")
+        print(f"- Invalid levels: {data_quality.invalid_levels}")
+        print(f"- Invalid level ratio: {data_quality.invalid_level_ratio:.2f}")
+        reasons_text = "; ".join(data_quality.reasons) if data_quality.reasons else "None"
+        blocks_text = "; ".join(data_quality.blocking_reasons) if data_quality.blocking_reasons else "None"
+        print(f"- Reasons: {reasons_text}")
+        print(f"- Blocking reasons: {blocks_text}")
 
 
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
@@ -479,7 +579,7 @@ def _run_demo_scenario(
     session_time: datetime,
     show_trace: bool,
     show_orderflow: bool,
-    orderflow_context_result: OrderFlowContextResult | None,
+    orderflow_csv_result: OrderFlowCsvDemoResult,
 ) -> None:
     """Run one demo scenario and print the results."""
     print(f"Scenario: {name}")
@@ -499,6 +599,7 @@ def _run_demo_scenario(
     tracer = DecisionTracer() if show_trace else None
     flow_config = PaperTradingFlowConfig(symbol=profile.symbol)
     broker_state = _create_broker_state(broker_config)
+    orderflow_context_result = orderflow_csv_result.context
 
     result = flow.run_single_timeframe(
         candles,
@@ -570,6 +671,7 @@ def _run_demo_scenario(
         imbalance_bias=getattr(orderflow_context_result, "imbalance_bias", None),
         absorption_bias=getattr(orderflow_context_result, "absorption_bias", None),
         final_cvd=getattr(orderflow_context_result, "final_cvd", None),
+        data_quality=orderflow_csv_result.data_quality,
     )
 
     print("\nJournal summary")
@@ -614,7 +716,7 @@ def _run_backtest_scenario(
     session_time: datetime,
     show_trace: bool,
     show_orderflow: bool,
-    orderflow_context_result: OrderFlowContextResult | None,
+    orderflow_csv_result: OrderFlowCsvDemoResult,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -630,6 +732,7 @@ def _run_backtest_scenario(
     journal = TradeJournal()
     broker_state = _create_broker_state(broker_config)
     runner = BacktestRunner()
+    orderflow_context_result = orderflow_csv_result.context
     result = runner.run(
         candles,
         BacktestConfig(symbol=profile.symbol, timeframe="M5", window_size=60, step_size=5),
@@ -725,6 +828,7 @@ def _run_backtest_scenario(
             orderflow_reasons=["Order Flow context not provided for this backtest run"],
             orderflow_blocking_reasons=[],
             show_detail=show_orderflow,
+            data_quality=orderflow_csv_result.data_quality,
         )
     else:
         _print_orderflow_summary(
@@ -738,6 +842,7 @@ def _run_backtest_scenario(
             imbalance_bias=orderflow_context_result.imbalance_bias,
             absorption_bias=orderflow_context_result.absorption_bias,
             final_cvd=orderflow_context_result.final_cvd,
+            data_quality=orderflow_csv_result.data_quality,
         )
 
     print("\nBacktest explanation")
@@ -795,7 +900,7 @@ def main(args: list[str] | None = None) -> None:
     parsed_spread, spread_warning = _parse_spread(parsed_args.spread)
     show_trace = bool(getattr(parsed_args, "show_trace", False))
     show_orderflow = bool(getattr(parsed_args, "show_orderflow", False))
-    orderflow_context_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
+    orderflow_csv_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
 
     if mode not in {"demo", "backtest"}:
         print(f"Invalid mode: {mode}")
@@ -855,7 +960,7 @@ def main(args: list[str] | None = None) -> None:
                     parsed_session_time,
                     show_trace,
                     show_orderflow,
-                    orderflow_context_result,
+                    orderflow_csv_result,
                 )
             else:
                 _run_backtest_scenario(
@@ -872,7 +977,7 @@ def main(args: list[str] | None = None) -> None:
                     parsed_session_time,
                     show_trace,
                     show_orderflow,
-                    orderflow_context_result,
+                    orderflow_csv_result,
                 )
             print("\n" + "=" * 40)
             print()
@@ -893,7 +998,7 @@ def main(args: list[str] | None = None) -> None:
             parsed_session_time,
             show_trace,
             show_orderflow,
-            orderflow_context_result,
+            orderflow_csv_result,
         )
     else:
         _run_backtest_scenario(
@@ -910,7 +1015,7 @@ def main(args: list[str] | None = None) -> None:
             parsed_session_time,
             show_trace,
             show_orderflow,
-            orderflow_context_result,
+            orderflow_csv_result,
         )
 
 

@@ -19,10 +19,15 @@ Use `--orderflow-csv` with a CSV that has these columns:
 
 The CLI loads the file with `SierraChartImporter`, builds footprint candles, then runs:
 
+- `OrderFlowDataQualityChecker`
 - `DeltaCVDAnalyzer`
 - `ImbalanceAnalyzer`
 - `AbsorptionAnalyzer`
 - `OrderFlowContextCombiner`
+
+If data quality is `PASSED` or `WARNING`, the analyzers continue and Order Flow
+Context can become active. If quality is `FAILED`, `EMPTY`, or `INVALID`, Order
+Flow stays inactive and the rest of the demo keeps running safely.
 
 The resulting `OrderFlowContextResult` is passed into `PaperTradingFlow` as an
 optional context source.

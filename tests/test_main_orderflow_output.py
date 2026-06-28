@@ -71,6 +71,9 @@ def test_sample_bullish_csv_produces_active_orderflow() -> None:
     assert "Order Flow Context" in output
     assert "- Active: True" in output
     assert "- Bias: BULLISH" in output
+    assert "Order Flow Data Quality" in output
+    assert "- Status: PASSED" in output or "- Status: WARNING" in output
+    assert "- Passed: True" in output
     assert "- Delta direction: BUYING_PRESSURE" in output
     assert "- Imbalance bias: BULLISH" in output
     assert "- Final CVD:" in output
@@ -91,6 +94,9 @@ def test_sample_bearish_csv_produces_active_orderflow() -> None:
     assert "Order Flow Context" in output
     assert "- Active: True" in output
     assert "- Bias: BEARISH" in output
+    assert "Order Flow Data Quality" in output
+    assert "- Status: PASSED" in output or "- Status: WARNING" in output
+    assert "- Passed: True" in output
     assert "- Delta direction: SELLING_PRESSURE" in output
     assert "- Imbalance bias: BEARISH" in output
 
@@ -110,6 +116,9 @@ def test_missing_orderflow_csv_path_does_not_crash() -> None:
     assert "Order Flow Context" in output
     assert "- Active: False" in output
     assert "Order Flow CSV not found" in output
+    assert "Order Flow Data Quality" in output
+    assert "- Status: INVALID" in output
+    assert "- Passed: False" in output
 
 
 def test_invalid_orderflow_csv_does_not_crash(tmp_path) -> None:
@@ -130,3 +139,47 @@ def test_invalid_orderflow_csv_does_not_crash(tmp_path) -> None:
     assert "Order Flow Context" in output
     assert "- Active: False" in output
     assert "Order Flow CSV could not be imported" in output
+    assert "Order Flow Data Quality" in output
+    assert "- Status: EMPTY" in output
+    assert "- Passed: False" in output
+
+
+def test_empty_orderflow_csv_blocks_context(tmp_path) -> None:
+    empty_csv = tmp_path / "empty_footprint.csv"
+    empty_csv.write_text("time,open,high,low,close,price,bid_volume,ask_volume\n", encoding="utf-8")
+
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        str(empty_csv),
+    )
+
+    assert "Order Flow Context" in output
+    assert "- Active: False" in output
+    assert "Order Flow Data Quality" in output
+    assert "- Status: EMPTY" in output
+    assert "- Passed: False" in output
+
+
+def test_decision_trace_includes_orderflow_data_quality_fields() -> None:
+    output = _run_main(
+        "--mode",
+        "demo",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        "data/sample_footprint_bullish.csv",
+        "--show-trace",
+    )
+
+    assert "Decision Trace" in output
+    assert "orderflow_data_quality_status=PASSED" in output
+    assert "orderflow_data_quality_passed=True" in output
+    assert "orderflow_data_quality_blocking_reasons=None" in output
