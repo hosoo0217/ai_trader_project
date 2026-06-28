@@ -278,6 +278,29 @@ def _print_spread_summary(
         print("- Spread blocking reasons: None")
 
 
+def _print_orderflow_summary(
+    orderflow_checked: bool,
+    orderflow_bias: str | None,
+    orderflow_confidence: float | None,
+    orderflow_reasons: list[str],
+    orderflow_blocking_reasons: list[str],
+) -> None:
+    """Print order flow context status without requiring footprint data."""
+    print("\nOrder Flow Context")
+    print(f"- Order Flow checked: {orderflow_checked}")
+    print(f"- Order Flow bias: {orderflow_bias if orderflow_bias else 'UNKNOWN'}")
+    confidence_text = f"{orderflow_confidence:.1f}" if orderflow_confidence is not None else "0.0"
+    print(f"- Order Flow confidence: {confidence_text}")
+    if orderflow_reasons:
+        print(f"- Order Flow reasons: {'; '.join(orderflow_reasons)}")
+    else:
+        print("- Order Flow reasons: Order Flow context not provided")
+    if orderflow_blocking_reasons:
+        print(f"- Order Flow blocking reasons: {'; '.join(orderflow_blocking_reasons)}")
+    else:
+        print("- Order Flow blocking reasons: None")
+
+
 def _create_broker_state(config: PaperBrokerConfig) -> PaperBrokerState:
     """Create broker state using the configured starting balance."""
     return PaperBroker().create_default_state(config)
@@ -440,6 +463,14 @@ def _run_demo_scenario(
         result.spread_blocking_reasons,
     )
 
+    _print_orderflow_summary(
+        result.orderflow_checked,
+        result.orderflow_bias,
+        result.orderflow_confidence,
+        result.orderflow_reasons,
+        result.orderflow_blocking_reasons,
+    )
+
     print("\nJournal summary")
     summary = journal.summarize()
     print(f"- Entries: {summary['total_entries']}")
@@ -581,6 +612,13 @@ def _run_backtest_scenario(
         result.spread_allowed,
         result.spread_blocking_reasons,
     )
+
+    print("\nOrder Flow Context")
+    print("- Order Flow checked: False")
+    print("- Order Flow bias: UNKNOWN")
+    print("- Order Flow confidence: 0.0")
+    print("- Order Flow reasons: Order Flow context not provided for this backtest run")
+    print("- Order Flow blocking reasons: None")
 
     print("\nBacktest explanation")
     print(f"- {runner.explain(result)}")

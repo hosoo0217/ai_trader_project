@@ -29,6 +29,7 @@ from core.market_analyzer import MarketAnalysisResult, MarketAnalyzer, MarketAna
 from core.multi_timeframe import MultiTimeframeBiasCombiner, MultiTimeframeConfig, MultiTimeframeDecision
 from core.safety_gate import SafetyGate
 from core.trade_manager import TradeManager, TradeRequest
+from orderflow.orderflow_context import OrderFlowContextResult
 from risk.risk_engine import RiskEngine, RiskEngineConfig
 from smc.bos_choch import BOSCHOCHAnalyzer, BOSCHOCHConfig
 from smc.liquidity_sweep import LiquiditySweepAnalyzer, LiquiditySweepConfig
@@ -120,6 +121,11 @@ class PaperTradingFlowResult:
     crt_signal_type: str | None = None
     crt_reasons: List[str] = field(default_factory=list)
     crt_blocking_reasons: List[str] = field(default_factory=list)
+    orderflow_checked: bool = False
+    orderflow_bias: str | None = None
+    orderflow_confidence: float | None = None
+    orderflow_reasons: List[str] = field(default_factory=list)
+    orderflow_blocking_reasons: List[str] = field(default_factory=list)
     alignment_checked: bool = False
     alignment_allowed: bool = False
     alignment_status: str | None = None
@@ -159,6 +165,7 @@ class PaperTradingFlow:
         crt_enabled: bool = True,
         crt_config: Optional[CRTConfig] = None,
         alignment_config: Optional[ContextAlignmentConfig] = None,
+        orderflow_context_result: Optional[OrderFlowContextResult] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         decision_trace = self._create_decision_trace(tracer, flow_config.symbol)
@@ -434,6 +441,11 @@ class PaperTradingFlow:
         crt_signal_type: str | None = None
         crt_reasons: List[str] = []
         crt_blocking_reasons: List[str] = []
+        orderflow_checked = False
+        orderflow_bias: str | None = None
+        orderflow_confidence: float | None = None
+        orderflow_reasons: List[str] = []
+        orderflow_blocking_reasons: List[str] = []
         alignment_checked = False
         alignment_result: Optional[ContextAlignmentResult] = None
         alignment_allowed = False
@@ -543,6 +555,36 @@ class PaperTradingFlow:
                 reasons=list(crt_result.reasons),
                 blocking_reasons=list(crt_result.blocking_reasons),
             )
+
+        orderflow_checked = True
+        if orderflow_context_result is None:
+            orderflow_bias = "UNKNOWN"
+            orderflow_confidence = 0.0
+            orderflow_reasons = ["Order Flow context not provided"]
+            orderflow_blocking_reasons = []
+        else:
+            orderflow_bias = str(getattr(orderflow_context_result, "bias", "UNKNOWN") or "UNKNOWN")
+            orderflow_confidence = float(getattr(orderflow_context_result, "confidence", 0.0) or 0.0)
+            orderflow_reasons = list(getattr(orderflow_context_result, "reasons", []))
+            orderflow_blocking_reasons = list(getattr(orderflow_context_result, "blocking_reasons", []))
+            if orderflow_bias == "NEUTRAL":
+                orderflow_reasons.append("Order Flow context is neutral")
+            elif orderflow_bias == "UNKNOWN":
+                orderflow_reasons.append("Order Flow context is unknown")
+
+        self._trace_step(
+            tracer,
+            decision_trace,
+            "ORDER_FLOW_CONTEXT",
+            orderflow_bias or "UNKNOWN",
+            orderflow_bias in {"BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"},
+            reasons=[
+                f"orderflow_bias={orderflow_bias or 'UNKNOWN'}",
+                f"orderflow_confidence={float(orderflow_confidence or 0.0):.1f}",
+                *orderflow_reasons,
+            ],
+            blocking_reasons=list(orderflow_blocking_reasons),
+        )
 
         capital_engine = CapitalProtectionEngine()
         capital_decision = capital_engine.evaluate(capital_config, capital_state)
@@ -739,6 +781,11 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                orderflow_checked=orderflow_checked,
+                orderflow_bias=orderflow_bias,
+                orderflow_confidence=orderflow_confidence,
+                orderflow_reasons=list(orderflow_reasons),
+                orderflow_blocking_reasons=list(orderflow_blocking_reasons),
                 alignment_checked=alignment_checked,
                 alignment_allowed=alignment_allowed,
                 alignment_status=alignment_status,
@@ -758,6 +805,7 @@ class PaperTradingFlow:
             smc_result=smc_context_result,
             crt_result=crt_result,
             config=effective_alignment_config,
+            orderflow_result=orderflow_context_result,
         )
         alignment_allowed = bool(alignment_result.allowed)
         alignment_status = alignment_result.status
@@ -787,11 +835,13 @@ class PaperTradingFlow:
                     *alignment_reasons,
                     *[f"SMC: {item}" for item in smc_reasons],
                     *[f"CRT: {item}" for item in crt_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_reasons],
                 ],
                 blocking_reasons=[
                     *alignment_blocking_reasons,
                     *[f"SMC: {item}" for item in smc_blocking_reasons],
                     *[f"CRT: {item}" for item in crt_blocking_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_blocking_reasons],
                 ],
                 confidence=0.0,
                 price=None,
@@ -862,6 +912,11 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                orderflow_checked=orderflow_checked,
+                orderflow_bias=orderflow_bias,
+                orderflow_confidence=orderflow_confidence,
+                orderflow_reasons=list(orderflow_reasons),
+                orderflow_blocking_reasons=list(orderflow_blocking_reasons),
                 alignment_checked=alignment_checked,
                 alignment_allowed=alignment_allowed,
                 alignment_status=alignment_status,
@@ -881,6 +936,7 @@ class PaperTradingFlow:
             smc_context_result,
             crt_result,
             alignment_result,
+            orderflow_context_result,
         )
         decision_engine = DecisionEngine()
         decision_result = decision_engine.evaluate(decision_context, capital_decision, mtf_decision)
@@ -905,12 +961,14 @@ class PaperTradingFlow:
                     *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                     *[f"SMC: {item}" for item in smc_reasons],
                     *[f"CRT: {item}" for item in crt_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_reasons],
                 ],
                 blocking_reasons=[
                     *decision_result.blocking_reasons,
                     *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                     *[f"SMC: {item}" for item in smc_blocking_reasons],
                     *[f"CRT: {item}" for item in crt_blocking_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_blocking_reasons],
                 ],
                 confidence=decision_result.confidence,
                 price=None,
@@ -981,6 +1039,11 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                orderflow_checked=orderflow_checked,
+                orderflow_bias=orderflow_bias,
+                orderflow_confidence=orderflow_confidence,
+                orderflow_reasons=list(orderflow_reasons),
+                orderflow_blocking_reasons=list(orderflow_blocking_reasons),
                 alignment_checked=alignment_checked,
                 alignment_allowed=alignment_allowed,
                 alignment_status=alignment_status,
@@ -1023,12 +1086,14 @@ class PaperTradingFlow:
                     *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                     *[f"SMC: {item}" for item in smc_reasons],
                     *[f"CRT: {item}" for item in crt_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_reasons],
                 ],
                 blocking_reasons=[
                     *risk_blocking_reasons,
                     *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                     *[f"SMC: {item}" for item in smc_blocking_reasons],
                     *[f"CRT: {item}" for item in crt_blocking_reasons],
+                    *[f"ORDER_FLOW: {item}" for item in orderflow_blocking_reasons],
                 ],
                 confidence=decision_result.confidence,
                 price=entry_price,
@@ -1106,6 +1171,11 @@ class PaperTradingFlow:
                 crt_signal_type=crt_signal_type,
                 crt_reasons=list(crt_reasons),
                 crt_blocking_reasons=list(crt_blocking_reasons),
+                orderflow_checked=orderflow_checked,
+                orderflow_bias=orderflow_bias,
+                orderflow_confidence=orderflow_confidence,
+                orderflow_reasons=list(orderflow_reasons),
+                orderflow_blocking_reasons=list(orderflow_blocking_reasons),
                 alignment_checked=alignment_checked,
                 alignment_allowed=alignment_allowed,
                 alignment_status=alignment_status,
@@ -1176,6 +1246,7 @@ class PaperTradingFlow:
                 *[f"ALIGNMENT: {item}" for item in alignment_reasons],
                 *[f"SMC: {item}" for item in smc_reasons],
                 *[f"CRT: {item}" for item in crt_reasons],
+                *[f"ORDER_FLOW: {item}" for item in orderflow_reasons],
             ],
             blocking_reasons=[
                 *decision_result.blocking_reasons,
@@ -1183,6 +1254,7 @@ class PaperTradingFlow:
                 *[f"ALIGNMENT: {item}" for item in alignment_blocking_reasons],
                 *[f"SMC: {item}" for item in smc_blocking_reasons],
                 *[f"CRT: {item}" for item in crt_blocking_reasons],
+                *[f"ORDER_FLOW: {item}" for item in orderflow_blocking_reasons],
             ],
             confidence=decision_result.confidence,
             price=trade_request.price,
@@ -1321,6 +1393,11 @@ class PaperTradingFlow:
             crt_signal_type=crt_signal_type,
             crt_reasons=list(crt_reasons),
             crt_blocking_reasons=list(crt_blocking_reasons),
+            orderflow_checked=orderflow_checked,
+            orderflow_bias=orderflow_bias,
+            orderflow_confidence=orderflow_confidence,
+            orderflow_reasons=list(orderflow_reasons),
+            orderflow_blocking_reasons=list(orderflow_blocking_reasons),
             alignment_checked=alignment_checked,
             alignment_allowed=alignment_allowed,
             alignment_status=alignment_status,
@@ -1459,6 +1536,7 @@ class PaperTradingFlow:
         smc_context_result: Optional[SMCContextResult] = None,
         crt_result: Optional[CRTResult] = None,
         alignment_result: Optional[ContextAlignmentResult] = None,
+        orderflow_context_result: Optional[OrderFlowContextResult] = None,
     ) -> DecisionContext:
         """Create a simple DecisionContext from the paper-flow analysis output."""
         last_close = float(candles["close"].iloc[-1])
@@ -1483,7 +1561,20 @@ class PaperTradingFlow:
             crt_reasons=crt_reasons,
             crt_blocking_reasons=crt_blocking_reasons,
         )
-        context.orderflow = OrderFlowContext()
+        context.orderflow = OrderFlowContext(
+            orderflow_bias=str(getattr(orderflow_context_result, "bias", "UNKNOWN") or "UNKNOWN")
+            if orderflow_context_result is not None
+            else "UNKNOWN",
+            orderflow_confidence=float(getattr(orderflow_context_result, "confidence", 0.0) or 0.0)
+            if orderflow_context_result is not None
+            else 0.0,
+            orderflow_reasons=list(getattr(orderflow_context_result, "reasons", []))
+            if orderflow_context_result is not None
+            else ["Order Flow context not provided"],
+            orderflow_blocking_reasons=list(getattr(orderflow_context_result, "blocking_reasons", []))
+            if orderflow_context_result is not None
+            else [],
+        )
         context.risk = RiskContext(equity=10000.0, max_risk_per_trade=0.01)
         context.trading_halted = False
         context.max_concurrent_trades = 1

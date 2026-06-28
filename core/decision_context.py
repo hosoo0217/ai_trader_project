@@ -77,6 +77,10 @@ class OrderFlowContext:
 
     buying_pressure: float = 0.0
     recent_fills: float = 0.0
+    orderflow_bias: str = "UNKNOWN"
+    orderflow_confidence: float = 0.0
+    orderflow_reasons: List[str] = field(default_factory=list)
+    orderflow_blocking_reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
