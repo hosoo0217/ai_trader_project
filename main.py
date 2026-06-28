@@ -8,6 +8,11 @@ import pandas as pd
 
 from ai.trade_reviewer import TradeReviewer
 from ai.session_trend_coach import SessionTrendCoach, SessionTrendCoachConfig, SessionTrendCoachReview
+from ai.strategy_improvement import (
+    StrategyImprovementConfig,
+    StrategyImprovementEngine,
+    StrategyImprovementResult,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -886,6 +891,30 @@ def _print_session_trend_coach_review(review: SessionTrendCoachReview) -> None:
     print(f"- Reasons: {reasons_text}")
 
 
+def _print_strategy_improvement_suggestions(result: StrategyImprovementResult) -> None:
+    """Print safe strategy improvement suggestions in beginner-readable form."""
+    warnings_text = "; ".join(result.warnings) if result.warnings else "None"
+    reasons_text = "; ".join(result.reasons) if result.reasons else "None"
+
+    print("\nStrategy Improvement Suggestions")
+    print(f"- Status: {result.status}")
+    print(f"- Summary: {result.summary}")
+    print("- Suggestions:")
+    if result.suggestions:
+        for suggestion in result.suggestions:
+            approval = "Yes" if suggestion.human_approval_required else "No"
+            print(f"  - Category: {suggestion.category}")
+            print(f"    Priority: {suggestion.priority}")
+            print(f"    Suggestion: {suggestion.suggestion}")
+            print(f"    Reason: {suggestion.reason}")
+            print(f"    Risk: {suggestion.risk}")
+            print(f"    Human approval required: {approval}")
+    else:
+        print("  - None")
+    print(f"- Warnings: {warnings_text}")
+    print(f"- Reasons: {reasons_text}")
+
+
 def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
     """Load saved session history and print trend analysis safely."""
     history = SessionHistoryStore().load_history(session_history_config)
@@ -893,6 +922,8 @@ def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
     _print_session_history_trend(trend)
     review = SessionTrendCoach().review(trend, SessionTrendCoachConfig())
     _print_session_trend_coach_review(review)
+    improvements = StrategyImprovementEngine().suggest(trend, review, StrategyImprovementConfig())
+    _print_strategy_improvement_suggestions(improvements)
 
 
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:
