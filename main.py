@@ -13,6 +13,11 @@ from ai.strategy_improvement import (
     StrategyImprovementEngine,
     StrategyImprovementResult,
 )
+from ai.strategy_approval_pipeline import (
+    StrategyApprovalPipeline,
+    StrategyApprovalPipelineConfig,
+    StrategyApprovalPipelineResult,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -915,6 +920,43 @@ def _print_strategy_improvement_suggestions(result: StrategyImprovementResult) -
     print(f"- Reasons: {reasons_text}")
 
 
+def _print_human_approval_requests(result: StrategyApprovalPipelineResult) -> None:
+    """Print pending human approval requests without applying any change."""
+    reasons_text = "; ".join(result.reasons) if result.reasons else "None"
+    blocking_text = "; ".join(result.blocking_reasons) if result.blocking_reasons else "None"
+
+    print("\nHuman Approval Requests")
+    print(f"- Status: {result.status}")
+    print(f"- Total suggestions: {result.total_suggestions}")
+    print(f"- Pending requests: {result.pending_requests}")
+    print("- Created requests:")
+    if result.created_requests:
+        for request in result.created_requests:
+            approval = "Yes" if request.human_approval_required else "No"
+            print(f"  - Request ID: {request.request_id}")
+            print(f"    Suggestion category: {request.suggestion_category}")
+            print(f"    Suggestion priority: {request.suggestion_priority}")
+            print(f"    Suggestion text: {request.suggestion_text}")
+            print(f"    Reason: {request.reason}")
+            print(f"    Risk: {request.risk}")
+            print(f"    Status: {request.status}")
+            print(f"    Human approval required: {approval}")
+            print("    Note: No strategy rule was changed. Review before applying any future change.")
+    else:
+        print("  - None")
+
+    print("- Skipped suggestions:")
+    if result.skipped_suggestions:
+        for suggestion in result.skipped_suggestions:
+            print(f"  - Category: {getattr(suggestion, 'category', 'UNKNOWN')}")
+            print(f"    Priority: {getattr(suggestion, 'priority', 'UNKNOWN')}")
+            print(f"    Suggestion: {getattr(suggestion, 'suggestion', 'UNKNOWN')}")
+    else:
+        print("  - None")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
 def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
     """Load saved session history and print trend analysis safely."""
     history = SessionHistoryStore().load_history(session_history_config)
@@ -924,6 +966,19 @@ def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
     _print_session_trend_coach_review(review)
     improvements = StrategyImprovementEngine().suggest(trend, review, StrategyImprovementConfig())
     _print_strategy_improvement_suggestions(improvements)
+    try:
+        approval_result = StrategyApprovalPipeline().create_requests(
+            improvements,
+            StrategyApprovalPipelineConfig(),
+        )
+    except Exception as exc:
+        approval_result = StrategyApprovalPipelineResult(
+            status="UNKNOWN",
+            reasons=["Human approval request output was requested"],
+            blocking_reasons=[f"Approval pipeline could not create requests: {exc}"],
+        )
+    _print_human_approval_requests(approval_result)
+
 
 
 def _print_decision_trace(trace_id: str | None, trace_explanation: str | None) -> None:

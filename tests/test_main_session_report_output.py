@@ -342,6 +342,8 @@ def test_main_prints_session_history_trend_when_requested(tmp_path: Path) -> Non
     assert "- Trend status:" in output
     assert "AI Coach Session Trend Review" in output
     assert "Strategy Improvement Suggestions" in output
+    assert "Human Approval Requests" in output
+    assert "- Pending requests:" in output
 
 
 def test_session_history_trend_output_contains_total_sessions(tmp_path: Path) -> None:
@@ -359,6 +361,7 @@ def test_session_history_trend_output_contains_total_sessions(tmp_path: Path) ->
     assert "- Grade:" in output
     assert "- Summary:" in output
     assert "Human approval required" in output
+    assert "Human Approval Requests" in output
 
 
 def test_session_trend_coach_output_contains_trend_read(tmp_path: Path) -> None:
@@ -389,6 +392,8 @@ def test_missing_history_file_does_not_crash_session_trend(tmp_path: Path) -> No
     assert "- Trend status: NOT_ENOUGH_DATA" in output
     assert "AI Coach Session Trend Review" in output
     assert "Strategy Improvement Suggestions" in output
+    assert "Human Approval Requests" in output
+    assert "- Status: REQUESTS_CREATED" in output
 
 
 def test_invalid_history_json_does_not_crash_session_trend(tmp_path: Path) -> None:
@@ -403,6 +408,30 @@ def test_invalid_history_json_does_not_crash_session_trend(tmp_path: Path) -> No
     assert "- Trend status: NOT_ENOUGH_DATA" in output
     assert "AI Coach Session Trend Review" in output
     assert "Strategy Improvement Suggestions" in output
+    assert "Human Approval Requests" in output
+    assert "- Status: REQUESTS_CREATED" in output
+
+
+def test_session_trend_with_no_suggestions_prints_no_suggestion_approval_status(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps(
+            [
+                {"trade_executed": True, "market_bias": "BULLISH"},
+                {"trade_executed": False, "market_bias": "BEARISH", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "NEUTRAL", "blocked_reasons": ["News block"]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = _run_main("--show-session-trend", "--session-history-dir", str(history_dir))
+
+    assert "Strategy Improvement Suggestions" in output
+    assert "Human Approval Requests" in output
+    assert "- Status: NO_SUGGESTIONS" in output
+    assert "- Pending requests: 0" in output
 
 
 def test_not_enough_data_shows_not_enough_data_status(tmp_path: Path) -> None:
