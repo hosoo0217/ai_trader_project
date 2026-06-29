@@ -21,7 +21,7 @@ This is a validation step before deeper backtest or paper-trading validation. It
 
 ## 2. Important Safety Warning
 
-- This is CSV export testing only.
+- CSV export testing only.
 - No Sierra Chart live connection is used.
 - No CME live data connection is used.
 - No broker connection is used.
@@ -38,9 +38,8 @@ Start with a small, easy-to-review export.
 
 - [ ] Use a small sample first.
 - [ ] Prefer one session/day first.
-- [ ] Make sure the chart, instrument, and timezone are understood.
-- [ ] Record what instrument the file came from.
-- [ ] Record what session/date the file came from.
+- [ ] Make sure the chart, instrument, date, session, and timezone are understood.
+- [ ] Record the instrument, date, session, and timezone.
 - [ ] Record the Sierra Chart study/export settings if possible.
 - [ ] Do not include account credentials.
 - [ ] Do not include private broker information.
@@ -73,7 +72,7 @@ The project's normalized fields are:
 - `bid_volume`
 - `ask_volume`
 
-Sierra Chart exports may use different column names. Any column names may need mapping if Sierra Chart exports names that the importer does not already recognize.
+Sierra Chart exports may use different column names. Column names may need mapping if Sierra Chart exports names that the importer does not already recognize.
 
 Known supported examples include names like `Date Time`, `Last`, `Level`, `Bid Volume`, and `Ask Volume`.
 
@@ -174,8 +173,7 @@ Common problems:
 - Empty export.
 - Wrong delimiter.
 - Wrong timezone.
-- Missing bid volume.
-- Missing ask volume.
+- Missing bid/ask volume.
 - Missing price level.
 - Missing OHLC columns.
 - File path typo.
