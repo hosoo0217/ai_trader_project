@@ -192,6 +192,37 @@ def _candles_from_footprint_candles(candles: list[object]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
 
 
+def _is_sierra_bar_summary_market_dataframe(dataframe: pd.DataFrame) -> bool:
+    """Detect Sierra BAR_SUMMARY market rows by the first price columns."""
+    if dataframe is None or not isinstance(dataframe, pd.DataFrame) or len(dataframe.columns) < 6:
+        return False
+    first_columns = [_normalize_market_column(column) for column in list(dataframe.columns[:6])]
+    return (
+        first_columns[0] == "date"
+        and first_columns[1] == "time"
+        and first_columns[2] == "open"
+        and first_columns[3] == "high"
+        and first_columns[4] == "low"
+        and first_columns[5] in {"last", "close"}
+    )
+
+
+def _market_candles_from_sierra_bar_summary_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Read Sierra BAR_SUMMARY price OHLC from fixed first-column positions."""
+    market_candles = pd.DataFrame()
+    market_candles["time"] = [
+        f"{str(date).strip()} {str(time).strip()}".strip()
+        for date, time in zip(dataframe.iloc[:, 0], dataframe.iloc[:, 1])
+    ]
+    market_candles["open"] = pd.to_numeric(dataframe.iloc[:, 2], errors="coerce")
+    market_candles["high"] = pd.to_numeric(dataframe.iloc[:, 3], errors="coerce")
+    market_candles["low"] = pd.to_numeric(dataframe.iloc[:, 4], errors="coerce")
+    market_candles["close"] = pd.to_numeric(dataframe.iloc[:, 5], errors="coerce")
+    if len(dataframe.columns) > 6:
+        market_candles["volume"] = pd.to_numeric(dataframe.iloc[:, 6], errors="coerce")
+    return market_candles.dropna(subset=["time", "open", "high", "low", "close"]).reset_index(drop=True)
+
+
 def _load_backtest_market_candles_from_csv(raw_path: str) -> BacktestMarketCsvResult:
     """Load optional research-only market candles from OHLC or Sierra CSV files."""
     cleaned = (raw_path or "").strip()
@@ -202,6 +233,24 @@ def _load_backtest_market_candles_from_csv(raw_path: str) -> BacktestMarketCsvRe
     if not csv_path.exists() or not csv_path.is_file():
         return BacktestMarketCsvResult(reason=f"Backtest market CSV not found: {cleaned}")
 
+    try:
+        dataframe = pd.read_csv(csv_path)
+    except Exception:
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV could not be read: {cleaned}")
+
+    if dataframe.empty:
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV is empty: {cleaned}")
+
+    if _is_sierra_bar_summary_market_dataframe(dataframe):
+        market_candles = _market_candles_from_sierra_bar_summary_dataframe(dataframe)
+        if market_candles.empty:
+            return BacktestMarketCsvResult(reason=f"Backtest market CSV had no usable candles: {cleaned}")
+        return BacktestMarketCsvResult(
+            candles=market_candles,
+            source=f"{csv_path.name} (BAR_SUMMARY positional OHLC)",
+            reason=f"Loaded backtest market CSV from Sierra BAR_SUMMARY price columns: {csv_path.name}",
+        )
+
     importer = SierraChartImporter()
     footprint_candles = importer.load_csv(str(csv_path), SierraChartImportConfig())
     if footprint_candles:
@@ -211,14 +260,6 @@ def _load_backtest_market_candles_from_csv(raw_path: str) -> BacktestMarketCsvRe
             source=f"{csv_path.name} ({getattr(footprint_candles[0], 'source_format', 'PRICE_LEVEL_FOOTPRINT')})",
             reason=f"Loaded backtest market CSV from Sierra import: {csv_path.name}",
         )
-
-    try:
-        dataframe = pd.read_csv(csv_path)
-    except Exception:
-        return BacktestMarketCsvResult(reason=f"Backtest market CSV could not be read: {cleaned}")
-
-    if dataframe.empty:
-        return BacktestMarketCsvResult(reason=f"Backtest market CSV is empty: {cleaned}")
 
     column_map = {
         "time": _first_matching_column(dataframe, ["time", "datetime", "timestamp", "Date Time", "DateTime"]),

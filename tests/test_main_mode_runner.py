@@ -17,7 +17,7 @@ def _run_main(*args: str) -> str:
 
 def _write_sierra_bar_summary_csv(path: Path, rows: int = 75) -> None:
     lines = [
-        "Date, Time, Open, High, Low, Last, Volume, # of Trades, OHLC Avg, HLC Avg, HL Avg, Bid Volume, Ask Volume, Open, High, Low, Last, Delta, Finish, Volume, Volume / Sec"
+        "Date, Time, Open, High, Low, Last, Volume, # of Trades, OHLC Avg, HLC Avg, HL Avg, Bid Volume, Ask Volume, Open, High, Low, Last, Finish, CPL, Open, High, Low, Close, Delta, Volume, Volume / Sec"
     ]
     for index in range(rows):
         open_price = 4160.0 + index
@@ -33,7 +33,7 @@ def _write_sierra_bar_summary_csv(path: Path, rows: int = 75) -> None:
             f"{open_price:.1f}, {high_price:.1f}, {low_price:.1f}, {close_price:.1f}, "
             f"{bid_volume + ask_volume}, 50, 0, 0, 0, {bid_volume}, {ask_volume}, "
             f"{open_price:.1f}, {high_price:.1f}, {low_price:.1f}, {close_price:.1f}, "
-            f"{delta}, 0, {bid_volume + ask_volume}, 1"
+            f"0, 0, 9000.0, 99999.0, 1.0, 88888.0, {delta}, {bid_volume + ask_volume}, 1"
         )
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -150,6 +150,20 @@ def test_sierra_bar_summary_loads_as_backtest_market_candles(tmp_path: Path) -> 
     assert result.candles.iloc[0]["open"] == 4160.0
     assert result.candles.iloc[0]["close"] == 4161.5
     assert "BAR_SUMMARY" in str(result.source)
+
+
+def test_sierra_bar_summary_market_candles_use_first_price_ohlc_group(tmp_path: Path) -> None:
+    csv_path = tmp_path / "sierra_bar_summary.csv"
+    _write_sierra_bar_summary_csv(csv_path, rows=3)
+
+    result = main._load_backtest_market_candles_from_csv(str(csv_path))
+
+    assert result.candles is not None
+    first_range = result.candles.iloc[0]["high"] - result.candles.iloc[0]["low"]
+    assert first_range == 7.0
+    assert result.candles.iloc[0]["high"] == 4164.0
+    assert result.candles.iloc[0]["low"] == 4157.0
+    assert result.candles.iloc[0]["close"] == 4161.5
 
 
 def test_backtest_market_csv_can_produce_multiple_iterations(tmp_path: Path) -> None:

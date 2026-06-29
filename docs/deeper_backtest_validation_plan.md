@@ -71,6 +71,8 @@ To use a local historical OHLC CSV as the backtest market candle source, use:
 
 This still reads local historical CSV files only. It does not connect to Sierra Chart live, CME live data, MT5, a broker, or any external API.
 
+For Sierra `BAR_SUMMARY` market candles, duplicate headers are handled positionally. The first price OHLC group is used as market data: `Date`, `Time`, `Open`, `High`, `Low`, `Last`, and `Volume`. Later duplicate study columns do not overwrite the price OHLC values.
+
 ## 4. Minimum Deeper Backtest Requirements
 
 Future deeper validation should include:
@@ -108,6 +110,7 @@ The goal is not to force good results. The goal is to understand whether the sys
 - Use `--backtest-max-iterations` to run more rolling research-only iterations when enough candles exist.
 - Use `--backtest-market-csv` when the Sierra export should provide the OHLC market candles.
 - Use `--orderflow-csv` separately when the Sierra export should also provide Order Flow context.
+- Confirm Sierra `BAR_SUMMARY` market candles use the first price OHLC group, not later duplicate study columns.
 - Review total trades, blocked trades, risk behavior, and backtest quality grade.
 - Confirm quality grade improves beyond `INSUFFICIENT_DATA` only when enough iterations exist.
 

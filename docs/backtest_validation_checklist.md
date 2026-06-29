@@ -61,6 +61,8 @@ During early Sierra Chart `BAR_SUMMARY` validation, the same local Sierra CSV ca
 
 This is still local CSV backtesting only. It is not Sierra Chart live data, CME live data, MT5 login, broker execution, paper trading, or live trading.
 
+For Sierra `BAR_SUMMARY` market candles, duplicate headers are handled positionally. The first price OHLC group is used as market data: `Date`, `Time`, `Open`, `High`, `Low`, `Last`, and `Volume`. Later duplicate study columns should not overwrite the price OHLC values.
+
 ## 3. Data Quality Checklist
 
 Historical data must be clean enough to trust the result.
@@ -69,6 +71,7 @@ Historical data must be clean enough to trust the result.
 - [ ] Timestamps are correct.
 - [ ] Price columns are correct.
 - [ ] Open, high, low, and close values are valid.
+- [ ] Sierra `BAR_SUMMARY` duplicate headers use the first price OHLC group for market candles.
 - [ ] No missing data.
 - [ ] No duplicated candles.
 - [ ] No obvious price spikes caused by bad data.
