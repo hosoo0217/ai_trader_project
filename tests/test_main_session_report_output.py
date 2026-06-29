@@ -715,6 +715,7 @@ def _write_saved_change_proposal(proposal_dir: Path) -> Path:
 def test_main_records_accept_change_proposal_review(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
     _write_saved_change_proposal(proposal_dir)
 
     output = _run_main(
@@ -730,23 +731,33 @@ def test_main_records_accept_change_proposal_review(tmp_path: Path) -> None:
         str(proposal_dir),
         "--proposal-review-log-dir",
         str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
     )
 
     review_log_path = review_log_dir / "change_proposal_reviews.json"
+    plans_path = plan_dir / "implementation_plans.json"
     records = json.loads(review_log_path.read_text(encoding="utf-8"))
+    plans = json.loads(plans_path.read_text(encoding="utf-8"))
     assert "Change Proposal Review" in output
+    assert "Implementation Plan" in output
     assert "- Decision: ACCEPT" in output
     assert "- Status: ACCEPTED_FOR_FUTURE_WORK" in output
     assert "- Implementation allowed: False" in output
+    assert "- Created: True" in output
     assert "- No strategy rule was changed." in output
     assert review_log_path.exists()
+    assert plans_path.exists()
     assert records[0]["review_decision"] == "ACCEPT"
     assert records[0]["implementation_allowed"] is False
+    assert plans[0]["auto_implementation_allowed"] is False
+    assert plans[0]["human_final_approval_required"] is True
 
 
 def test_main_records_reject_change_proposal_review(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
     _write_saved_change_proposal(proposal_dir)
 
     output = _run_main(
@@ -756,12 +767,17 @@ def test_main_records_reject_change_proposal_review(tmp_path: Path) -> None:
         str(proposal_dir),
         "--proposal-review-log-dir",
         str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
     )
 
     records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
     assert "Change Proposal Review" in output
+    assert "Implementation Plan" in output
     assert "- Decision: REJECT" in output
     assert "- Status: REJECTED" in output
+    assert "No implementation plan created because proposal was not accepted" in output
+    assert not (plan_dir / "implementation_plans.json").exists()
     assert records[0]["review_decision"] == "REJECT"
     assert records[0]["accepted"] is False
 
@@ -769,6 +785,7 @@ def test_main_records_reject_change_proposal_review(tmp_path: Path) -> None:
 def test_main_records_needs_more_data_change_proposal_review(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
     _write_saved_change_proposal(proposal_dir)
 
     output = _run_main(
@@ -778,17 +795,23 @@ def test_main_records_needs_more_data_change_proposal_review(tmp_path: Path) -> 
         str(proposal_dir),
         "--proposal-review-log-dir",
         str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
     )
 
     records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
     assert "Change Proposal Review" in output
+    assert "Implementation Plan" in output
     assert "- Decision: NEEDS_MORE_DATA" in output
+    assert "No implementation plan created because proposal was not accepted" in output
+    assert not (plan_dir / "implementation_plans.json").exists()
     assert records[0]["review_status"] == "NEEDS_MORE_DATA"
 
 
 def test_main_records_needs_backtest_change_proposal_review(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
     _write_saved_change_proposal(proposal_dir)
 
     output = _run_main(
@@ -798,11 +821,16 @@ def test_main_records_needs_backtest_change_proposal_review(tmp_path: Path) -> N
         str(proposal_dir),
         "--proposal-review-log-dir",
         str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
     )
 
     records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
     assert "Change Proposal Review" in output
+    assert "Implementation Plan" in output
     assert "- Decision: NEEDS_BACKTEST" in output
+    assert "No implementation plan created because proposal was not accepted" in output
+    assert not (plan_dir / "implementation_plans.json").exists()
     assert records[0]["review_status"] == "NEEDS_BACKTEST"
 
 
@@ -840,6 +868,7 @@ def test_review_change_proposal_out_of_range_does_not_crash(tmp_path: Path) -> N
 def test_review_change_proposal_output_has_no_direct_trade_commands(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
     _write_saved_change_proposal(proposal_dir)
 
     output = _run_main(
@@ -849,6 +878,8 @@ def test_review_change_proposal_output_has_no_direct_trade_commands(tmp_path: Pa
         str(proposal_dir),
         "--proposal-review-log-dir",
         str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
     ).lower()
 
     forbidden_phrases = [
@@ -862,6 +893,53 @@ def test_review_change_proposal_output_has_no_direct_trade_commands(tmp_path: Pa
     ]
     for phrase in forbidden_phrases:
         assert phrase not in output
+
+
+def test_review_change_proposal_accept_output_contains_implementation_plan_safety_text(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    plan_dir = tmp_path / "plans"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
+    )
+
+    assert "Implementation Plan" in output
+    assert "- No strategy rule was changed." in output
+    assert "- No trade signal was created." in output
+    assert "- No implementation was applied automatically." in output
+    assert "- Plan is saved for future human-reviewed work only." in output
+    assert "- Final human approval is still required." in output
+
+
+def test_review_change_proposal_out_of_range_does_not_create_implementation_plan(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    plan_dir = tmp_path / "plans"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--change-proposal-index",
+        "99",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--implementation-plan-dir",
+        str(plan_dir),
+    )
+
+    assert "Change Proposal Review" in output
+    assert "Change proposal index is out of range" in output
+    assert "Implementation Plan" not in output
+    assert not (plan_dir / "implementation_plans.json").exists()
 
 
 def test_existing_demo_command_still_works_without_session_trend() -> None:

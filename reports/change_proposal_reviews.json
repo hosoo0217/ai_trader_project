@@ -22,5 +22,29 @@
     "blocking_reasons": [
       "Backtesting is required before this proposal can move forward"
     ]
+  },
+  {
+    "proposal_id": "proposal-backtesting-5d90e981",
+    "source_request_id": "approval-backtesting-cc5da0c5",
+    "category": "BACKTESTING",
+    "priority": "MEDIUM",
+    "title": "Review proposed BACKTESTING change",
+    "description": "Save more session history before changing strategy rules.",
+    "review_decision": "ACCEPT",
+    "review_status": "ACCEPTED_FOR_FUTURE_WORK",
+    "accepted": true,
+    "implementation_allowed": false,
+    "reviewed_by": "Hosoo",
+    "reviewed_at": "2026-06-29T11:55:06.436104+00:00",
+    "notes": "Accepted for future work only, create implementation plan",
+    "human_review_required": true,
+    "auto_implementation_allowed": false,
+    "reasons": [
+      "Change proposal review records review outcomes only",
+      "Final implementation must remain separate and human-controlled",
+      "Proposal accepted for future reviewed work only",
+      "Acceptance does not allow automatic implementation"
+    ],
+    "blocking_reasons": []
   }
 ]

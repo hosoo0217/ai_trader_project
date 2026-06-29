@@ -25,6 +25,11 @@ from ai.change_proposal_review import (
     ChangeProposalReviewResult,
     ChangeProposalReviewWorkflow,
 )
+from ai.implementation_plan import (
+    ImplementationPlanConfig,
+    ImplementationPlanResult,
+    ImplementationPlanWorkflow,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -86,6 +91,11 @@ from storage.change_proposal_review_log import (
     ChangeProposalReviewLogConfig,
     ChangeProposalReviewLogResult,
     ChangeProposalReviewLogStore,
+)
+from storage.implementation_plan_store import (
+    ImplementationPlanStore,
+    ImplementationPlanStoreConfig,
+    ImplementationPlanStoreResult,
 )
 from storage.trade_journal import TradeJournal
 
@@ -279,6 +289,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--proposal-review-log-dir",
         default="reports",
         help="Output folder for change_proposal_reviews.json",
+    )
+    parser.add_argument(
+        "--implementation-plan-dir",
+        default="reports",
+        help="Output folder for implementation_plans.json",
     )
     return parser
 
@@ -1233,6 +1248,105 @@ def _print_change_proposal_review(
     print(f"- Blocking reasons: {blocking_text}")
 
 
+def _print_implementation_plan(
+    plan_result: ImplementationPlanResult | None,
+    store_result: ImplementationPlanStoreResult | None,
+    message: str | None = None,
+) -> None:
+    """Print implementation plan output without applying implementation."""
+    print("\nImplementation Plan")
+    if message:
+        print(f"- Message: {message}")
+
+    plan = plan_result.plan if plan_result is not None else None
+    reasons = plan_result.reasons if plan_result is not None else []
+    blocking_reasons = plan_result.blocking_reasons if plan_result is not None else []
+    if store_result is not None and store_result.blocking_reasons:
+        blocking_reasons = list(blocking_reasons) + list(store_result.blocking_reasons)
+
+    reasons_text = "; ".join(reasons) if reasons else "None"
+    blocking_text = "; ".join(blocking_reasons) if blocking_reasons else "None"
+    proposed_steps = "; ".join(plan.proposed_steps) if plan is not None and plan.proposed_steps else "None"
+    required_tests = "; ".join(plan.required_tests) if plan is not None and plan.required_tests else "None"
+    risk_checks = "; ".join(plan.risk_checks) if plan is not None and plan.risk_checks else "None"
+
+    print(f"- Created: {plan_result.created if plan_result is not None else False}")
+    print(f"- Plan ID: {plan.plan_id if plan is not None else 'N/A'}")
+    print(f"- Source proposal ID: {plan.source_proposal_id if plan is not None else 'N/A'}")
+    print(f"- Title: {plan.title if plan is not None else 'N/A'}")
+    print(f"- Category: {plan.category if plan is not None else 'N/A'}")
+    print(f"- Priority: {plan.priority if plan is not None else 'N/A'}")
+    print(f"- Objective: {plan.objective if plan is not None else 'N/A'}")
+    print(f"- Proposed steps: {proposed_steps}")
+    print(f"- Required tests: {required_tests}")
+    print(f"- Risk checks: {risk_checks}")
+    print(f"- Rollback plan: {plan.rollback_plan if plan is not None else 'N/A'}")
+    print(f"- Status: {plan.status if plan is not None else (plan_result.status if plan_result else 'UNKNOWN')}")
+    print(f"- Human final approval required: {plan.human_final_approval_required if plan is not None else True}")
+    print(f"- Auto implementation allowed: {plan.auto_implementation_allowed if plan is not None else False}")
+    print(f"- Saved: {store_result.saved if store_result is not None else False}")
+    print(f"- Plans path: {store_result.plans_path if store_result is not None else 'None'}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- No implementation was applied automatically.")
+    print("- Plan is saved for future human-reviewed work only.")
+    print("- Final human approval is still required.")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
+def _create_and_store_implementation_plan(
+    proposal: object | None,
+    review_result: ChangeProposalReviewResult,
+    plan_config: ImplementationPlanStoreConfig,
+) -> None:
+    """Create a future implementation plan only for accepted reviews."""
+    if not review_result.accepted:
+        plan_result = ImplementationPlanResult(
+            plan=None,
+            created=False,
+            status="NO_ACCEPTED_REVIEW",
+            reasons=["No implementation plan created because proposal was not accepted"],
+            blocking_reasons=[],
+        )
+        _print_implementation_plan(
+            plan_result,
+            None,
+            message="No implementation plan created because proposal was not accepted",
+        )
+        return
+
+    try:
+        plan_result = ImplementationPlanWorkflow().create_from_review(
+            proposal,
+            review_result,
+            ImplementationPlanConfig(),
+        )
+    except Exception as exc:
+        plan_result = ImplementationPlanResult(
+            plan=None,
+            created=False,
+            status="UNKNOWN",
+            reasons=["Implementation plan could not be created"],
+            blocking_reasons=[f"Implementation plan workflow failed: {exc}"],
+        )
+
+    store_result = None
+    if plan_result.plan is not None:
+        try:
+            store_result = ImplementationPlanStore().append_plan(plan_result.plan, plan_config)
+        except Exception as exc:
+            store_result = ImplementationPlanStoreResult(
+                saved=False,
+                plans_path=None,
+                total_plans=0,
+                reasons=["Implementation plan store was requested"],
+                blocking_reasons=[f"Implementation plan could not be saved: {exc}"],
+            )
+
+    _print_implementation_plan(plan_result, store_result)
+
+
 def _review_saved_change_proposal(
     review_decision: str,
     proposal_index: int,
@@ -1240,6 +1354,7 @@ def _review_saved_change_proposal(
     notes: str | None,
     proposal_config: ChangeProposalStoreConfig,
     review_log_config: ChangeProposalReviewLogConfig,
+    implementation_plan_config: ImplementationPlanStoreConfig,
 ) -> None:
     """Review one saved proposal without implementing it."""
     try:
@@ -1303,6 +1418,7 @@ def _review_saved_change_proposal(
         )
 
     _print_change_proposal_review(proposal, review_result, log_result)
+    _create_and_store_implementation_plan(proposal, review_result, implementation_plan_config)
 
 
 def _record_human_approval_decision(
@@ -1937,6 +2053,9 @@ def main(args: list[str] | None = None) -> None:
     proposal_review_log_config = ChangeProposalReviewLogConfig(
         output_dir=getattr(parsed_args, "proposal_review_log_dir", "reports") or "reports",
     )
+    implementation_plan_config = ImplementationPlanStoreConfig(
+        output_dir=getattr(parsed_args, "implementation_plan_dir", "reports") or "reports",
+    )
 
     if review_change_proposal:
         _review_saved_change_proposal(
@@ -1946,6 +2065,7 @@ def main(args: list[str] | None = None) -> None:
             proposal_review_notes,
             proposal_store_config,
             proposal_review_log_config,
+            implementation_plan_config,
         )
         return
 
