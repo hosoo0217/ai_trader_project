@@ -43,6 +43,24 @@ For deeper research-only backtest validation, the CLI can limit or expand rollin
 
 More iterations can help reduce `INSUFFICIENT_DATA` when enough historical candles exist. This is still historical backtesting only, not paper trading or live trading.
 
+To use a local OHLC CSV as the historical market candle source for backtesting:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --profile apex --backtest-market-csv private_data/sierra_chart/gc_footprint_test.csv --backtest-max-iterations 25
+```
+
+Use `--backtest-market-csv` for research-only historical market candles.
+
+Use `--orderflow-csv` for Order Flow context.
+
+During early Sierra Chart `BAR_SUMMARY` validation, the same local Sierra CSV can be used for both:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --profile apex --backtest-market-csv private_data/sierra_chart/gc_footprint_test.csv --orderflow-csv private_data/sierra_chart/gc_footprint_test.csv --backtest-max-iterations 25
+```
+
+This is still local CSV backtesting only. It is not Sierra Chart live data, CME live data, MT5 login, broker execution, paper trading, or live trading.
+
 ## 3. Data Quality Checklist
 
 Historical data must be clean enough to trust the result.

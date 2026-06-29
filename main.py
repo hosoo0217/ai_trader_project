@@ -123,6 +123,15 @@ class OrderFlowCsvDemoResult:
     data_quality: OrderFlowDataQualityResult | None = None
 
 
+@dataclass
+class BacktestMarketCsvResult:
+    """Optional market candles loaded from a research-only CSV file."""
+
+    candles: pd.DataFrame | None = None
+    source: str | None = None
+    reason: str | None = None
+
+
 def _load_candles(path: Path) -> pd.DataFrame:
     """Load sample candles and fall back to a safe empty frame if needed."""
     try:
@@ -137,6 +146,125 @@ def _load_candles(path: Path) -> pd.DataFrame:
                 candles[column] = 0.0
 
     return candles
+
+
+def _first_matching_column(dataframe: pd.DataFrame, aliases: list[str]) -> str | None:
+    """Find the first column matching aliases while tolerating duplicate headers."""
+    normalized_aliases = {_normalize_market_column(alias) for alias in aliases}
+    for column in dataframe.columns:
+        if _normalize_market_column(column) in normalized_aliases:
+            return str(column)
+    return None
+
+
+def _normalize_market_column(name: object) -> str:
+    """Normalize CSV headers for market candle loading."""
+    base_name = str(name).strip()
+    if "." in base_name:
+        prefix, suffix = base_name.rsplit(".", 1)
+        if suffix.isdigit():
+            base_name = prefix
+    return base_name.lower().replace(" ", "").replace("_", "")
+
+
+def _series_from_market_column(dataframe: pd.DataFrame, column: str) -> pd.Series:
+    """Read a DataFrame column safely when duplicate headers are present."""
+    values = dataframe[column]
+    if isinstance(values, pd.DataFrame):
+        return values.iloc[:, 0]
+    return values
+
+
+def _candles_from_footprint_candles(candles: list[object]) -> pd.DataFrame:
+    """Convert imported Sierra candles into the market OHLC DataFrame shape."""
+    rows: list[dict[str, object]] = []
+    for candle in candles:
+        rows.append(
+            {
+                "time": getattr(candle, "time", None),
+                "open": getattr(candle, "open", None),
+                "high": getattr(candle, "high", None),
+                "low": getattr(candle, "low", None),
+                "close": getattr(candle, "close", None),
+                "volume": getattr(candle, "reported_volume", None),
+            }
+        )
+    return pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
+
+
+def _load_backtest_market_candles_from_csv(raw_path: str) -> BacktestMarketCsvResult:
+    """Load optional research-only market candles from OHLC or Sierra CSV files."""
+    cleaned = (raw_path or "").strip()
+    if not cleaned:
+        return BacktestMarketCsvResult()
+
+    csv_path = _resolve_orderflow_csv_path(cleaned)
+    if not csv_path.exists() or not csv_path.is_file():
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV not found: {cleaned}")
+
+    importer = SierraChartImporter()
+    footprint_candles = importer.load_csv(str(csv_path), SierraChartImportConfig())
+    if footprint_candles:
+        market_candles = _candles_from_footprint_candles(footprint_candles)
+        return BacktestMarketCsvResult(
+            candles=market_candles,
+            source=f"{csv_path.name} ({getattr(footprint_candles[0], 'source_format', 'PRICE_LEVEL_FOOTPRINT')})",
+            reason=f"Loaded backtest market CSV from Sierra import: {csv_path.name}",
+        )
+
+    try:
+        dataframe = pd.read_csv(csv_path)
+    except Exception:
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV could not be read: {cleaned}")
+
+    if dataframe.empty:
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV is empty: {cleaned}")
+
+    column_map = {
+        "time": _first_matching_column(dataframe, ["time", "datetime", "timestamp", "Date Time", "DateTime"]),
+        "date": _first_matching_column(dataframe, ["date", "Date"]),
+        "open": _first_matching_column(dataframe, ["open", "Open"]),
+        "high": _first_matching_column(dataframe, ["high", "High"]),
+        "low": _first_matching_column(dataframe, ["low", "Low"]),
+        "close": _first_matching_column(dataframe, ["close", "Close", "last", "Last"]),
+        "volume": _first_matching_column(dataframe, ["volume", "Volume"]),
+    }
+    has_time = column_map["time"] is not None or (column_map["date"] is not None and column_map["time"] is not None)
+    required = ["open", "high", "low", "close"]
+    if not has_time or any(column_map[field] is None for field in required):
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV missing required OHLC columns: {cleaned}")
+
+    market_candles = pd.DataFrame()
+    if column_map["date"] and column_map["time"] and column_map["date"] != column_map["time"]:
+        dates = _series_from_market_column(dataframe, column_map["date"])
+        times = _series_from_market_column(dataframe, column_map["time"])
+        market_candles["time"] = [
+            f"{str(date).strip()} {str(time).strip()}".strip()
+            for date, time in zip(dates, times)
+        ]
+    else:
+        market_candles["time"] = _series_from_market_column(dataframe, str(column_map["time"]))
+
+    for field in required:
+        market_candles[field] = pd.to_numeric(
+            _series_from_market_column(dataframe, str(column_map[field])),
+            errors="coerce",
+        )
+    if column_map["volume"] is not None:
+        market_candles["volume"] = pd.to_numeric(
+            _series_from_market_column(dataframe, column_map["volume"]),
+            errors="coerce",
+        )
+
+    market_candles = market_candles.dropna(subset=["time", "open", "high", "low", "close"])
+    if market_candles.empty:
+        return BacktestMarketCsvResult(reason=f"Backtest market CSV had no usable candles: {cleaned}")
+
+    return BacktestMarketCsvResult(
+        candles=market_candles.reset_index(drop=True),
+        source=csv_path.name,
+        reason=f"Loaded backtest market CSV: {csv_path.name}",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -178,6 +306,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=None,
         help="Optional maximum number of rolling backtest iterations to run",
+    )
+    parser.add_argument(
+        "--backtest-market-csv",
+        default="",
+        help="Optional OHLC CSV path to use as market candles for research-only backtests",
     )
     parser.add_argument(
         "--show-trace",
@@ -2051,6 +2184,7 @@ def _run_backtest_scenario(
     show_trace: bool,
     show_orderflow: bool,
     orderflow_csv_result: OrderFlowCsvDemoResult,
+    backtest_market_csv_result: BacktestMarketCsvResult,
     orderflow_replay_result: OrderFlowReplayResult | None,
     show_orderflow_replay_steps: bool,
     export_orderflow_report: bool,
@@ -2067,13 +2201,21 @@ def _run_backtest_scenario(
     print(f"Scenario: {name}")
     print("-" * 24)
 
-    data_path = _get_scenario_data_path(name)
-    if not data_path.exists():
-        print(f"- File not found: {data_path.name}")
+    if backtest_market_csv_result.reason and backtest_market_csv_result.candles is None:
+        print(f"- {backtest_market_csv_result.reason}")
         print("- Safe fallback: no backtest run")
         return
 
-    candles = _load_candles(data_path)
+    if backtest_market_csv_result.candles is not None:
+        candles = backtest_market_csv_result.candles.copy()
+        print(f"- Backtest market candles: {backtest_market_csv_result.source}")
+    else:
+        data_path = _get_scenario_data_path(name)
+        if not data_path.exists():
+            print(f"- File not found: {data_path.name}")
+            print("- Safe fallback: no backtest run")
+            return
+        candles = _load_candles(data_path)
     journal = TradeJournal()
     broker_state = _create_broker_state(broker_config)
     runner = BacktestRunner()
@@ -2309,6 +2451,9 @@ def main(args: list[str] | None = None) -> None:
     show_trace = bool(getattr(parsed_args, "show_trace", False))
     show_orderflow = bool(getattr(parsed_args, "show_orderflow", False))
     orderflow_csv_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
+    backtest_market_csv_result = _load_backtest_market_candles_from_csv(
+        getattr(parsed_args, "backtest_market_csv", "")
+    )
     orderflow_replay_result = _build_orderflow_replay_from_csv(getattr(parsed_args, "orderflow_replay_csv", ""))
     show_orderflow_replay_steps = bool(getattr(parsed_args, "show_orderflow_replay_steps", False))
     export_orderflow_report = bool(getattr(parsed_args, "export_orderflow_report", False))
@@ -2519,6 +2664,7 @@ def main(args: list[str] | None = None) -> None:
                     show_trace,
                     show_orderflow,
                     orderflow_csv_result,
+                    backtest_market_csv_result,
                     orderflow_replay_result,
                     show_orderflow_replay_steps,
                     export_orderflow_report,
@@ -2578,6 +2724,7 @@ def main(args: list[str] | None = None) -> None:
             show_trace,
             show_orderflow,
             orderflow_csv_result,
+            backtest_market_csv_result,
             orderflow_replay_result,
             show_orderflow_replay_steps,
             export_orderflow_report,
