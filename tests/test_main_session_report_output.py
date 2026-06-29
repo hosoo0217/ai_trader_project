@@ -480,6 +480,7 @@ def test_session_trend_coach_output_has_no_direct_trade_commands(tmp_path: Path)
 def test_main_records_approve_human_approval_decision(tmp_path: Path) -> None:
     history_dir = tmp_path / "history"
     log_dir = tmp_path / "approval_logs"
+    proposal_dir = tmp_path / "proposals"
     history_dir.mkdir(parents=True)
     (history_dir / "session_history.json").write_text(
         json.dumps(
@@ -504,21 +505,33 @@ def test_main_records_approve_human_approval_decision(tmp_path: Path) -> None:
         "Review later before changing rules",
         "--approval-log-dir",
         str(log_dir),
+        "--proposal-dir",
+        str(proposal_dir),
     )
 
     log_path = log_dir / "human_approval_log.json"
+    proposals_path = proposal_dir / "change_proposals.json"
     records = json.loads(log_path.read_text(encoding="utf-8"))
+    proposals = json.loads(proposals_path.read_text(encoding="utf-8"))
     assert "Human Approval Decision" in output
+    assert "Approved Change Proposal" in output
     assert "- Decision: APPROVE" in output
+    assert "- Created: True" in output
     assert "- No strategy rule was changed." in output
     assert "- No trade signal was created." in output
+    assert "Proposal is saved for future human review only" in output
+    assert "Final human review is still required" in output
     assert log_path.exists()
+    assert proposals_path.exists()
     assert records[0]["decision"] == "APPROVE"
+    assert proposals[0]["auto_implementation_allowed"] is False
+    assert proposals[0]["human_review_required"] is True
 
 
 def test_main_records_reject_human_approval_decision(tmp_path: Path) -> None:
     history_dir = tmp_path / "history"
     log_dir = tmp_path / "approval_logs"
+    proposal_dir = tmp_path / "proposals"
     history_dir.mkdir(parents=True)
     (history_dir / "session_history.json").write_text(
         json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
@@ -537,18 +550,24 @@ def test_main_records_reject_human_approval_decision(tmp_path: Path) -> None:
         "Not enough data yet",
         "--approval-log-dir",
         str(log_dir),
+        "--proposal-dir",
+        str(proposal_dir),
     )
 
     records = json.loads((log_dir / "human_approval_log.json").read_text(encoding="utf-8"))
     assert "Human Approval Decision" in output
+    assert "Approved Change Proposal" in output
     assert "- Decision: REJECT" in output
+    assert "No change proposal created because decision was not approved" in output
     assert records[0]["decision"] == "REJECT"
     assert records[0]["approved"] is False
+    assert not (proposal_dir / "change_proposals.json").exists()
 
 
 def test_main_records_needs_review_human_approval_decision(tmp_path: Path) -> None:
     history_dir = tmp_path / "history"
     log_dir = tmp_path / "approval_logs"
+    proposal_dir = tmp_path / "proposals"
     history_dir.mkdir(parents=True)
     (history_dir / "session_history.json").write_text(
         json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
@@ -567,13 +586,18 @@ def test_main_records_needs_review_human_approval_decision(tmp_path: Path) -> No
         "Need more backtest sessions",
         "--approval-log-dir",
         str(log_dir),
+        "--proposal-dir",
+        str(proposal_dir),
     )
 
     records = json.loads((log_dir / "human_approval_log.json").read_text(encoding="utf-8"))
     assert "Human Approval Decision" in output
+    assert "Approved Change Proposal" in output
     assert "- Decision: NEEDS_REVIEW" in output
+    assert "No change proposal created because decision was not approved" in output
     assert records[0]["decision"] == "NEEDS_REVIEW"
     assert records[0]["approved"] is False
+    assert not (proposal_dir / "change_proposals.json").exists()
 
 
 def test_approval_decision_without_session_trend_does_not_crash() -> None:
@@ -633,6 +657,30 @@ def test_invalid_approval_decision_does_not_crash(tmp_path: Path) -> None:
     assert "- Decision: UNKNOWN" in output
     assert records[0]["decision"] == "UNKNOWN"
     assert records[0]["approved"] is False
+
+
+def test_approve_change_proposal_with_missing_history_does_not_crash(tmp_path: Path) -> None:
+    history_dir = tmp_path / "missing_history"
+    log_dir = tmp_path / "approval_logs"
+    proposal_dir = tmp_path / "proposals"
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "APPROVE",
+        "--approval-log-dir",
+        str(log_dir),
+        "--proposal-dir",
+        str(proposal_dir),
+    )
+
+    proposals_path = proposal_dir / "change_proposals.json"
+    assert "Session History Trend" in output
+    assert "Approved Change Proposal" in output
+    assert "- Created: True" in output
+    assert proposals_path.exists()
 
 
 def test_existing_demo_command_still_works_without_session_trend() -> None:

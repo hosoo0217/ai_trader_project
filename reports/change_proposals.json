@@ -1,0 +1,25 @@
+[
+  {
+    "proposal_id": "proposal-backtesting-5d90e981",
+    "source_request_id": "approval-backtesting-cc5da0c5",
+    "category": "BACKTESTING",
+    "priority": "MEDIUM",
+    "title": "Review proposed BACKTESTING change",
+    "description": "Save more session history before changing strategy rules.",
+    "reason": "Human approval workflow records review decisions only",
+    "risk": "Risk must be reviewed again before any implementation.",
+    "proposed_change": "Prepare a human-reviewed change proposal from this approved research note. Do not implement code or strategy rules until final review is complete.",
+    "status": "PROPOSED",
+    "human_review_required": true,
+    "auto_implementation_allowed": false,
+    "reasons": [
+      "Change proposals are planning records only",
+      "Final human review is required before implementation",
+      "No strategy rules are changed automatically",
+      "Human approval workflow records review decisions only",
+      "approval does not automatically change strategy rules",
+      "A human approved this future reviewed change proposal"
+    ],
+    "blocking_reasons": []
+  }
+]

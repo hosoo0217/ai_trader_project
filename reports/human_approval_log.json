@@ -18,5 +18,24 @@
     "blocking_reasons": [
       "Human marked this suggestion as needing more review"
     ]
+  },
+  {
+    "request_id": "approval-backtesting-cc5da0c5",
+    "suggestion_category": "BACKTESTING",
+    "suggestion_priority": "MEDIUM",
+    "suggestion_text": "Save more session history before changing strategy rules.",
+    "request_status": "APPROVED",
+    "decision": "APPROVE",
+    "approved": true,
+    "allowed_to_apply": true,
+    "decided_by": "Hosoo",
+    "decided_at": "2026-06-29T10:58:41.581853+00:00",
+    "notes": "Approved as future proposal only, review before implementation",
+    "reasons": [
+      "Human approval workflow records review decisions only",
+      "approval does not automatically change strategy rules",
+      "A human approved this future reviewed change proposal"
+    ],
+    "blocking_reasons": []
   }
 ]

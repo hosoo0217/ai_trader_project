@@ -19,6 +19,7 @@ from ai.strategy_approval_pipeline import (
     StrategyApprovalPipelineResult,
 )
 from ai.human_approval import HumanApprovalConfig, HumanApprovalResult, HumanApprovalWorkflow
+from ai.change_proposal import ChangeProposalConfig, ChangeProposalResult, ChangeProposalEngine
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -75,6 +76,7 @@ from storage.session_report_exporter import (
 from storage.session_history import SessionHistoryConfig, SessionHistoryStore, SessionHistorySummary
 from storage.session_trend import SessionTrendAnalyzer, SessionTrendConfig, SessionTrendResult
 from storage.human_approval_log import HumanApprovalLogConfig, HumanApprovalLogResult, HumanApprovalLogStore
+from storage.change_proposal_store import ChangeProposalStoreConfig, ChangeProposalStoreResult, ChangeProposalStore
 from storage.trade_journal import TradeJournal
 
 
@@ -236,6 +238,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--approval-log-dir",
         default="reports",
         help="Output folder for human_approval_log.json",
+    )
+    parser.add_argument(
+        "--proposal-dir",
+        default="reports",
+        help="Output folder for change_proposals.json",
     )
     return parser
 
@@ -1023,6 +1030,128 @@ def _print_human_approval_decision(
     print(f"- Blocking reasons: {blocking_text}")
 
 
+def _print_approved_change_proposal(
+    proposal_result: ChangeProposalResult | None,
+    store_result: ChangeProposalStoreResult | None,
+    message: str | None = None,
+) -> None:
+    """Print approved change proposal output without applying changes."""
+    print("\nApproved Change Proposal")
+    if message:
+        print(f"- Message: {message}")
+
+    proposal = proposal_result.proposal if proposal_result is not None else None
+    reasons = proposal_result.reasons if proposal_result is not None else []
+    blocking_reasons = proposal_result.blocking_reasons if proposal_result is not None else []
+    if store_result is not None and store_result.blocking_reasons:
+        blocking_reasons = list(blocking_reasons) + list(store_result.blocking_reasons)
+
+    reasons_text = "; ".join(reasons) if reasons else "None"
+    blocking_text = "; ".join(blocking_reasons) if blocking_reasons else "None"
+    print(f"- Created: {proposal_result.created if proposal_result is not None else False}")
+    print(f"- Proposal ID: {proposal.proposal_id if proposal is not None else 'N/A'}")
+    print(f"- Source request ID: {proposal.source_request_id if proposal is not None else 'N/A'}")
+    print(f"- Category: {proposal.category if proposal is not None else 'N/A'}")
+    print(f"- Priority: {proposal.priority if proposal is not None else 'N/A'}")
+    print(f"- Title: {proposal.title if proposal is not None else 'N/A'}")
+    print(f"- Description: {proposal.description if proposal is not None else 'N/A'}")
+    print(f"- Reason: {proposal.reason if proposal is not None else 'N/A'}")
+    print(f"- Risk: {proposal.risk if proposal is not None else 'N/A'}")
+    print(f"- Proposed change: {proposal.proposed_change if proposal is not None else 'N/A'}")
+    print(f"- Status: {proposal.status if proposal is not None else (proposal_result.status if proposal_result else 'UNKNOWN')}")
+    print(f"- Human review required: {proposal.human_review_required if proposal is not None else True}")
+    print(f"- Auto implementation allowed: {proposal.auto_implementation_allowed if proposal is not None else False}")
+    print(f"- Saved: {store_result.saved if store_result is not None else False}")
+    print(f"- Proposals path: {store_result.proposals_path if store_result is not None else 'None'}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- Proposal is saved for future human review only.")
+    print("- Final human review is still required.")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
+def _approval_record_from_decision(
+    request: object | None,
+    decision_result: HumanApprovalResult,
+    log_result: HumanApprovalLogResult | None,
+    log_config: HumanApprovalLogConfig,
+) -> dict | None:
+    """Use the saved approval log record when available."""
+    if log_result is not None and log_result.saved:
+        records = HumanApprovalLogStore().load_log(log_config)
+        if records:
+            return records[-1]
+
+    decision = decision_result.decision
+    return {
+        "request_id": getattr(request, "request_id", None),
+        "suggestion_category": getattr(request, "suggestion_category", "UNKNOWN"),
+        "suggestion_priority": getattr(request, "suggestion_priority", "UNKNOWN"),
+        "suggestion_text": getattr(request, "suggestion_text", "UNKNOWN"),
+        "request_status": getattr(request, "status", decision_result.status),
+        "decision": getattr(decision, "decision", "UNKNOWN") if decision is not None else "UNKNOWN",
+        "approved": decision_result.approved,
+        "allowed_to_apply": decision_result.allowed_to_apply,
+        "reasons": list(decision_result.reasons),
+        "blocking_reasons": list(decision_result.blocking_reasons),
+    }
+
+
+def _create_and_store_change_proposal(
+    request: object | None,
+    decision_result: HumanApprovalResult,
+    log_result: HumanApprovalLogResult | None,
+    log_config: HumanApprovalLogConfig,
+    proposal_config: ChangeProposalStoreConfig,
+) -> None:
+    """Create a future proposal only for approved decisions."""
+    if not decision_result.approved:
+        proposal_result = ChangeProposalResult(
+            proposal=None,
+            created=False,
+            status="NO_APPROVED_DECISION",
+            reasons=["No change proposal created because decision was not approved"],
+            blocking_reasons=[],
+        )
+        _print_approved_change_proposal(
+            proposal_result,
+            None,
+            message="No change proposal created because decision was not approved",
+        )
+        return
+
+    approval_record = _approval_record_from_decision(request, decision_result, log_result, log_config)
+    try:
+        proposal_result = ChangeProposalEngine().create_from_approval_record(
+            approval_record,
+            ChangeProposalConfig(),
+        )
+    except Exception as exc:
+        proposal_result = ChangeProposalResult(
+            proposal=None,
+            created=False,
+            status="UNKNOWN",
+            reasons=["Approved change proposal could not be created"],
+            blocking_reasons=[f"Change proposal engine failed: {exc}"],
+        )
+
+    store_result = None
+    if proposal_result.proposal is not None:
+        try:
+            store_result = ChangeProposalStore().append_proposal(proposal_result.proposal, proposal_config)
+        except Exception as exc:
+            store_result = ChangeProposalStoreResult(
+                saved=False,
+                proposals_path=None,
+                total_proposals=0,
+                reasons=["Change proposal store was requested"],
+                blocking_reasons=[f"Change proposal could not be saved: {exc}"],
+            )
+
+    _print_approved_change_proposal(proposal_result, store_result)
+
+
 def _record_human_approval_decision(
     approval_result: StrategyApprovalPipelineResult,
     approval_decision: str,
@@ -1030,6 +1159,7 @@ def _record_human_approval_decision(
     decided_by: str | None,
     notes: str | None,
     log_config: HumanApprovalLogConfig,
+    proposal_config: ChangeProposalStoreConfig,
 ) -> None:
     """Record one approval decision without changing strategy behavior."""
     if not approval_result.created_requests:
@@ -1082,6 +1212,7 @@ def _record_human_approval_decision(
         )
 
     _print_human_approval_decision(request, decision_result, log_result)
+    _create_and_store_change_proposal(request, decision_result, log_result, log_config, proposal_config)
 
 
 def _show_session_trend(
@@ -1091,6 +1222,7 @@ def _show_session_trend(
     approval_decided_by: str | None = None,
     approval_notes: str | None = None,
     approval_log_config: HumanApprovalLogConfig | None = None,
+    proposal_store_config: ChangeProposalStoreConfig | None = None,
 ) -> None:
     """Load saved session history and print trend analysis safely."""
     history = SessionHistoryStore().load_history(session_history_config)
@@ -1120,6 +1252,7 @@ def _show_session_trend(
             approval_decided_by,
             approval_notes,
             approval_log_config or HumanApprovalLogConfig(),
+            proposal_store_config or ChangeProposalStoreConfig(),
         )
 
 
@@ -1641,6 +1774,9 @@ def main(args: list[str] | None = None) -> None:
     approval_log_config = HumanApprovalLogConfig(
         output_dir=getattr(parsed_args, "approval_log_dir", "reports") or "reports",
     )
+    proposal_store_config = ChangeProposalStoreConfig(
+        output_dir=getattr(parsed_args, "proposal_dir", "reports") or "reports",
+    )
 
     if approval_decision and not show_session_trend:
         print("Session trend is required to create approval requests")
@@ -1670,6 +1806,7 @@ def main(args: list[str] | None = None) -> None:
             approval_decided_by=approval_decided_by,
             approval_notes=approval_notes,
             approval_log_config=approval_log_config,
+            proposal_store_config=proposal_store_config,
         )
         return
 
@@ -1722,6 +1859,7 @@ def main(args: list[str] | None = None) -> None:
             approval_decided_by=approval_decided_by,
             approval_notes=approval_notes,
             approval_log_config=approval_log_config,
+            proposal_store_config=proposal_store_config,
         )
 
     if scenario == "all":
