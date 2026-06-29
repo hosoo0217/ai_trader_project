@@ -1,0 +1,25 @@
+[
+  {
+    "plan_id": "plan-backtesting-0dc73eb8",
+    "source_proposal_id": "proposal-backtesting-5d90e981",
+    "title": "Implementation plan for Review proposed BACKTESTING change",
+    "category": "BACKTESTING",
+    "priority": "MEDIUM",
+    "final_review_decision": "APPROVE_FOR_WORK",
+    "final_review_status": "APPROVED_FOR_FUTURE_WORK",
+    "approved_for_work": true,
+    "implementation_allowed_now": false,
+    "reviewed_by": "Hosoo",
+    "reviewed_at": "2026-06-29T12:26:54.890873+00:00",
+    "notes": "Approved for future work only, no automatic implementation",
+    "human_final_approval_required": true,
+    "auto_implementation_allowed": false,
+    "reasons": [
+      "Final implementation review records a human decision only",
+      "Implementation must remain separate, reviewed, tested, and committed manually",
+      "Plan approved for future human-reviewed implementation work only",
+      "Approval does not allow immediate or automatic implementation"
+    ],
+    "blocking_reasons": []
+  }
+]

@@ -712,6 +712,36 @@ def _write_saved_change_proposal(proposal_dir: Path) -> Path:
     return proposals_path
 
 
+def _write_saved_implementation_plan(plan_dir: Path) -> Path:
+    plan_dir.mkdir(parents=True)
+    plans_path = plan_dir / "implementation_plans.json"
+    plans_path.write_text(
+        json.dumps(
+            [
+                {
+                    "plan_id": "plan-risk-management-12345678",
+                    "source_proposal_id": "proposal-risk-management-12345678",
+                    "title": "Implementation plan for risk management review",
+                    "category": "RISK_MANAGEMENT",
+                    "priority": "HIGH",
+                    "objective": "Plan a future human-reviewed risk management change.",
+                    "proposed_steps": ["Review current strategy logic", "Run backtest"],
+                    "required_tests": ["unit tests", "backtest comparison"],
+                    "risk_checks": ["drawdown check", "capital protection check"],
+                    "rollback_plan": "Revert code change, restore previous config, and rerun tests.",
+                    "status": "PLANNED",
+                    "human_final_approval_required": True,
+                    "auto_implementation_allowed": False,
+                    "reasons": ["Implementation plans are planning records only"],
+                    "blocking_reasons": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return plans_path
+
+
 def test_main_records_accept_change_proposal_review(tmp_path: Path) -> None:
     proposal_dir = tmp_path / "proposals"
     review_log_dir = tmp_path / "review_logs"
@@ -940,6 +970,161 @@ def test_review_change_proposal_out_of_range_does_not_create_implementation_plan
     assert "Change proposal index is out of range" in output
     assert "Implementation Plan" not in output
     assert not (plan_dir / "implementation_plans.json").exists()
+
+
+def test_main_records_approve_for_work_implementation_final_review(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "APPROVE_FOR_WORK",
+        "--implementation-plan-index",
+        "0",
+        "--implementation-reviewed-by",
+        "Hosoo",
+        "--implementation-review-notes",
+        "Approved for future work only",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    log_path = final_review_log_dir / "implementation_final_reviews.json"
+    records = json.loads(log_path.read_text(encoding="utf-8"))
+    assert "Implementation Final Review" in output
+    assert "- Decision: APPROVE_FOR_WORK" in output
+    assert "- Status: APPROVED_FOR_FUTURE_WORK" in output
+    assert "- Approved for work: True" in output
+    assert "- Implementation allowed now: False" in output
+    assert "- No strategy rule was changed." in output
+    assert log_path.exists()
+    assert records[0]["final_review_decision"] == "APPROVE_FOR_WORK"
+    assert records[0]["implementation_allowed_now"] is False
+
+
+def test_main_records_reject_implementation_final_review(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "REJECT",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    records = json.loads((final_review_log_dir / "implementation_final_reviews.json").read_text(encoding="utf-8"))
+    assert "Implementation Final Review" in output
+    assert "- Decision: REJECT" in output
+    assert "- Status: REJECTED" in output
+    assert records[0]["final_review_decision"] == "REJECT"
+    assert records[0]["approved_for_work"] is False
+
+
+def test_main_records_needs_backtest_implementation_final_review(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "NEEDS_BACKTEST",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    records = json.loads((final_review_log_dir / "implementation_final_reviews.json").read_text(encoding="utf-8"))
+    assert "Implementation Final Review" in output
+    assert "- Decision: NEEDS_BACKTEST" in output
+    assert "- Status: NEEDS_BACKTEST" in output
+    assert records[0]["final_review_status"] == "NEEDS_BACKTEST"
+
+
+def test_main_records_needs_more_review_implementation_final_review(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "NEEDS_MORE_REVIEW",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    records = json.loads((final_review_log_dir / "implementation_final_reviews.json").read_text(encoding="utf-8"))
+    assert "Implementation Final Review" in output
+    assert "- Decision: NEEDS_MORE_REVIEW" in output
+    assert "- Status: NEEDS_MORE_REVIEW" in output
+    assert records[0]["final_review_status"] == "NEEDS_MORE_REVIEW"
+
+
+def test_final_review_implementation_plan_missing_file_does_not_crash(tmp_path: Path) -> None:
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "APPROVE_FOR_WORK",
+        "--implementation-plan-dir",
+        str(tmp_path / "missing_plans"),
+    )
+
+    assert "Implementation Final Review" in output
+    assert "No saved implementation plans available" in output
+    assert "- No strategy rule was changed." in output
+
+
+def test_final_review_implementation_plan_out_of_range_does_not_crash(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "APPROVE_FOR_WORK",
+        "--implementation-plan-index",
+        "99",
+        "--implementation-plan-dir",
+        str(plan_dir),
+    )
+
+    assert "Implementation Final Review" in output
+    assert "Implementation plan index is out of range" in output
+    assert "- Log saved: False" in output
+
+
+def test_final_review_implementation_plan_output_has_no_direct_trade_commands(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--final-review-implementation-plan",
+        "APPROVE_FOR_WORK",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    ).lower()
+
+    forbidden_phrases = [
+        "buy now",
+        "sell now",
+        "enter trade",
+        "open position",
+        "guaranteed signal",
+        "strategy changed automatically",
+        "auto implemented",
+    ]
+    for phrase in forbidden_phrases:
+        assert phrase not in output
 
 
 def test_existing_demo_command_still_works_without_session_trend() -> None:

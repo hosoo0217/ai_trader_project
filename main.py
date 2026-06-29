@@ -30,6 +30,11 @@ from ai.implementation_plan import (
     ImplementationPlanResult,
     ImplementationPlanWorkflow,
 )
+from ai.implementation_final_review import (
+    ImplementationFinalReviewConfig,
+    ImplementationFinalReviewResult,
+    ImplementationFinalReviewWorkflow,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -96,6 +101,11 @@ from storage.implementation_plan_store import (
     ImplementationPlanStore,
     ImplementationPlanStoreConfig,
     ImplementationPlanStoreResult,
+)
+from storage.implementation_final_review_log import (
+    ImplementationFinalReviewLogConfig,
+    ImplementationFinalReviewLogResult,
+    ImplementationFinalReviewLogStore,
 )
 from storage.trade_journal import TradeJournal
 
@@ -294,6 +304,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--implementation-plan-dir",
         default="reports",
         help="Output folder for implementation_plans.json",
+    )
+    parser.add_argument(
+        "--final-review-implementation-plan",
+        default="",
+        help="Final-review a saved implementation plan: APPROVE_FOR_WORK, REJECT, NEEDS_BACKTEST, or NEEDS_MORE_REVIEW",
+    )
+    parser.add_argument(
+        "--implementation-plan-index",
+        type=int,
+        default=0,
+        help="Zero-based saved Implementation Plan index to final-review",
+    )
+    parser.add_argument(
+        "--implementation-reviewed-by",
+        default="",
+        help="Optional reviewer name for the implementation final review log",
+    )
+    parser.add_argument(
+        "--implementation-review-notes",
+        default="",
+        help="Optional notes for the implementation final review log",
+    )
+    parser.add_argument(
+        "--implementation-final-review-log-dir",
+        default="reports",
+        help="Output folder for implementation_final_reviews.json",
     )
     return parser
 
@@ -1421,6 +1457,131 @@ def _review_saved_change_proposal(
     _create_and_store_implementation_plan(proposal, review_result, implementation_plan_config)
 
 
+def _print_implementation_final_review(
+    plan: object | None,
+    final_review_result: ImplementationFinalReviewResult | None,
+    log_result: ImplementationFinalReviewLogResult | None,
+    message: str | None = None,
+) -> None:
+    """Print final implementation review output without implementing changes."""
+    print("\nImplementation Final Review")
+    if message:
+        print(f"- Message: {message}")
+
+    decision = final_review_result.decision if final_review_result is not None else None
+    plan_id = (
+        getattr(plan, "plan_id", None)
+        if plan is not None and not isinstance(plan, dict)
+        else (plan or {}).get("plan_id") if isinstance(plan, dict) else None
+    )
+    plan_id = plan_id or (final_review_result.plan_id if final_review_result is not None else None) or "N/A"
+    decision_text = getattr(decision, "decision", None) or "UNKNOWN"
+    reviewed_by = getattr(decision, "reviewed_by", None) or "N/A"
+    notes = getattr(decision, "notes", None) or "None"
+    reasons = final_review_result.reasons if final_review_result is not None else []
+    blocking_reasons = final_review_result.blocking_reasons if final_review_result is not None else []
+    if log_result is not None and log_result.blocking_reasons:
+        blocking_reasons = list(blocking_reasons) + list(log_result.blocking_reasons)
+
+    reasons_text = "; ".join(reasons) if reasons else "None"
+    blocking_text = "; ".join(blocking_reasons) if blocking_reasons else "None"
+    print(f"- Plan ID: {plan_id}")
+    print(f"- Decision: {decision_text}")
+    print(f"- Status: {final_review_result.status if final_review_result is not None else 'UNKNOWN'}")
+    print(f"- Approved for work: {final_review_result.approved_for_work if final_review_result is not None else False}")
+    print(
+        "- Implementation allowed now: "
+        f"{final_review_result.implementation_allowed_now if final_review_result is not None else False}"
+    )
+    print(f"- Reviewed by: {reviewed_by}")
+    print(f"- Notes: {notes}")
+    print(f"- Log saved: {log_result.saved if log_result is not None else False}")
+    print(f"- Log path: {log_result.log_path if log_result is not None else 'None'}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- No implementation was applied automatically.")
+    print("- Final review is recorded for future human-reviewed work only.")
+    print("- APPROVE_FOR_WORK does not mean automatic implementation.")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
+def _final_review_saved_implementation_plan(
+    final_review_decision: str,
+    plan_index: int,
+    reviewed_by: str | None,
+    notes: str | None,
+    plan_config: ImplementationPlanStoreConfig,
+    final_review_log_config: ImplementationFinalReviewLogConfig,
+) -> None:
+    """Final-review one saved implementation plan without implementing it."""
+    try:
+        plans = ImplementationPlanStore().load_plans(plan_config)
+    except Exception as exc:
+        _print_implementation_final_review(
+            None,
+            None,
+            None,
+            message=f"Could not load saved implementation plans: {exc}",
+        )
+        return
+
+    if not plans:
+        _print_implementation_final_review(
+            None,
+            None,
+            None,
+            message="No saved implementation plans available",
+        )
+        return
+
+    if plan_index < 0 or plan_index >= len(plans):
+        _print_implementation_final_review(
+            None,
+            None,
+            None,
+            message="Implementation plan index is out of range",
+        )
+        return
+
+    plan = plans[plan_index]
+    try:
+        final_review_result = ImplementationFinalReviewWorkflow().review(
+            plan,
+            final_review_decision,
+            ImplementationFinalReviewConfig(),
+            reviewed_by=reviewed_by or None,
+            notes=notes or None,
+        )
+    except Exception as exc:
+        final_review_result = ImplementationFinalReviewResult(
+            plan_id=plan.get("plan_id") if isinstance(plan, dict) else None,
+            decision=None,
+            status="UNKNOWN",
+            approved_for_work=False,
+            implementation_allowed_now=False,
+            reasons=["Implementation final review could not be recorded"],
+            blocking_reasons=[f"Final review workflow failed: {exc}"],
+        )
+
+    try:
+        log_result = ImplementationFinalReviewLogStore().append_review(
+            plan,
+            final_review_result,
+            final_review_log_config,
+        )
+    except Exception as exc:
+        log_result = ImplementationFinalReviewLogResult(
+            saved=False,
+            log_path=None,
+            total_records=0,
+            reasons=["Implementation final review log was requested"],
+            blocking_reasons=[f"Implementation final review log could not be saved: {exc}"],
+        )
+
+    _print_implementation_final_review(plan, final_review_result, log_result)
+
+
 def _record_human_approval_decision(
     approval_result: StrategyApprovalPipelineResult,
     approval_decision: str,
@@ -2056,6 +2217,26 @@ def main(args: list[str] | None = None) -> None:
     implementation_plan_config = ImplementationPlanStoreConfig(
         output_dir=getattr(parsed_args, "implementation_plan_dir", "reports") or "reports",
     )
+    final_review_implementation_plan = str(
+        getattr(parsed_args, "final_review_implementation_plan", "") or ""
+    ).strip()
+    implementation_plan_index = int(getattr(parsed_args, "implementation_plan_index", 0) or 0)
+    implementation_reviewed_by = str(getattr(parsed_args, "implementation_reviewed_by", "") or "").strip()
+    implementation_review_notes = str(getattr(parsed_args, "implementation_review_notes", "") or "").strip()
+    implementation_final_review_log_config = ImplementationFinalReviewLogConfig(
+        output_dir=getattr(parsed_args, "implementation_final_review_log_dir", "reports") or "reports",
+    )
+
+    if final_review_implementation_plan:
+        _final_review_saved_implementation_plan(
+            final_review_implementation_plan,
+            implementation_plan_index,
+            implementation_reviewed_by,
+            implementation_review_notes,
+            implementation_plan_config,
+            implementation_final_review_log_config,
+        )
+        return
 
     if review_change_proposal:
         _review_saved_change_proposal(
