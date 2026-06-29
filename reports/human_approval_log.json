@@ -1,0 +1,22 @@
+[
+  {
+    "request_id": "approval-backtesting-f9c108c9",
+    "suggestion_category": "BACKTESTING",
+    "suggestion_priority": "MEDIUM",
+    "suggestion_text": "Save more session history before changing strategy rules.",
+    "request_status": "NEEDS_REVIEW",
+    "decision": "NEEDS_REVIEW",
+    "approved": false,
+    "allowed_to_apply": false,
+    "decided_by": "Hosoo",
+    "decided_at": "2026-06-29T10:36:38.744769+00:00",
+    "notes": "Need more backtest data before changing rules",
+    "reasons": [
+      "Human approval workflow records review decisions only",
+      "approval does not automatically change strategy rules"
+    ],
+    "blocking_reasons": [
+      "Human marked this suggestion as needing more review"
+    ]
+  }
+]

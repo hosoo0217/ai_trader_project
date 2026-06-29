@@ -477,6 +477,164 @@ def test_session_trend_coach_output_has_no_direct_trade_commands(tmp_path: Path)
         assert phrase not in output
 
 
+def test_main_records_approve_human_approval_decision(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    log_dir = tmp_path / "approval_logs"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps(
+            [
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["Spread too high"]},
+                {"trade_executed": False, "market_bias": "UNKNOWN", "blocked_reasons": ["News block"]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "APPROVE",
+        "--approval-decided-by",
+        "Hosoo",
+        "--approval-notes",
+        "Review later before changing rules",
+        "--approval-log-dir",
+        str(log_dir),
+    )
+
+    log_path = log_dir / "human_approval_log.json"
+    records = json.loads(log_path.read_text(encoding="utf-8"))
+    assert "Human Approval Decision" in output
+    assert "- Decision: APPROVE" in output
+    assert "- No strategy rule was changed." in output
+    assert "- No trade signal was created." in output
+    assert log_path.exists()
+    assert records[0]["decision"] == "APPROVE"
+
+
+def test_main_records_reject_human_approval_decision(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    log_dir = tmp_path / "approval_logs"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "REJECT",
+        "--approval-decided-by",
+        "Hosoo",
+        "--approval-notes",
+        "Not enough data yet",
+        "--approval-log-dir",
+        str(log_dir),
+    )
+
+    records = json.loads((log_dir / "human_approval_log.json").read_text(encoding="utf-8"))
+    assert "Human Approval Decision" in output
+    assert "- Decision: REJECT" in output
+    assert records[0]["decision"] == "REJECT"
+    assert records[0]["approved"] is False
+
+
+def test_main_records_needs_review_human_approval_decision(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    log_dir = tmp_path / "approval_logs"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "NEEDS_REVIEW",
+        "--approval-decided-by",
+        "Hosoo",
+        "--approval-notes",
+        "Need more backtest sessions",
+        "--approval-log-dir",
+        str(log_dir),
+    )
+
+    records = json.loads((log_dir / "human_approval_log.json").read_text(encoding="utf-8"))
+    assert "Human Approval Decision" in output
+    assert "- Decision: NEEDS_REVIEW" in output
+    assert records[0]["decision"] == "NEEDS_REVIEW"
+    assert records[0]["approved"] is False
+
+
+def test_approval_decision_without_session_trend_does_not_crash() -> None:
+    output = _run_main("--approval-decision", "APPROVE")
+
+    assert "Session trend is required to create approval requests" in output
+    assert "No strategy rule was changed" in output
+
+
+def test_out_of_range_approval_request_index_does_not_crash(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    log_dir = tmp_path / "approval_logs"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "APPROVE",
+        "--approval-request-index",
+        "99",
+        "--approval-log-dir",
+        str(log_dir),
+    )
+
+    assert "Human Approval Decision" in output
+    assert "No approval requests available at that index" in output
+    assert "- Log saved: False" in output
+
+
+def test_invalid_approval_decision_does_not_crash(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    log_dir = tmp_path / "approval_logs"
+    history_dir.mkdir(parents=True)
+    (history_dir / "session_history.json").write_text(
+        json.dumps([{"trade_executed": True, "market_bias": "BULLISH"}]),
+        encoding="utf-8",
+    )
+
+    output = _run_main(
+        "--show-session-trend",
+        "--session-history-dir",
+        str(history_dir),
+        "--approval-decision",
+        "MAYBE",
+        "--approval-log-dir",
+        str(log_dir),
+    )
+
+    records = json.loads((log_dir / "human_approval_log.json").read_text(encoding="utf-8"))
+    assert "Human Approval Decision" in output
+    assert "- Decision: UNKNOWN" in output
+    assert records[0]["decision"] == "UNKNOWN"
+    assert records[0]["approved"] is False
+
+
 def test_existing_demo_command_still_works_without_session_trend() -> None:
     output = _run_main("--mode", "demo", "--scenario", "bullish", "--profile", "apex")
 

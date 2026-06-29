@@ -18,6 +18,7 @@ from ai.strategy_approval_pipeline import (
     StrategyApprovalPipelineConfig,
     StrategyApprovalPipelineResult,
 )
+from ai.human_approval import HumanApprovalConfig, HumanApprovalResult, HumanApprovalWorkflow
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -73,6 +74,7 @@ from storage.session_report_exporter import (
 )
 from storage.session_history import SessionHistoryConfig, SessionHistoryStore, SessionHistorySummary
 from storage.session_trend import SessionTrendAnalyzer, SessionTrendConfig, SessionTrendResult
+from storage.human_approval_log import HumanApprovalLogConfig, HumanApprovalLogResult, HumanApprovalLogStore
 from storage.trade_journal import TradeJournal
 
 
@@ -208,6 +210,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--show-session-trend",
         action="store_true",
         help="Show performance trend analysis from saved session history",
+    )
+    parser.add_argument(
+        "--approval-decision",
+        default="",
+        help="Record a human approval decision for a generated request: APPROVE, REJECT, or NEEDS_REVIEW",
+    )
+    parser.add_argument(
+        "--approval-request-index",
+        type=int,
+        default=0,
+        help="Zero-based Human Approval Request index to decide",
+    )
+    parser.add_argument(
+        "--approval-decided-by",
+        default="",
+        help="Optional reviewer name for the approval decision log",
+    )
+    parser.add_argument(
+        "--approval-notes",
+        default="",
+        help="Optional notes for the approval decision log",
+    )
+    parser.add_argument(
+        "--approval-log-dir",
+        default="reports",
+        help="Output folder for human_approval_log.json",
     )
     return parser
 
@@ -957,7 +985,113 @@ def _print_human_approval_requests(result: StrategyApprovalPipelineResult) -> No
     print(f"- Blocking reasons: {blocking_text}")
 
 
-def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
+def _print_human_approval_decision(
+    request: object | None,
+    decision_result: HumanApprovalResult | None,
+    log_result: HumanApprovalLogResult | None,
+    message: str | None = None,
+) -> None:
+    """Print one human approval decision log result safely."""
+    print("\nHuman Approval Decision")
+    if message:
+        print(f"- Message: {message}")
+
+    decision = decision_result.decision if decision_result is not None else None
+    request_id = getattr(request, "request_id", None) or getattr(decision, "request_id", None) or "N/A"
+    decision_text = getattr(decision, "decision", None) or "UNKNOWN"
+    decided_by = getattr(decision, "decided_by", None) or "N/A"
+    notes = getattr(decision, "notes", None) or "None"
+    reasons = decision_result.reasons if decision_result is not None else []
+    blocking_reasons = decision_result.blocking_reasons if decision_result is not None else []
+    if log_result is not None and log_result.blocking_reasons:
+        blocking_reasons = list(blocking_reasons) + list(log_result.blocking_reasons)
+
+    reasons_text = "; ".join(reasons) if reasons else "None"
+    blocking_text = "; ".join(blocking_reasons) if blocking_reasons else "None"
+    print(f"- Request ID: {request_id}")
+    print(f"- Decision: {decision_text}")
+    print(f"- Approved: {decision_result.approved if decision_result is not None else False}")
+    print(f"- Allowed to apply: {decision_result.allowed_to_apply if decision_result is not None else False}")
+    print(f"- Decided by: {decided_by}")
+    print(f"- Notes: {notes}")
+    print(f"- Log saved: {log_result.saved if log_result is not None else False}")
+    print(f"- Log path: {log_result.log_path if log_result is not None else 'None'}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- Approval is only recorded for future human-reviewed work.")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
+def _record_human_approval_decision(
+    approval_result: StrategyApprovalPipelineResult,
+    approval_decision: str,
+    request_index: int,
+    decided_by: str | None,
+    notes: str | None,
+    log_config: HumanApprovalLogConfig,
+) -> None:
+    """Record one approval decision without changing strategy behavior."""
+    if not approval_result.created_requests:
+        _print_human_approval_decision(
+            None,
+            None,
+            None,
+            message="No approval requests available",
+        )
+        return
+
+    if request_index < 0 or request_index >= len(approval_result.created_requests):
+        _print_human_approval_decision(
+            None,
+            None,
+            None,
+            message="No approval requests available at that index",
+        )
+        return
+
+    request = approval_result.created_requests[request_index]
+    try:
+        decision_result = HumanApprovalWorkflow().decide(
+            request,
+            approval_decision,
+            HumanApprovalConfig(),
+            decided_by=decided_by or None,
+            notes=notes or None,
+        )
+    except Exception as exc:
+        decision_result = HumanApprovalResult(
+            request=request,
+            decision=None,
+            approved=False,
+            allowed_to_apply=False,
+            status="UNKNOWN",
+            reasons=["Human approval decision could not be recorded"],
+            blocking_reasons=[f"Decision workflow failed: {exc}"],
+        )
+
+    try:
+        log_result = HumanApprovalLogStore().append_decision(request, decision_result, log_config)
+    except Exception as exc:
+        log_result = HumanApprovalLogResult(
+            saved=False,
+            log_path=None,
+            total_records=0,
+            reasons=["Human approval decision log was requested"],
+            blocking_reasons=[f"Approval decision log could not be saved: {exc}"],
+        )
+
+    _print_human_approval_decision(request, decision_result, log_result)
+
+
+def _show_session_trend(
+    session_history_config: SessionHistoryConfig,
+    approval_decision: str = "",
+    approval_request_index: int = 0,
+    approval_decided_by: str | None = None,
+    approval_notes: str | None = None,
+    approval_log_config: HumanApprovalLogConfig | None = None,
+) -> None:
     """Load saved session history and print trend analysis safely."""
     history = SessionHistoryStore().load_history(session_history_config)
     trend = SessionTrendAnalyzer().analyze(history, SessionTrendConfig())
@@ -978,6 +1112,15 @@ def _show_session_trend(session_history_config: SessionHistoryConfig) -> None:
             blocking_reasons=[f"Approval pipeline could not create requests: {exc}"],
         )
     _print_human_approval_requests(approval_result)
+    if approval_decision:
+        _record_human_approval_decision(
+            approval_result,
+            approval_decision,
+            approval_request_index,
+            approval_decided_by,
+            approval_notes,
+            approval_log_config or HumanApprovalLogConfig(),
+        )
 
 
 
@@ -1491,6 +1634,20 @@ def main(args: list[str] | None = None) -> None:
         output_dir=getattr(parsed_args, "session_history_dir", "reports") or "reports",
     )
     show_session_trend = bool(getattr(parsed_args, "show_session_trend", False))
+    approval_decision = str(getattr(parsed_args, "approval_decision", "") or "").strip()
+    approval_request_index = int(getattr(parsed_args, "approval_request_index", 0) or 0)
+    approval_decided_by = str(getattr(parsed_args, "approval_decided_by", "") or "").strip()
+    approval_notes = str(getattr(parsed_args, "approval_notes", "") or "").strip()
+    approval_log_config = HumanApprovalLogConfig(
+        output_dir=getattr(parsed_args, "approval_log_dir", "reports") or "reports",
+    )
+
+    if approval_decision and not show_session_trend:
+        print("Session trend is required to create approval requests")
+        print("- No strategy rule was changed.")
+        print("- No trade signal was created.")
+        print("- Approval is only recorded for future human-reviewed work.")
+        return
 
     only_showing_session_trend = (
         show_session_trend
@@ -1506,7 +1663,14 @@ def main(args: list[str] | None = None) -> None:
         and not getattr(parsed_args, "orderflow_csv", "")
     )
     if only_showing_session_trend:
-        _show_session_trend(session_history_config)
+        _show_session_trend(
+            session_history_config,
+            approval_decision=approval_decision,
+            approval_request_index=approval_request_index,
+            approval_decided_by=approval_decided_by,
+            approval_notes=approval_notes,
+            approval_log_config=approval_log_config,
+        )
         return
 
     if mode not in {"demo", "backtest"}:
@@ -1551,7 +1715,14 @@ def main(args: list[str] | None = None) -> None:
         print("- Note: Safe profile selected. This conservative fallback keeps trading disabled.")
 
     if show_session_trend:
-        _show_session_trend(session_history_config)
+        _show_session_trend(
+            session_history_config,
+            approval_decision=approval_decision,
+            approval_request_index=approval_request_index,
+            approval_decided_by=approval_decided_by,
+            approval_notes=approval_notes,
+            approval_log_config=approval_log_config,
+        )
 
     if scenario == "all":
         for scenario_name in ["bullish", "bearish", "weak"]:
