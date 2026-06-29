@@ -1,167 +1,213 @@
-# AI Trader Project
+# ai_trader_project
 
-This project is being built as a professional AI trading platform for two distinct trading systems:
-- System A: Apex Futures account trading Gold Futures (GC) on Sierra Chart with a professional scalping style and strict daily risk controls.
-- System B: XAUUSD spot trading with a swing and intraday style focused on larger moves, runners, partial take profits, and trailing stops.
+`ai_trader_project` is an AI Trading Platform / Trading Operating System for research, backtesting, paper trading, reporting, and human-reviewed strategy improvement planning.
 
-The current focus is research-first and paper-trading-first. The long-term goal is an autonomous AI trader that can analyze markets, protect capital, explain its decisions, and scale responsibly.
+It is not a live trading bot yet.
 
-## Primary mission
-- Protect capital above all else
-- Never trade when market quality, confidence, or rules are weak
-- Build a modular, understandable, testable, and expandable platform
-- Teach the user through every decision and outcome
+## What This Project Is
 
-## Core principles
-- Backtesting first
-- Paper trading first
-- Live trading only after validation
-- No broker connection yet
-- No trade is better than a bad trade
-- Capital protection is more important than profit
+This project is built to help study trading ideas safely before any live-trading work is considered. The current focus is:
 
-## Market analysis framework
-The system will analyze markets across multiple timeframes:
-- Weekly: overall direction
-- Daily: market bias
-- 4H: structure
-- 1H: setup
-- 15M: confirmation
-- 5M: execution
+- Research
+- Backtesting
+- Paper-trading simulation
+- Local CSV-based Order Flow / footprint analysis
+- Sierra Chart CSV import and replay
+- Risk and capital-protection validation
+- Session reports, history, trend review, and coaching output
+- Human approval, change proposal, implementation plan, and readiness workflows
 
-## Core analysis modules
-- Higher timeframe analysis
+The long-term idea is a professional trading operating system, but the current MVP is intentionally offline and simulation-first.
+
+## Safety Warning
+
+Do not use this project for real-money trading yet.
+
+- No live trading is implemented.
+- No broker connection is implemented.
+- No real order execution exists.
+- No real trade signals should be used for live trading.
+- No external broker or market-data API is connected.
+- Backtesting and paper trading are required first.
+
+Capital protection comes before profit, speed, automation, or new features.
+
+## Current MVP Status
+
+The Research / Backtest / Paper Trading MVP is close to completion.
+
+Completed or mostly complete areas:
+
+- Core decision flow
+- Safety gate
+- Risk engine
+- Paper broker simulation
 - Smart Money Concepts (SMC)
 - Candle Range Theory (CRT)
-- Order Flow / Footprint analysis
-- News filter
-- Session filter
-- Volatility analysis
-- Market bias and execution context
+- Order Flow / footprint CSV analysis
+- Sierra Chart CSV importer and replay workflow
+- Session, news, spread, and volatility filters
+- Session reports, export, history, and trend review
+- AI coach / review output for educational use
+- Strategy improvement suggestions
+- Human approval workflow
+- Change proposal workflow
+- Implementation plan workflow
+- Implementation final review workflow
+- Implementation readiness checklist
 
-## Decision engine
-Every trade will pass through a validation pipeline:
-Higher Timeframe -> SMC -> CRT -> Order Flow -> Risk -> Execution
+Still needed before any future live-trading discussion:
 
-If any mandatory validation fails, the system will skip the trade.
+- Final project health audit
+- End-to-end demo validation
+- Deeper historical backtest validation
+- Real Sierra Chart exported CSV testing
+- Reports / `.gitignore` safety review
+- MVP code freeze note
 
-## Capital protection engine
-The platform will include strict capital protection controls:
-- Maximum daily loss
-- Maximum daily profit
-- Maximum consecutive losses
-- Maximum open trades
-- News protection
-- Spread protection
-- Session protection
-- Emergency stop
-- Trade lock
-
-## AI Trading Mentor
-The platform is designed to do more than generate signals. It will act as a mentor by explaining every decision in plain language.
-
-### AI brain modules
-1. Market Analyst
-- Multi-timeframe analysis: Weekly, Daily, 4H, 1H, 15M, 5M
-- SMC
-- CRT
-- Order Flow / Footprint
-- Market bias
-
-2. Risk Manager
-- Entry validation
-- Stop loss explanation
-- Take profit logic
-- Risk per trade
-- Daily loss limit
-- No-trade conditions
-
-3. Trading Coach
-- Explain why a trade was taken
-- Explain why a trade hit stop loss
-- Explain why a trade hit take profit
-- Identify mistakes such as early entry, weak confirmation, poor session choice, and poor risk sizing
-- Give a short lesson after each trade
-- Create a trade grade: A+, A, B, C, or D
-
-### Example outputs
-- Winning trade explanation
-- Losing trade explanation
-- No-trade recommendation
-- Daily lesson
-
-## Development order
-1. Foundation
-2. Backtesting
-3. Paper Trading
-4. Small Live
-5. Full Automation
-
-Never skip phases.
-
-## Architecture Sprint 2
-The project now includes a clean modular package structure for future expansion without implementing trading logic yet.
-
-### Package overview
-- core/: orchestration for market analysis, decisions, execution, trade management, and capital protection
-- analysis/: multi-timeframe analysis utilities
-- smc/: Smart Money Concepts analysis modules
-- crt/: Candle Range Theory analysis modules
-- orderflow/: order-flow and footprint analysis modules
-- risk/: risk validation and capital protection rules
-- broker/: broker integration abstractions
-- ai/: explainable AI modules for market analysis and coaching
-- storage/: trade journal and persistence abstractions
-- config/: configuration and settings
-- utils/: shared helper modules such as logging
-
-### Placeholder modules created
-- core/market_analyzer.py
-- core/decision_engine.py
-- analysis/timeframe_analyzer.py
-- smc/smc_engine.py
-- crt/crt_engine.py
-- orderflow/orderflow_engine.py
-- risk/risk_manager.py
-- broker/broker_adapter.py
-- ai/trading_coach.py
-- ai/market_analyst_ai.py
-- storage/trade_journal.py
-- config/settings.py
-- utils/logger.py
-
-Each module contains a docstring, a main class, type hints, and TODO comments describing future responsibilities.
-
-## Project structure
-- src/data_loader.py: loads OHLCV-style candle data from CSV
-- src/strategy.py: generates EMA crossover signals
-- src/backtester.py: runs a simple backtest
-- src/risk_manager.py: stores basic risk logic
-- main.py: runs the sample backtest
+See [docs/mvp_completion_checklist.md](docs/mvp_completion_checklist.md) for the detailed MVP checklist.
 
 ## Setup
-1. Create and activate a virtual environment
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the sample backtest:
-   ```bash
-   python main.py
-   ```
 
-## Data format
-The CSV should contain these columns:
-- time
-- open
-- high
-- low
-- close
+Use Windows PowerShell from the project root.
 
-## Development philosophy
-- Backtesting first
-- Paper trading first
-- Research before execution
-- No live trading yet
-- No broker connection yet
-- Beginner-friendly explanations
+Create a virtual environment if needed:
+
+```powershell
+py -m venv venv
+```
+
+Activate it:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+Install requirements:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Run the test suite:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest -q
+```
+
+## Common Commands
+
+Run all tests:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest -q
+```
+
+Run the default demo:
+
+```powershell
+.\venv\Scripts\python.exe main.py
+```
+
+Run all built-in scenarios:
+
+```powershell
+.\venv\Scripts\python.exe main.py --scenario all
+```
+
+Run a bullish Apex paper-trading demo:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex
+```
+
+Run a bullish Apex backtest:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex
+```
+
+Run a demo with Order Flow CSV context and decision trace:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --orderflow-csv data/sample_footprint_bullish.csv --show-trace
+```
+
+Run an Order Flow replay with replay steps:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --orderflow-replay-csv data/sample_footprint_bullish.csv --show-orderflow-replay-steps
+```
+
+Show session trend from saved session history:
+
+```powershell
+.\venv\Scripts\python.exe main.py --show-session-trend
+```
+
+Check implementation readiness for a saved implementation plan:
+
+```powershell
+.\venv\Scripts\python.exe main.py --check-implementation-readiness --implementation-plan-index 0
+```
+
+## Project Structure
+
+- `main.py`: CLI entry point for demo, backtest, Order Flow, reports, session trend, approval, proposal, and readiness workflows.
+- `core/`: decision flow, backtest runner, paper-trading flow, safety gate, capital protection, trade manager, and decision context.
+- `analysis/`: session, news, spread, volatility, and timeframe analysis helpers.
+- `risk/`: risk validation logic.
+- `broker/`: paper broker simulation and broker abstraction placeholders.
+- `smc/`: Smart Money Concepts modules.
+- `crt/`: Candle Range Theory modules.
+- `orderflow/`: footprint, Delta/CVD, imbalance, absorption, Order Flow context, replay, reports, and Sierra Chart CSV importer.
+- `ai/`: educational review, strategy improvement, human approval, proposal, plan, final review, and readiness logic.
+- `storage/`: journals, reports, history, logs, proposal stores, and export helpers.
+- `docs/`: design notes, CLI output notes, safety notes, and MVP cleanup checklists.
+- `tests/`: unit and integration tests.
+- `data/`: local sample CSV files for demo, backtest, and Order Flow testing.
+
+## Development Rules
+
+- Work one small step at a time.
+- Run `.\venv\Scripts\python.exe -m pytest -q` after every code change.
+- Commit only after tests pass.
+- Keep changes easy to review.
+- Do not add live trading work.
+- Do not add broker credentials.
+- Do not add API credentials.
+- Do not connect to live broker or market-data services.
+- Do not create real order execution.
+- Do not create real trade signals for live use.
+- Do not make automatic strategy rule changes.
+- Keep human approval required for strategy changes.
+
+## Final Cleanup Mode
+
+The project is now in cleanup mode.
+
+Current cleanup focus:
+
+- Documentation
+- Tests
+- Bug fixes
+- Validation
+- Safer examples
+- Clearer beginner usage
+- Reports and generated-file review
+
+No new major features should be added during cleanup. Live trading, broker connections, external APIs, and real execution are outside the current MVP.
+
+## Next Recommended Cleanup Steps
+
+1. Project Health Audit
+2. End-to-End Demo Validation
+3. Backtest Validation Checklist
+4. Real Sierra Chart CSV Test Guide
+5. Reports / `.gitignore` safety review
+
+## Beginner Summary
+
+This project is a safe practice environment for building and testing trading-system ideas. It can run demos, backtests, paper-trading simulations, Order Flow CSV analysis, reports, trend reviews, and human-reviewed improvement planning.
+
+It is not ready for real money. The next phase is cleanup and validation, not live trading.
