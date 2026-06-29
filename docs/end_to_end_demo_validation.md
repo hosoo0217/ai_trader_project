@@ -1,37 +1,39 @@
 # End-to-End Demo Validation
 
-This document is a manual validation checklist for `ai_trader_project`.
+This document is a manual end-to-end validation checklist for `ai_trader_project`.
 
-It is documentation only. It does not add trading features, edit Python code, connect to a broker, call external APIs, create trade signals, place orders, or implement live trading.
+It is documentation only. It does not edit Python code, add trading features, change strategy logic, change risk logic, connect a broker, call external APIs, create real trade execution, or implement live trading.
 
-## Purpose
+## 1. Purpose
 
-End-to-end validation checks whether the current research / backtest / paper-trading MVP can be run safely from the command line.
+End-to-end validation checks whether the existing CLI flows work together safely from the terminal.
 
-The goal is to confirm:
+The goal is to confirm that the current research / backtest / paper-trading MVP can run its main paths:
 
-- `main.py` demo mode runs.
-- Backtest mode runs.
-- Order Flow CSV context runs.
-- Order Flow replay runs.
-- Session reports and session trend run.
-- Approval, proposal, final review, and implementation readiness flows run.
-- Generated reports are created only as local files.
-- No live trading, broker connection, external API call, or real order execution occurs.
+- Demo mode
+- Backtest mode
+- Order Flow CSV context
+- Order Flow replay
+- Session trend output
+- Implementation readiness output
 
-## Before You Start
+This validation is not a live-trading test. It is only a safe local check before deeper backtest validation, real Sierra Chart CSV validation, and paper-trading validation.
 
-Use Windows PowerShell from the project root.
+## 2. Required Baseline Check
 
-Recommended baseline:
+Run the full test suite first:
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest -q
 ```
 
-Current known test status from the MVP cleanup pass: `793 tests passed`.
+Expected result:
 
-## Demo Mode Commands
+- Pytest should pass.
+- Current known test status from cleanup mode: `793 tests passed`.
+- If pytest fails, stop and fix or document the failure before running CLI validation.
+
+## 3. Demo Mode Validation
 
 Run the default demo:
 
@@ -39,93 +41,71 @@ Run the default demo:
 .\venv\Scripts\python.exe main.py
 ```
 
-Expected safe behavior:
-
-- Program runs locally.
-- Output is beginner-readable.
-- Uses demo/paper-trading simulation behavior.
-- Does not connect to a broker.
-- Does not place a real order.
-
 Run all built-in scenarios:
 
 ```powershell
 .\venv\Scripts\python.exe main.py --scenario all
 ```
 
-Expected safe behavior:
-
-- Bullish, bearish, and weak scenarios run.
-- Results stay local.
-- Any trade action is paper/simulated only.
-
-Run a focused Apex demo:
+Run bullish Apex demo mode:
 
 ```powershell
 .\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex
 ```
 
+Run bearish Apex demo mode:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode demo --scenario bearish --profile apex
+```
+
 Expected safe behavior:
 
-- Apex profile settings are used for simulation.
-- Risk and safety checks appear in output.
-- No broker credentials are needed.
+- Commands run locally.
+- Output may include analysis, safety checks, paper/demo decisions, and review text.
+- Any trade-like behavior is paper/demo simulation only.
+- No broker credentials are required.
+- No real order is placed.
 
-## Backtest Mode Commands
+## 4. Backtest Mode Validation
 
-Run a focused Apex backtest:
+Run bullish Apex backtest mode:
 
 ```powershell
 .\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex
 ```
 
-Expected safe behavior:
-
-- Backtest summary prints.
-- Output should clearly remain research-only.
-- Result should not be treated as live-trading readiness.
-
-Run all scenarios in backtest mode:
+Run bullish Spot backtest mode:
 
 ```powershell
-.\venv\Scripts\python.exe main.py --mode backtest --scenario all --profile apex
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile spot
 ```
 
 Expected safe behavior:
 
-- Multiple scenarios run locally.
+- Commands run locally.
+- Output may include backtest metrics, research summaries, and safety/risk context.
+- Backtest output must not be treated as live-trading readiness.
 - No live data is requested.
 - No real execution occurs.
 
-## Order Flow CSV Commands
+## 5. Order Flow CSV Validation
 
-Run demo mode with sample Order Flow CSV context:
+Run demo mode with local Order Flow CSV context and a fixed session time:
 
 ```powershell
-.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --orderflow-csv data/sample_footprint_bullish.csv --show-trace
+.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --session-time 2026-06-26T14:00:00Z --orderflow-csv data/sample_footprint_bullish.csv --show-trace
 ```
 
 Expected safe behavior:
 
-- Local CSV is read from `data/`.
-- Order Flow context appears in the output.
-- Decision trace appears if available.
+- Local CSV is read from `data/sample_footprint_bullish.csv`.
+- Order Flow context may print in the output.
+- Decision trace may print in the output.
 - No Sierra Chart live connection is used.
 - No CME, broker, or external API connection is used.
 
-Run backtest mode with sample Order Flow CSV context:
-
-```powershell
-.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex --orderflow-csv data/sample_footprint_bullish.csv --show-trace
-```
-
-Expected safe behavior:
-
-- Backtest uses local Order Flow context.
-- Output remains research/backtest only.
-- No live market data is used.
-
-## Order Flow Replay Commands
+## 6. Order Flow Replay Validation
 
 Run Order Flow replay with step output:
 
@@ -137,56 +117,10 @@ Expected safe behavior:
 
 - Replay steps print from the local CSV.
 - Replay is educational/research-only.
-- No real trade signals are created.
-- No orders are placed.
+- Replay output is not a live trade signal.
+- No real order is placed.
 
-Run Order Flow replay and export a local report:
-
-```powershell
-.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --orderflow-replay-csv data/sample_footprint_bullish.csv --export-orderflow-report
-```
-
-Expected safe behavior:
-
-- Local report files may be written under `reports/`.
-- Generated files should be reviewed before committing.
-- No live systems are contacted.
-
-## Session Report / Trend Commands
-
-Show a session report:
-
-```powershell
-.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --show-session-report
-```
-
-Expected safe behavior:
-
-- Session report prints locally.
-- Report is for review only.
-- It does not create live signals or orders.
-
-Export a session report:
-
-```powershell
-.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --show-session-report --export-session-report
-```
-
-Expected safe behavior:
-
-- Local report files may be written under `reports/`.
-- Review generated files before committing.
-
-Save session history and show summary:
-
-```powershell
-.\venv\Scripts\python.exe main.py --mode demo --scenario bullish --profile apex --save-session-history --show-session-history-summary
-```
-
-Expected safe behavior:
-
-- Local `session_history.json` may be updated under `reports/`.
-- History is for review and trend analysis only.
+## 7. Session Report / Trend Validation
 
 Show session trend:
 
@@ -196,61 +130,16 @@ Show session trend:
 
 Expected safe behavior:
 
-- Trend analysis prints from saved local session history if available.
-- Trend output is educational/reporting only.
-- No trade signals are created.
+- Session trend output may print from saved local session history.
+- Output is reporting/review only.
+- No strategy rules are changed.
+- No trades are placed.
 
-## Approval / Proposal / Implementation Readiness Commands
+Optional later validation can add session report export commands after generated report handling is reviewed.
 
-Show session trend and pending approval requests:
+## 8. Implementation Readiness Validation
 
-```powershell
-.\venv\Scripts\python.exe main.py --show-session-trend
-```
-
-Expected safe behavior:
-
-- Improvement suggestions may appear as review items.
-- Suggestions require human approval.
-- Suggestions do not change strategy rules automatically.
-
-Record a human approval decision for a generated request:
-
-```powershell
-.\venv\Scripts\python.exe main.py --show-session-trend --approval-decision APPROVE --approval-request-index 0 --approval-decided-by "Manual Reviewer" --approval-notes "Demo validation only"
-```
-
-Expected safe behavior:
-
-- A local approval log may be written under `reports/`.
-- An approved request may create a saved change proposal.
-- No implementation happens automatically.
-
-Review a saved change proposal:
-
-```powershell
-.\venv\Scripts\python.exe main.py --review-change-proposal ACCEPT --change-proposal-index 0 --proposal-reviewed-by "Manual Reviewer" --proposal-review-notes "Demo validation only"
-```
-
-Expected safe behavior:
-
-- A local proposal review log may be written under `reports/`.
-- An accepted proposal may create a saved implementation plan.
-- No code or strategy rule changes happen automatically.
-
-Final-review a saved implementation plan:
-
-```powershell
-.\venv\Scripts\python.exe main.py --final-review-implementation-plan APPROVE_FOR_WORK --implementation-plan-index 0 --implementation-reviewed-by "Manual Reviewer" --implementation-review-notes "Demo validation only"
-```
-
-Expected safe behavior:
-
-- A local implementation final review log may be written under `reports/`.
-- Approval means future human-reviewed work may be considered.
-- It does not implement the plan.
-
-Check implementation readiness:
+Check implementation readiness for saved implementation plan index `0`:
 
 ```powershell
 .\venv\Scripts\python.exe main.py --check-implementation-readiness --implementation-plan-index 0
@@ -258,54 +147,52 @@ Check implementation readiness:
 
 Expected safe behavior:
 
-- Readiness output prints locally.
-- Readiness is a checklist only.
-- It does not edit config, code, strategy rules, broker logic, or execution logic.
+- Readiness status may print.
+- Missing or incomplete plan data should be reported safely.
+- Readiness output is a checklist only.
+- It must not edit code, config, strategy rules, risk rules, broker logic, or execution logic.
 
-## Validation Results Checklist
+## 9. Expected Safe Behavior
 
-Use this checklist while running the commands:
+Across all commands:
 
-- [ ] Full pytest passes.
-- [ ] Default demo runs.
-- [ ] All scenarios run.
-- [ ] Focused Apex demo runs.
-- [ ] Focused Apex backtest runs.
-- [ ] Order Flow CSV context runs.
-- [ ] Order Flow replay steps run.
-- [ ] Order Flow replay report export runs.
-- [ ] Session report output runs.
-- [ ] Session report export runs.
-- [ ] Session history save/summary runs.
-- [ ] Session trend runs.
-- [ ] Approval request output runs.
-- [ ] Approval decision logging runs.
-- [ ] Change proposal review runs.
-- [ ] Implementation final review runs.
-- [ ] Implementation readiness check runs.
-- [ ] Generated `reports/` files are reviewed.
-- [ ] No API keys, broker credentials, account numbers, or secrets are present in generated files.
-- [ ] No live trading code is used.
-- [ ] No real broker connection is used.
-- [ ] No real order execution occurs.
+- Commands may print trade analysis, paper/demo output, reports, warnings, or readiness status.
+- Commands must not place real trades.
+- Commands must not connect to a broker.
+- Commands must not call external APIs.
+- Commands must not change strategy rules automatically.
+- Commands must not create live trading execution.
+- Commands must not require broker credentials, API keys, account numbers, or secrets.
 
-## No Live Trading Safety Reminder
+Generated files, if any, should remain local and should be reviewed before committing.
 
-This project is not a live trading bot.
+## 10. Failure Handling
 
-- No live trading is implemented.
-- No real broker connection is implemented.
-- No real order execution exists.
-- No live Sierra Chart or CME connection is used.
-- No external API call is required for the demo validation checklist.
-- Backtesting and paper trading are required before any future live-trading discussion.
+If pytest fails:
 
-If a command ever appears to require credentials, connect to a live service, or place a real order, stop validation and investigate before continuing.
+- Stop validation.
+- Record the failing command.
+- Record the failing test names and error summary.
+- Fix or understand the test failure before continuing.
 
-## Beginner Summary
+If a CLI command crashes:
 
-This checklist helps you prove that the project can run from start to finish in a safe demo mode.
+- Stop the current validation path.
+- Record the exact command.
+- Record the error output.
+- Do not hide the failure.
+- Do not continue validation until the failure is understood.
 
-You are checking that the system can run demos, backtests, Order Flow CSV analysis, Order Flow replay, session reports, session trends, approval records, proposal review, final review, and readiness checks.
+If a command appears to request credentials, connect to a live service, or place a real order:
 
-Everything should stay local and simulated. The goal is confidence in the MVP workflow, not live trading.
+- Stop immediately.
+- Treat it as a safety issue.
+- Do not continue until the behavior is reviewed.
+
+## 11. Beginner Summary
+
+This checklist proves that the project can run from start to finish in demo and research mode.
+
+You are checking that the main terminal commands work before moving into deeper backtest validation, real Sierra Chart CSV testing, or paper-trading validation.
+
+The project is not going live during this step. Everything should stay local, simulated, and safe.
