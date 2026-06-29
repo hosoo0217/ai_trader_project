@@ -97,6 +97,15 @@ def test_max_iterations_limits_run() -> None:
     assert result.total_iterations == 2
 
 
+def test_max_iterations_three_can_run_when_enough_candles_exist() -> None:
+    result = run_backtest(
+        load_sample("bullish_sample_xauusd.csv"),
+        BacktestConfig(window_size=60, step_size=1, max_iterations=3),
+    )
+
+    assert result.total_iterations == 3
+
+
 def test_explain_returns_readable_text() -> None:
     runner = BacktestRunner()
     text = runner.explain(

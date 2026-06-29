@@ -1,7 +1,10 @@
 from contextlib import redirect_stdout
 from io import StringIO
 
+import pytest
+
 import main
+from core.backtest_runner import BacktestResult
 
 
 def _run_main(*args: str) -> str:
@@ -60,3 +63,44 @@ def test_invalid_mode_is_rejected_safely() -> None:
 def test_invalid_scenario_is_rejected_safely() -> None:
     output = _run_main("--mode", "demo", "--scenario", "invalid")
     assert "Invalid scenario" in output
+
+
+def test_help_includes_backtest_max_iterations() -> None:
+    help_text = main._build_parser().format_help()
+
+    assert "--backtest-max-iterations" in help_text
+    assert "rolling backtest iterations" in help_text
+
+
+def test_backtest_max_iterations_is_passed_to_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, int | None] = {}
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        seen["max_iterations"] = backtest_config.max_iterations
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=3,
+            trades_executed=0,
+            trades_blocked=3,
+            final_balance=10000.0,
+            total_pnl=0.0,
+            reasons=["Backtest completed"],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    output = _run_main("--mode", "backtest", "--scenario", "bullish", "--backtest-max-iterations", "3")
+
+    assert "AI Trader Backtest" in output
+    assert seen["max_iterations"] == 3
+
+
+def test_backtest_max_iterations_rejects_zero() -> None:
+    with pytest.raises(SystemExit):
+        main.main(["--mode", "backtest", "--backtest-max-iterations", "0"])
+
+
+def test_backtest_max_iterations_rejects_negative() -> None:
+    with pytest.raises(SystemExit):
+        main.main(["--mode", "backtest", "--backtest-max-iterations", "-1"])

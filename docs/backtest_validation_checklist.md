@@ -35,6 +35,14 @@ Recommended test command:
 .\venv\Scripts\python.exe -m pytest -q
 ```
 
+For deeper research-only backtest validation, the CLI can limit or expand rolling backtest iterations with:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex --backtest-max-iterations 25
+```
+
+More iterations can help reduce `INSUFFICIENT_DATA` when enough historical candles exist. This is still historical backtesting only, not paper trading or live trading.
+
 ## 3. Data Quality Checklist
 
 Historical data must be clean enough to trust the result.

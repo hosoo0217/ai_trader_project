@@ -174,6 +174,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional current spread value for spread safety checks, example: 2.0",
     )
     parser.add_argument(
+        "--backtest-max-iterations",
+        type=_positive_int,
+        default=None,
+        help="Optional maximum number of rolling backtest iterations to run",
+    )
+    parser.add_argument(
         "--show-trace",
         action="store_true",
         help="Show decision trace details in output",
@@ -342,6 +348,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Check whether a saved Implementation Plan is ready for future human-reviewed work",
     )
     return parser
+
+
+def _positive_int(raw_value: str) -> int:
+    """Parse a CLI integer that must be at least one."""
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer greater than or equal to 1") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be greater than or equal to 1")
+    return value
 
 
 def _unknown_orderflow_context(reason: str) -> OrderFlowContextResult:
@@ -2044,6 +2061,7 @@ def _run_backtest_scenario(
     save_session_history: bool,
     show_session_history_summary: bool,
     session_history_config: SessionHistoryConfig,
+    backtest_max_iterations: int | None,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -2062,7 +2080,13 @@ def _run_backtest_scenario(
     orderflow_context_result = orderflow_csv_result.context
     result = runner.run(
         candles,
-        BacktestConfig(symbol=profile.symbol, timeframe="M5", window_size=60, step_size=5),
+        BacktestConfig(
+            symbol=profile.symbol,
+            timeframe="M5",
+            window_size=60,
+            step_size=5,
+            max_iterations=backtest_max_iterations,
+        ),
         PaperTradingFlowConfig(symbol=profile.symbol, simulate_exit=True),
         MarketAnalyzerConfig(),
         MultiTimeframeConfig(),
@@ -2333,6 +2357,7 @@ def main(args: list[str] | None = None) -> None:
         output_dir=getattr(parsed_args, "implementation_final_review_log_dir", "reports") or "reports",
     )
     check_implementation_readiness = bool(getattr(parsed_args, "check_implementation_readiness", False))
+    backtest_max_iterations = getattr(parsed_args, "backtest_max_iterations", None)
 
     if check_implementation_readiness:
         _check_saved_implementation_readiness(
@@ -2504,6 +2529,7 @@ def main(args: list[str] | None = None) -> None:
                     save_session_history,
                     show_session_history_summary,
                     session_history_config,
+                    backtest_max_iterations,
                 )
             print("\n" + "=" * 40)
             print()
@@ -2562,6 +2588,7 @@ def main(args: list[str] | None = None) -> None:
             save_session_history,
             show_session_history_summary,
             session_history_config,
+            backtest_max_iterations,
         )
 
 

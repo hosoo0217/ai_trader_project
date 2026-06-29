@@ -49,6 +49,14 @@ Also, the current real Sierra export is `BAR_SUMMARY` data. `BAR_SUMMARY` create
 
 The `-10.00` PnL from one smoke test does not prove the strategy is good or bad.
 
+For deeper research-only validation, the CLI can run more rolling backtest iterations with:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex --backtest-max-iterations 25
+```
+
+Using more iterations can help reduce `INSUFFICIENT_DATA` when enough historical candles exist. It is still backtesting only, not paper trading or live trading.
+
 ## 4. Minimum Deeper Backtest Requirements
 
 Future deeper validation should include:
@@ -83,6 +91,7 @@ The goal is not to force good results. The goal is to understand whether the sys
 
 - Use multiple sessions from Sierra Chart `BAR_SUMMARY` exports.
 - Run bullish, bearish, and range/choppy scenarios.
+- Use `--backtest-max-iterations` to run more rolling research-only iterations when enough candles exist.
 - Review total trades, blocked trades, risk behavior, and backtest quality grade.
 - Confirm quality grade improves beyond `INSUFFICIENT_DATA` only when enough iterations exist.
 
