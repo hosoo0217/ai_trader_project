@@ -3,3 +3,14 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+
+# Generated reports/logs from local demo, backtest, approval, and replay flows
+reports/*.json
+reports/*.txt
+reports/*.csv
+logs/
+*.log
+
+# Private local data and secrets
+secrets/
+private_data/
