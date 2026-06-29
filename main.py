@@ -35,6 +35,11 @@ from ai.implementation_final_review import (
     ImplementationFinalReviewResult,
     ImplementationFinalReviewWorkflow,
 )
+from ai.implementation_readiness import (
+    ImplementationReadinessChecker,
+    ImplementationReadinessChecklist,
+    ImplementationReadinessConfig,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -330,6 +335,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--implementation-final-review-log-dir",
         default="reports",
         help="Output folder for implementation_final_reviews.json",
+    )
+    parser.add_argument(
+        "--check-implementation-readiness",
+        action="store_true",
+        help="Check whether a saved Implementation Plan is ready for future human-reviewed work",
     )
     return parser
 
@@ -1582,6 +1592,102 @@ def _final_review_saved_implementation_plan(
     _print_implementation_final_review(plan, final_review_result, log_result)
 
 
+def _print_implementation_readiness(
+    checklist: ImplementationReadinessChecklist | None,
+    message: str | None = None,
+) -> None:
+    """Print implementation readiness output without applying changes."""
+    print("\nImplementation Readiness")
+    if message:
+        print(f"- Message: {message}")
+
+    checklist_items = checklist.checklist_items if checklist is not None else {}
+    item_lines = (
+        "; ".join(f"{name}={value}" for name, value in checklist_items.items())
+        if checklist_items
+        else "None"
+    )
+    missing = "; ".join(checklist.missing_items) if checklist is not None and checklist.missing_items else "None"
+    warnings = "; ".join(checklist.warnings) if checklist is not None and checklist.warnings else "None"
+    reasons = "; ".join(checklist.reasons) if checklist is not None and checklist.reasons else "None"
+    blocking = (
+        "; ".join(checklist.blocking_reasons)
+        if checklist is not None and checklist.blocking_reasons
+        else "None"
+    )
+
+    print(f"- Plan ID: {checklist.plan_id if checklist is not None and checklist.plan_id else 'N/A'}")
+    print(f"- Ready: {checklist.ready if checklist is not None else False}")
+    print(f"- Status: {checklist.status if checklist is not None else 'UNKNOWN'}")
+    print(f"- Checklist items: {item_lines}")
+    print(f"- Missing items: {missing}")
+    print(f"- Warnings: {warnings}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- No implementation was applied automatically.")
+    print("- Readiness means future human-reviewed work only.")
+    print("- Live trading changes are not allowed.")
+    print(f"- Reasons: {reasons}")
+    print(f"- Blocking reasons: {blocking}")
+
+
+def _latest_final_review_for_plan(records: list[dict], plan_id: str | None) -> dict | None:
+    """Return the latest saved final review record for the selected plan."""
+    if not plan_id:
+        return None
+    for record in reversed(records):
+        if str(record.get("plan_id") or "") == str(plan_id):
+            return record
+    return None
+
+
+def _check_saved_implementation_readiness(
+    plan_index: int,
+    plan_config: ImplementationPlanStoreConfig,
+    final_review_log_config: ImplementationFinalReviewLogConfig,
+) -> None:
+    """Check readiness for one saved implementation plan."""
+    try:
+        plans = ImplementationPlanStore().load_plans(plan_config)
+    except Exception as exc:
+        _print_implementation_readiness(
+            None,
+            message=f"Could not load saved implementation plans: {exc}",
+        )
+        return
+
+    if not plans:
+        _print_implementation_readiness(
+            None,
+            message="No saved implementation plans available",
+        )
+        return
+
+    if plan_index < 0 or plan_index >= len(plans):
+        _print_implementation_readiness(
+            None,
+            message="Implementation plan index is out of range",
+        )
+        return
+
+    plan = plans[plan_index]
+    plan_id = str(plan.get("plan_id") or "") if isinstance(plan, dict) else str(getattr(plan, "plan_id", "") or "")
+    try:
+        final_review_records = ImplementationFinalReviewLogStore().load_log(final_review_log_config)
+    except Exception:
+        final_review_records = []
+
+    final_review_record = _latest_final_review_for_plan(final_review_records, plan_id)
+    checklist = ImplementationReadinessChecker().check(
+        plan,
+        final_review_record,
+        ImplementationReadinessConfig(),
+    )
+    if final_review_record is None and "Final review approval was not found" not in checklist.blocking_reasons:
+        checklist.blocking_reasons.append("Final review approval was not found")
+    _print_implementation_readiness(checklist)
+
+
 def _record_human_approval_decision(
     approval_result: StrategyApprovalPipelineResult,
     approval_decision: str,
@@ -2226,6 +2332,15 @@ def main(args: list[str] | None = None) -> None:
     implementation_final_review_log_config = ImplementationFinalReviewLogConfig(
         output_dir=getattr(parsed_args, "implementation_final_review_log_dir", "reports") or "reports",
     )
+    check_implementation_readiness = bool(getattr(parsed_args, "check_implementation_readiness", False))
+
+    if check_implementation_readiness:
+        _check_saved_implementation_readiness(
+            implementation_plan_index,
+            implementation_plan_config,
+            implementation_final_review_log_config,
+        )
+        return
 
     if final_review_implementation_plan:
         _final_review_saved_implementation_plan(

@@ -732,7 +732,10 @@ def _write_saved_implementation_plan(plan_dir: Path) -> Path:
                     "status": "PLANNED",
                     "human_final_approval_required": True,
                     "auto_implementation_allowed": False,
-                    "reasons": ["Implementation plans are planning records only"],
+                    "reasons": [
+                        "Implementation plans are planning records only",
+                        "Backtest evidence exists for this future work review.",
+                    ],
                     "blocking_reasons": [],
                 }
             ]
@@ -740,6 +743,37 @@ def _write_saved_implementation_plan(plan_dir: Path) -> Path:
         encoding="utf-8",
     )
     return plans_path
+
+
+def _write_saved_implementation_final_review(final_review_log_dir: Path) -> Path:
+    final_review_log_dir.mkdir(parents=True)
+    log_path = final_review_log_dir / "implementation_final_reviews.json"
+    log_path.write_text(
+        json.dumps(
+            [
+                {
+                    "plan_id": "plan-risk-management-12345678",
+                    "source_proposal_id": "proposal-risk-management-12345678",
+                    "title": "Implementation plan for risk management review",
+                    "category": "RISK_MANAGEMENT",
+                    "priority": "HIGH",
+                    "final_review_decision": "APPROVE_FOR_WORK",
+                    "final_review_status": "APPROVED_FOR_FUTURE_WORK",
+                    "approved_for_work": True,
+                    "implementation_allowed_now": False,
+                    "reviewed_by": "Hosoo",
+                    "reviewed_at": "2026-06-29T00:00:00+00:00",
+                    "notes": "Backtest evidence exists and this is future work only.",
+                    "human_final_approval_required": True,
+                    "auto_implementation_allowed": False,
+                    "reasons": ["Backtest evidence exists for this future work review."],
+                    "blocking_reasons": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return log_path
 
 
 def test_main_records_accept_change_proposal_review(tmp_path: Path) -> None:
@@ -1108,6 +1142,122 @@ def test_final_review_implementation_plan_output_has_no_direct_trade_commands(tm
     output = _run_main(
         "--final-review-implementation-plan",
         "APPROVE_FOR_WORK",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    ).lower()
+
+    forbidden_phrases = [
+        "buy now",
+        "sell now",
+        "enter trade",
+        "open position",
+        "guaranteed signal",
+        "strategy changed automatically",
+        "auto implemented",
+    ]
+    for phrase in forbidden_phrases:
+        assert phrase not in output
+
+
+def test_main_prints_implementation_readiness_when_flag_is_used(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+    _write_saved_implementation_final_review(final_review_log_dir)
+
+    output = _run_main(
+        "--check-implementation-readiness",
+        "--implementation-plan-index",
+        "0",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    assert "Implementation Readiness" in output
+    assert "- Ready: True" in output
+    assert "- Status: READY_FOR_HUMAN_WORK" in output
+    assert "- No strategy rule was changed." in output
+
+
+def test_implementation_readiness_missing_plans_file_does_not_crash(tmp_path: Path) -> None:
+    output = _run_main(
+        "--check-implementation-readiness",
+        "--implementation-plan-dir",
+        str(tmp_path / "missing_plans"),
+    )
+
+    assert "Implementation Readiness" in output
+    assert "No saved implementation plans available" in output
+    assert "- No strategy rule was changed." in output
+
+
+def test_implementation_readiness_missing_final_review_log_does_not_crash(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--check-implementation-readiness",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(tmp_path / "missing_final_reviews"),
+    )
+
+    assert "Implementation Readiness" in output
+    assert "- Ready: False" in output
+    assert "- Status: NOT_READY" in output
+    assert "Final review approval was not found" in output
+
+
+def test_implementation_readiness_no_final_review_returns_not_ready(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+    final_review_log_dir.mkdir(parents=True)
+    (final_review_log_dir / "implementation_final_reviews.json").write_text("[]", encoding="utf-8")
+
+    output = _run_main(
+        "--check-implementation-readiness",
+        "--implementation-plan-dir",
+        str(plan_dir),
+        "--implementation-final-review-log-dir",
+        str(final_review_log_dir),
+    )
+
+    assert "Implementation Readiness" in output
+    assert "- Ready: False" in output
+    assert "- Status: NOT_READY" in output
+
+
+def test_implementation_readiness_out_of_range_plan_index_does_not_crash(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    _write_saved_implementation_plan(plan_dir)
+
+    output = _run_main(
+        "--check-implementation-readiness",
+        "--implementation-plan-index",
+        "99",
+        "--implementation-plan-dir",
+        str(plan_dir),
+    )
+
+    assert "Implementation Readiness" in output
+    assert "Implementation plan index is out of range" in output
+    assert "- Ready: False" in output
+
+
+def test_implementation_readiness_output_has_no_direct_trade_commands(tmp_path: Path) -> None:
+    plan_dir = tmp_path / "plans"
+    final_review_log_dir = tmp_path / "final_review_logs"
+    _write_saved_implementation_plan(plan_dir)
+    _write_saved_implementation_final_review(final_review_log_dir)
+
+    output = _run_main(
+        "--check-implementation-readiness",
         "--implementation-plan-dir",
         str(plan_dir),
         "--implementation-final-review-log-dir",
