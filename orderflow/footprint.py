@@ -54,6 +54,10 @@ class FootprintCandle:
     low: float
     close: float
     levels: list[FootprintLevel] = field(default_factory=list)
+    source_format: str = "PRICE_LEVEL_FOOTPRINT"
+    source_note: str | None = None
+    reported_volume: float | None = None
+    reported_delta: float | None = None
 
     def total_bid_volume(self) -> float:
         """Return total safe bid volume across all price levels."""

@@ -96,6 +96,14 @@ class OrderFlowDataQualityChecker:
             blocking_reasons.append(f"Candle count {candle_count} is below minimum {min_candles}")
 
         for candle_index, candle in enumerate(candle_list):
+            if getattr(candle, "source_format", None) == "BAR_SUMMARY":
+                reason = (
+                    "BAR_SUMMARY data uses one synthetic close-price level per candle; "
+                    "it is not full price-level footprint data"
+                )
+                if reason not in reasons:
+                    reasons.append(reason)
+
             levels = getattr(candle, "levels", None)
             if levels is None:
                 blocking_reasons.append(f"Candle {candle_index} has no levels field")

@@ -2,6 +2,8 @@
 
 This guide explains how to test a real exported Sierra Chart footprint / Order Flow CSV file with the existing `ai_trader_project` CSV importer, data-quality checker, and replay tools.
 
+The importer can read both full price-level footprint CSV data and Sierra Chart bar summary / study CSV data. Bar summary data is useful for early validation, but full price-level footprint export is still preferred for deeper Order Flow validation.
+
 It is documentation only. It does not add trading features, edit Python code, connect to Sierra Chart live data, connect to CME live data, connect to a broker, call external APIs, create real trade execution, or implement live trading.
 
 ## 1. Purpose
@@ -18,6 +20,13 @@ The goal is to confirm that a real CSV export can be:
 - reviewed without connecting to any live system.
 
 This is a validation step before deeper backtest or paper-trading validation. It is not live trading.
+
+Sierra Chart can export different kinds of CSV files:
+
+- Full footprint / price-level data, where each candle has multiple price levels with bid and ask volume.
+- Bar summary / study data, where each row is one bar with OHLC, total volume, bid volume, ask volume, and delta.
+
+The project can now safely read bar summary exports, but those rows are converted into one synthetic footprint level at the close price. That makes the data usable for early importer, data-quality, CVD, and replay checks, but it is weaker than true footprint data.
 
 ## 2. Important Safety Warning
 
@@ -52,7 +61,7 @@ Keep the first file small so it is easier to inspect if something looks wrong.
 
 The importer maps real CSV headers into normalized footprint fields.
 
-Expected fields generally include:
+For full footprint / price-level CSV exports, expected fields generally include:
 
 - `timestamp` / `datetime` / `time`
 - price level
@@ -76,6 +85,23 @@ Sierra Chart exports may use different column names. Column names may need mappi
 
 Known supported examples include names like `Date Time`, `Last`, `Level`, `Bid Volume`, and `Ask Volume`.
 
+For Sierra Chart bar summary / study exports, supported fields include:
+
+- `Date`
+- `Time`
+- `Open`
+- `High`
+- `Low`
+- `Last`
+- `Volume`
+- `Bid Volume`
+- `Ask Volume`
+- `Delta`
+
+In bar summary mode, each CSV row becomes one `FootprintCandle`. The importer uses `Date` + `Time` as the candle timestamp, reads OHLC from the row, uses `Last` as the close price, and creates one synthetic `FootprintLevel` at that close price with the row's bid and ask volume.
+
+Bar summary imports are marked as `BAR_SUMMARY` in the imported candle metadata and data-quality output. This note means the file is not full price-level footprint data.
+
 ## 5. Data Quality Checks
 
 Before trusting the output, check the file and the program output.
@@ -91,8 +117,11 @@ Before trusting the output, check the file and the program output.
 - [ ] Session time makes sense.
 - [ ] Data quality checker should not crash.
 - [ ] If quality fails, blocking reasons should be readable.
+- [ ] If the file is bar summary data, output should mention `BAR_SUMMARY`.
 
 The data-quality checker may return statuses such as `PASSED`, `WARNING`, `FAILED`, `EMPTY`, or `INVALID`. Failed, empty, or invalid data should block Order Flow safely.
+
+Bar summary data may pass data quality because it has valid candles and bid/ask volume, but it should still be treated as early validation data. Use full price-level footprint data later when available.
 
 ## 6. Example Command Using Sample CSV
 
@@ -122,7 +151,7 @@ Use `data/your_real_sierra_export.csv` as a placeholder. Rename it to the real l
 Expected result:
 
 - The file loads if the path and columns are valid.
-- The system prints Order Flow context, data-quality status, or blocking reasons.
+- The system prints Order Flow context, data-quality status, `BAR_SUMMARY` notes, or blocking reasons.
 - Invalid CSV data should fail safely.
 
 ## 8. Replay Test Command
@@ -146,6 +175,7 @@ The system should print one or more of:
 
 - Order Flow context,
 - data-quality status,
+- `BAR_SUMMARY` notes for bar summary exports,
 - replay steps,
 - final replay bias/confidence,
 - blocking reasons,
@@ -176,6 +206,7 @@ Common problems:
 - Missing bid/ask volume.
 - Missing price level.
 - Missing OHLC columns.
+- Bar summary export used when full footprint export was expected.
 - File path typo.
 - File is too large for a first test.
 
@@ -212,3 +243,5 @@ This guide helps test real Sierra Chart exported data without connecting to live
 You export a small CSV from Sierra Chart, place it locally, run the existing demo/replay commands, and check whether the importer and data-quality checker understand it.
 
 Everything should stay local, offline, and research-only. The goal is to prove the CSV format is usable before trusting it in deeper backtest or paper-trading validation.
+
+Bar summary exports are a safe first step, but they are not the final Order Flow data target. For serious footprint validation, export full price-level footprint data later and test it separately.
