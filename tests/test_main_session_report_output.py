@@ -683,6 +683,187 @@ def test_approve_change_proposal_with_missing_history_does_not_crash(tmp_path: P
     assert proposals_path.exists()
 
 
+def _write_saved_change_proposal(proposal_dir: Path) -> Path:
+    proposal_dir.mkdir(parents=True)
+    proposals_path = proposal_dir / "change_proposals.json"
+    proposals_path.write_text(
+        json.dumps(
+            [
+                {
+                    "proposal_id": "proposal-risk-management-12345678",
+                    "source_request_id": "approval-risk-management-12345678",
+                    "category": "RISK_MANAGEMENT",
+                    "priority": "HIGH",
+                    "title": "Review proposed RISK_MANAGEMENT change",
+                    "description": "Review drawdown limits before changing any strategy rule.",
+                    "reason": "A human approved this future reviewed change proposal",
+                    "risk": "Risk must be reviewed again before any implementation.",
+                    "proposed_change": "Prepare a human-reviewed change proposal.",
+                    "status": "PROPOSED",
+                    "human_review_required": True,
+                    "auto_implementation_allowed": False,
+                    "reasons": ["Change proposals are planning records only"],
+                    "blocking_reasons": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return proposals_path
+
+
+def test_main_records_accept_change_proposal_review(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--change-proposal-index",
+        "0",
+        "--proposal-reviewed-by",
+        "Hosoo",
+        "--proposal-review-notes",
+        "Accepted for future work only",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+    )
+
+    review_log_path = review_log_dir / "change_proposal_reviews.json"
+    records = json.loads(review_log_path.read_text(encoding="utf-8"))
+    assert "Change Proposal Review" in output
+    assert "- Decision: ACCEPT" in output
+    assert "- Status: ACCEPTED_FOR_FUTURE_WORK" in output
+    assert "- Implementation allowed: False" in output
+    assert "- No strategy rule was changed." in output
+    assert review_log_path.exists()
+    assert records[0]["review_decision"] == "ACCEPT"
+    assert records[0]["implementation_allowed"] is False
+
+
+def test_main_records_reject_change_proposal_review(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "REJECT",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+    )
+
+    records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
+    assert "Change Proposal Review" in output
+    assert "- Decision: REJECT" in output
+    assert "- Status: REJECTED" in output
+    assert records[0]["review_decision"] == "REJECT"
+    assert records[0]["accepted"] is False
+
+
+def test_main_records_needs_more_data_change_proposal_review(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "NEEDS_MORE_DATA",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+    )
+
+    records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
+    assert "Change Proposal Review" in output
+    assert "- Decision: NEEDS_MORE_DATA" in output
+    assert records[0]["review_status"] == "NEEDS_MORE_DATA"
+
+
+def test_main_records_needs_backtest_change_proposal_review(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "NEEDS_BACKTEST",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+    )
+
+    records = json.loads((review_log_dir / "change_proposal_reviews.json").read_text(encoding="utf-8"))
+    assert "Change Proposal Review" in output
+    assert "- Decision: NEEDS_BACKTEST" in output
+    assert records[0]["review_status"] == "NEEDS_BACKTEST"
+
+
+def test_review_change_proposal_missing_file_does_not_crash(tmp_path: Path) -> None:
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--proposal-dir",
+        str(tmp_path / "missing_proposals"),
+    )
+
+    assert "Change Proposal Review" in output
+    assert "No saved change proposals available" in output
+    assert "- No strategy rule was changed." in output
+
+
+def test_review_change_proposal_out_of_range_does_not_crash(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--change-proposal-index",
+        "99",
+        "--proposal-dir",
+        str(proposal_dir),
+    )
+
+    assert "Change Proposal Review" in output
+    assert "Change proposal index is out of range" in output
+    assert "- Log saved: False" in output
+
+
+def test_review_change_proposal_output_has_no_direct_trade_commands(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+    review_log_dir = tmp_path / "review_logs"
+    _write_saved_change_proposal(proposal_dir)
+
+    output = _run_main(
+        "--review-change-proposal",
+        "ACCEPT",
+        "--proposal-dir",
+        str(proposal_dir),
+        "--proposal-review-log-dir",
+        str(review_log_dir),
+    ).lower()
+
+    forbidden_phrases = [
+        "buy now",
+        "sell now",
+        "enter trade",
+        "open position",
+        "guaranteed signal",
+        "strategy changed automatically",
+        "auto implemented",
+    ]
+    for phrase in forbidden_phrases:
+        assert phrase not in output
+
+
 def test_existing_demo_command_still_works_without_session_trend() -> None:
     output = _run_main("--mode", "demo", "--scenario", "bullish", "--profile", "apex")
 

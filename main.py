@@ -20,6 +20,11 @@ from ai.strategy_approval_pipeline import (
 )
 from ai.human_approval import HumanApprovalConfig, HumanApprovalResult, HumanApprovalWorkflow
 from ai.change_proposal import ChangeProposalConfig, ChangeProposalResult, ChangeProposalEngine
+from ai.change_proposal_review import (
+    ChangeProposalReviewConfig,
+    ChangeProposalReviewResult,
+    ChangeProposalReviewWorkflow,
+)
 from analysis.news_filter import NewsEvent, NewsFilterConfig
 from analysis.session_filter import SessionFilterConfig
 from analysis.spread_filter import SpreadFilterConfig
@@ -77,6 +82,11 @@ from storage.session_history import SessionHistoryConfig, SessionHistoryStore, S
 from storage.session_trend import SessionTrendAnalyzer, SessionTrendConfig, SessionTrendResult
 from storage.human_approval_log import HumanApprovalLogConfig, HumanApprovalLogResult, HumanApprovalLogStore
 from storage.change_proposal_store import ChangeProposalStoreConfig, ChangeProposalStoreResult, ChangeProposalStore
+from storage.change_proposal_review_log import (
+    ChangeProposalReviewLogConfig,
+    ChangeProposalReviewLogResult,
+    ChangeProposalReviewLogStore,
+)
 from storage.trade_journal import TradeJournal
 
 
@@ -243,6 +253,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--proposal-dir",
         default="reports",
         help="Output folder for change_proposals.json",
+    )
+    parser.add_argument(
+        "--review-change-proposal",
+        default="",
+        help="Review a saved change proposal: ACCEPT, REJECT, NEEDS_MORE_DATA, or NEEDS_BACKTEST",
+    )
+    parser.add_argument(
+        "--change-proposal-index",
+        type=int,
+        default=0,
+        help="Zero-based saved Change Proposal index to review",
+    )
+    parser.add_argument(
+        "--proposal-reviewed-by",
+        default="",
+        help="Optional reviewer name for the change proposal review log",
+    )
+    parser.add_argument(
+        "--proposal-review-notes",
+        default="",
+        help="Optional notes for the change proposal review log",
+    )
+    parser.add_argument(
+        "--proposal-review-log-dir",
+        default="reports",
+        help="Output folder for change_proposal_reviews.json",
     )
     return parser
 
@@ -1152,6 +1188,123 @@ def _create_and_store_change_proposal(
     _print_approved_change_proposal(proposal_result, store_result)
 
 
+def _print_change_proposal_review(
+    proposal: object | None,
+    review_result: ChangeProposalReviewResult | None,
+    log_result: ChangeProposalReviewLogResult | None,
+    message: str | None = None,
+) -> None:
+    """Print one proposal review decision without implementing changes."""
+    print("\nChange Proposal Review")
+    if message:
+        print(f"- Message: {message}")
+
+    decision = review_result.decision if review_result is not None else None
+    proposal_id = (
+        getattr(proposal, "proposal_id", None)
+        if proposal is not None and not isinstance(proposal, dict)
+        else (proposal or {}).get("proposal_id") if isinstance(proposal, dict) else None
+    )
+    proposal_id = proposal_id or (review_result.proposal_id if review_result is not None else None) or "N/A"
+    decision_text = getattr(decision, "decision", None) or "UNKNOWN"
+    reviewed_by = getattr(decision, "reviewed_by", None) or "N/A"
+    notes = getattr(decision, "notes", None) or "None"
+    reasons = review_result.reasons if review_result is not None else []
+    blocking_reasons = review_result.blocking_reasons if review_result is not None else []
+    if log_result is not None and log_result.blocking_reasons:
+        blocking_reasons = list(blocking_reasons) + list(log_result.blocking_reasons)
+
+    reasons_text = "; ".join(reasons) if reasons else "None"
+    blocking_text = "; ".join(blocking_reasons) if blocking_reasons else "None"
+    print(f"- Proposal ID: {proposal_id}")
+    print(f"- Decision: {decision_text}")
+    print(f"- Status: {review_result.status if review_result is not None else 'UNKNOWN'}")
+    print(f"- Accepted: {review_result.accepted if review_result is not None else False}")
+    print(f"- Implementation allowed: {review_result.implementation_allowed if review_result is not None else False}")
+    print(f"- Reviewed by: {reviewed_by}")
+    print(f"- Notes: {notes}")
+    print(f"- Log saved: {log_result.saved if log_result is not None else False}")
+    print(f"- Log path: {log_result.log_path if log_result is not None else 'None'}")
+    print("- No strategy rule was changed.")
+    print("- No trade signal was created.")
+    print("- Review decision is recorded for future human-reviewed work only.")
+    print("- ACCEPT does not mean automatic implementation.")
+    print(f"- Reasons: {reasons_text}")
+    print(f"- Blocking reasons: {blocking_text}")
+
+
+def _review_saved_change_proposal(
+    review_decision: str,
+    proposal_index: int,
+    reviewed_by: str | None,
+    notes: str | None,
+    proposal_config: ChangeProposalStoreConfig,
+    review_log_config: ChangeProposalReviewLogConfig,
+) -> None:
+    """Review one saved proposal without implementing it."""
+    try:
+        proposals = ChangeProposalStore().load_proposals(proposal_config)
+    except Exception as exc:
+        _print_change_proposal_review(
+            None,
+            None,
+            None,
+            message=f"Could not load saved change proposals: {exc}",
+        )
+        return
+
+    if not proposals:
+        _print_change_proposal_review(
+            None,
+            None,
+            None,
+            message="No saved change proposals available",
+        )
+        return
+
+    if proposal_index < 0 or proposal_index >= len(proposals):
+        _print_change_proposal_review(
+            None,
+            None,
+            None,
+            message="Change proposal index is out of range",
+        )
+        return
+
+    proposal = proposals[proposal_index]
+    try:
+        review_result = ChangeProposalReviewWorkflow().review(
+            proposal,
+            review_decision,
+            ChangeProposalReviewConfig(),
+            reviewed_by=reviewed_by or None,
+            notes=notes or None,
+        )
+    except Exception as exc:
+        review_result = ChangeProposalReviewResult(
+            proposal_id=proposal.get("proposal_id") if isinstance(proposal, dict) else None,
+            decision=None,
+            status="UNKNOWN",
+            accepted=False,
+            implementation_allowed=False,
+            reasons=["Change proposal review could not be recorded"],
+            blocking_reasons=[f"Review workflow failed: {exc}"],
+        )
+
+    try:
+        log_result = ChangeProposalReviewLogStore().append_review(proposal, review_result, review_log_config)
+    except Exception as exc:
+        log_result = ChangeProposalReviewLogResult(
+            saved=False,
+            log_path=None,
+            total_records=0,
+            reasons=["Change proposal review log was requested"],
+            blocking_reasons=[f"Change proposal review log could not be saved: {exc}"],
+        )
+
+    _print_change_proposal_review(proposal, review_result, log_result)
+
+
 def _record_human_approval_decision(
     approval_result: StrategyApprovalPipelineResult,
     approval_decision: str,
@@ -1777,6 +1930,24 @@ def main(args: list[str] | None = None) -> None:
     proposal_store_config = ChangeProposalStoreConfig(
         output_dir=getattr(parsed_args, "proposal_dir", "reports") or "reports",
     )
+    review_change_proposal = str(getattr(parsed_args, "review_change_proposal", "") or "").strip()
+    change_proposal_index = int(getattr(parsed_args, "change_proposal_index", 0) or 0)
+    proposal_reviewed_by = str(getattr(parsed_args, "proposal_reviewed_by", "") or "").strip()
+    proposal_review_notes = str(getattr(parsed_args, "proposal_review_notes", "") or "").strip()
+    proposal_review_log_config = ChangeProposalReviewLogConfig(
+        output_dir=getattr(parsed_args, "proposal_review_log_dir", "reports") or "reports",
+    )
+
+    if review_change_proposal:
+        _review_saved_change_proposal(
+            review_change_proposal,
+            change_proposal_index,
+            proposal_reviewed_by,
+            proposal_review_notes,
+            proposal_store_config,
+            proposal_review_log_config,
+        )
+        return
 
     if approval_decision and not show_session_trend:
         print("Session trend is required to create approval requests")

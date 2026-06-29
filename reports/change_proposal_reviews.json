@@ -1,0 +1,26 @@
+[
+  {
+    "proposal_id": "proposal-backtesting-5d90e981",
+    "source_request_id": "approval-backtesting-cc5da0c5",
+    "category": "BACKTESTING",
+    "priority": "MEDIUM",
+    "title": "Review proposed BACKTESTING change",
+    "description": "Save more session history before changing strategy rules.",
+    "review_decision": "NEEDS_BACKTEST",
+    "review_status": "NEEDS_BACKTEST",
+    "accepted": false,
+    "implementation_allowed": false,
+    "reviewed_by": "Hosoo",
+    "reviewed_at": "2026-06-29T11:32:38.857204+00:00",
+    "notes": "Needs more backtesting before implementation",
+    "human_review_required": true,
+    "auto_implementation_allowed": false,
+    "reasons": [
+      "Change proposal review records review outcomes only",
+      "Final implementation must remain separate and human-controlled"
+    ],
+    "blocking_reasons": [
+      "Backtesting is required before this proposal can move forward"
+    ]
+  }
+]
