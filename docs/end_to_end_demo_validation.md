@@ -19,7 +19,7 @@ The goal is to confirm that the current research / backtest / paper-trading MVP 
 
 This validation is not a live-trading test. It is only a safe local check before deeper backtest validation, real Sierra Chart CSV validation, and paper-trading validation.
 
-## 2. Required Baseline Check
+## 2. Baseline Test
 
 Run the full test suite first:
 
@@ -120,7 +120,7 @@ Expected safe behavior:
 - Replay output is not a live trade signal.
 - No real order is placed.
 
-## 7. Session Report / Trend Validation
+## 7. Session Trend Validation
 
 Show session trend:
 
