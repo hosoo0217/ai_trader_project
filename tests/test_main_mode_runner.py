@@ -114,6 +114,13 @@ def test_help_includes_export_backtest_trade_traces() -> None:
     assert "executed backtest trade trace reports" in normalized_help
 
 
+def test_help_includes_simulate_orderflow_confirmation_ab() -> None:
+    help_text = main._build_parser().format_help()
+
+    assert "--simulate-orderflow-confirmation-ab" in help_text
+    assert "Order Flow confirmation" in help_text
+
+
 def test_help_includes_register_change_proposal_doc() -> None:
     help_text = main._build_parser().format_help()
 
@@ -343,6 +350,178 @@ def test_backtest_trade_trace_export_works_with_no_executed_trades(
     assert payload["executed_trade_iterations"] == []
     assert payload["blocked_trade_summary"]["count"] == 1
     assert "Executed Trade Iterations\n- None" in txt_report
+
+
+def test_orderflow_confirmation_ab_report_counts_neutral_executed_trade_as_b_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_reports"
+    seen: dict[str, bool] = {}
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        seen["collect_iteration_traces"] = bool(kwargs.get("collect_iteration_traces", False))
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=2,
+            trades_executed=2,
+            trades_blocked=0,
+            final_balance=9990.0,
+            total_pnl=-10.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="SELL",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    orderflow_status="NEUTRAL",
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                ),
+                BacktestIterationTrace(
+                    iteration_index=2,
+                    window_start=5,
+                    window_end=64,
+                    final_action="SELL",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    orderflow_status="BEARISH",
+                    simulated_pnl=10.0,
+                    outcome="WIN",
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    output = _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    report_path = trace_dir / "orderflow_confirmation_ab_report.json"
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert "Order Flow Confirmation A/B Diagnostic" in output
+    assert seen["collect_iteration_traces"] is True
+    assert payload["a_current_behavior"]["executed_trades"] == 2
+    assert payload["b_simulated_behavior"]["executed_trades"] == 1
+    assert payload["b_simulated_behavior"]["blocked_by_orderflow_confirmation"] == 1
+    assert payload["b_simulated_behavior"]["blocked_because_orderflow_neutral"] == 1
+    assert payload["b_simulated_blocked_trades"][0]["iteration_index"] == 1
+
+
+def test_orderflow_confirmation_ab_report_warns_when_b_blocks_everything(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_reports"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=1,
+            trades_blocked=0,
+            final_balance=9990.0,
+            total_pnl=-10.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="SELL",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    orderflow_status="NEUTRAL",
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    payload = json.loads((trace_dir / "orderflow_confirmation_ab_report.json").read_text(encoding="utf-8"))
+
+    assert payload["b_simulated_behavior"]["executed_trades"] == 0
+    assert payload["summary"]["warning"] == "B simulated behavior blocks every A executed trade"
+
+
+def test_orderflow_confirmation_ab_report_works_with_no_executed_trades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_empty_reports"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=0,
+            trades_blocked=1,
+            final_balance=10000.0,
+            total_pnl=0.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="NO_TRADE",
+                    final_allowed=False,
+                    trade_executed=False,
+                    status="NO_TRADE",
+                    orderflow_status="NEUTRAL",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    payload = json.loads((trace_dir / "orderflow_confirmation_ab_report.json").read_text(encoding="utf-8"))
+
+    assert payload["a_current_behavior"]["executed_trades"] == 0
+    assert payload["b_simulated_behavior"]["executed_trades"] == 0
+    assert payload["b_simulated_behavior"]["blocked_by_orderflow_confirmation"] == 0
+    assert payload["summary"]["warning"] is None
 
 
 def test_backtest_trace_collection_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

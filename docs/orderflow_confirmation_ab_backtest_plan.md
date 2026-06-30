@@ -73,6 +73,21 @@ Proposed behavior would require directional Order Flow confirmation:
 
 The B behavior should be tested only as a research comparison before any strategy code change.
 
+The CLI can generate a research-only A/B diagnostic report with:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex --backtest-market-csv private_data/sierra_chart/gc_weekday_test.csv --orderflow-csv private_data/sierra_chart/gc_weekday_test.csv --backtest-max-iterations 50 --simulate-orderflow-confirmation-ab
+```
+
+This writes:
+
+```text
+reports/orderflow_confirmation_ab_report.json
+reports/orderflow_confirmation_ab_report.txt
+```
+
+The diagnostic flag does not implement the proposed rule. It runs current behavior as A, then reports which executed A trades simulated B would have blocked because Order Flow confirmation was missing.
+
 ## 5. Required Input Data
 
 Required data for the A/B study:

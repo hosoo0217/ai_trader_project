@@ -367,6 +367,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output folder for exported backtest trade trace reports",
     )
     parser.add_argument(
+        "--simulate-orderflow-confirmation-ab",
+        action="store_true",
+        help="Export a research-only A/B diagnostic for simulated Order Flow confirmation",
+    )
+    parser.add_argument(
         "--show-trace",
         action="store_true",
         help="Show decision trace details in output",
@@ -1267,6 +1272,222 @@ def _export_backtest_trade_traces(
 
     txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return json_path, txt_path
+
+
+def _export_orderflow_confirmation_ab_report(
+    output_dir: str,
+    scenario: str,
+    profile: TradingProfile,
+    result,
+    performance,
+) -> tuple[Path, Path]:
+    """Export a research-only A/B diagnostic without changing execution."""
+    destination = Path(output_dir or "reports")
+    destination.mkdir(parents=True, exist_ok=True)
+    json_path = destination / "orderflow_confirmation_ab_report.json"
+    txt_path = destination / "orderflow_confirmation_ab_report.txt"
+
+    executed_iterations = [
+        item for item in list(getattr(result, "iteration_traces", [])) if bool(getattr(item, "trade_executed", False))
+    ]
+    b_blocked_by_orderflow = [
+        item for item in executed_iterations if _would_block_by_orderflow_confirmation(item)
+    ]
+    b_blocked_ids = {id(item) for item in b_blocked_by_orderflow}
+    b_remaining_executed = [
+        item for item in executed_iterations if id(item) not in b_blocked_ids
+    ]
+    b_pnls = [
+        float(item.simulated_pnl)
+        for item in b_remaining_executed
+        if getattr(item, "simulated_pnl", None) is not None
+    ]
+    b_metrics = _performance_metrics_from_pnls(b_pnls, len(b_remaining_executed))
+    warning = (
+        "B simulated behavior blocks every A executed trade"
+        if result.trades_executed > 0 and len(b_remaining_executed) == 0
+        else None
+    )
+
+    payload = {
+        "summary": {
+            "scenario": scenario,
+            "profile": profile.profile_name,
+            "research_only": True,
+            "not_implementation": True,
+            "total_iterations": result.total_iterations,
+            "warning": warning,
+            "safety": {
+                "live_trading": False,
+                "broker_connection": False,
+                "mt5_login": False,
+                "sierra_live_connection": False,
+                "cme_live_data_connection": False,
+                "real_orders": False,
+                "external_apis": False,
+            },
+        },
+        "a_current_behavior": {
+            "executed_trades": result.trades_executed,
+            "blocked_trades": result.trades_blocked,
+            "total_pnl": result.total_pnl,
+            "win_rate": performance.win_rate,
+            "max_drawdown": performance.max_drawdown,
+            "profit_factor": "INF" if performance.profit_factor == float("inf") else performance.profit_factor,
+        },
+        "b_simulated_behavior": {
+            "executed_trades": len(b_remaining_executed),
+            "blocked_trades": result.trades_blocked + len(b_blocked_by_orderflow),
+            "blocked_by_orderflow_confirmation": len(b_blocked_by_orderflow),
+            "blocked_because_orderflow_neutral": sum(
+                1 for item in b_blocked_by_orderflow if str(item.orderflow_status or "").upper() == "NEUTRAL"
+            ),
+            "total_pnl": b_metrics["total_pnl"],
+            "win_rate": b_metrics["win_rate"],
+            "max_drawdown": b_metrics["max_drawdown"],
+            "profit_factor": b_metrics["profit_factor"],
+            "metrics_safely_derivable": len(b_pnls) == len(b_remaining_executed),
+        },
+        "b_simulated_blocked_trades": [
+            {
+                "iteration_index": item.iteration_index,
+                "final_action": item.final_action,
+                "orderflow_status": item.orderflow_status,
+                "orderflow_reasons": list(item.orderflow_reasons),
+                "simulated_pnl_avoided": item.simulated_pnl,
+                "outcome": item.outcome,
+                "simulated_blocking_reason": _orderflow_confirmation_block_reason(item),
+            }
+            for item in b_blocked_by_orderflow
+        ],
+        "explanation": (
+            "This report simulates what the proposed Order Flow confirmation rule would have blocked. "
+            "It does not implement the rule, change actual backtest execution, or approve strategy changes."
+        ),
+    }
+
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    lines = [
+        "Order Flow Confirmation A/B Diagnostic Report",
+        "",
+        "Safety",
+        "- Research-only diagnostic",
+        "- This is not implementation",
+        "- No strategy rule was changed",
+        "- No risk rule was changed",
+        "- No live trading",
+        "- No broker connection",
+        "- No MT5 login",
+        "- No Sierra live connection",
+        "- No CME live data connection",
+        "- No real orders",
+        "- No external APIs",
+        "",
+        "A Current Behavior Summary",
+        f"- Total iterations: {result.total_iterations}",
+        f"- A executed trades: {result.trades_executed}",
+        f"- A blocked trades: {result.trades_blocked}",
+        f"- A PnL: {result.total_pnl:.2f}",
+        f"- A win rate: {performance.win_rate:.2f}%",
+        f"- A max drawdown: {performance.max_drawdown:.2f}",
+        "",
+        "B Simulated Behavior Summary",
+        f"- B simulated executed trades: {len(b_remaining_executed)}",
+        f"- B simulated blocked trades: {result.trades_blocked + len(b_blocked_by_orderflow)}",
+        f"- Trades B would block by Order Flow confirmation: {len(b_blocked_by_orderflow)}",
+        f"- Trades B would block because Order Flow was NEUTRAL: {payload['b_simulated_behavior']['blocked_because_orderflow_neutral']}",
+        f"- Simulated B PnL: {_format_optional_float(b_metrics['total_pnl'])}",
+        f"- Simulated B win rate: {_format_optional_float(b_metrics['win_rate'], suffix='%')}",
+        f"- Simulated B max drawdown: {_format_optional_float(b_metrics['max_drawdown'])}",
+        f"- Warning: {warning or 'None'}",
+        "",
+        "B Simulated Blocked Trades",
+    ]
+    if b_blocked_by_orderflow:
+        for item in b_blocked_by_orderflow:
+            lines.append(
+                f"- Iteration {item.iteration_index}: {item.final_action} blocked; "
+                f"Order Flow={item.orderflow_status or 'UNKNOWN'}; "
+                f"PnL avoided={item.simulated_pnl if item.simulated_pnl is not None else 'N/A'}; "
+                f"reason={_orderflow_confirmation_block_reason(item)}"
+            )
+    else:
+        lines.append("- None")
+
+    lines.extend(
+        [
+            "",
+            "Interpretation",
+            "- B is calculated from A's completed backtest traces only.",
+            "- B does not affect actual trade execution.",
+            "- If B blocks losing trades, that does not prove B is profitable.",
+            "- This only shows whether the proposed rule would have avoided specific A trades.",
+        ]
+    )
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, txt_path
+
+
+def _would_block_by_orderflow_confirmation(item) -> bool:
+    """Return whether simulated B would block one A executed trade."""
+    action = str(getattr(item, "final_action", "") or "").upper()
+    orderflow_status = str(getattr(item, "orderflow_status", "") or "").upper()
+    if action == "BUY":
+        return orderflow_status != "BULLISH"
+    if action == "SELL":
+        return orderflow_status != "BEARISH"
+    return False
+
+
+def _orderflow_confirmation_block_reason(item) -> str:
+    action = str(getattr(item, "final_action", "") or "").upper()
+    orderflow_status = str(getattr(item, "orderflow_status", "") or "UNKNOWN").upper()
+    if orderflow_status == "NEUTRAL":
+        return "Order Flow was NEUTRAL"
+    if action == "BUY":
+        return f"BUY requires BULLISH Order Flow; observed {orderflow_status}"
+    if action == "SELL":
+        return f"SELL requires BEARISH Order Flow; observed {orderflow_status}"
+    return f"Order Flow confirmation missing for action {action or 'UNKNOWN'}"
+
+
+def _performance_metrics_from_pnls(pnls: list[float], executed_count: int) -> dict[str, object]:
+    wins = [value for value in pnls if value > 0]
+    losses = [value for value in pnls if value < 0]
+    total_pnl = float(sum(pnls))
+    win_rate = float(len(wins) / len(pnls) * 100.0) if pnls else 0.0
+    gross_profit = float(sum(wins))
+    gross_loss_abs = float(abs(sum(losses)))
+    if gross_loss_abs == 0.0:
+        profit_factor: float | str = "INF" if gross_profit > 0.0 else 0.0
+    else:
+        profit_factor = float(gross_profit / gross_loss_abs)
+    return {
+        "executed_count": executed_count,
+        "total_pnl": total_pnl,
+        "win_rate": win_rate,
+        "max_drawdown": _max_drawdown_from_pnls(pnls),
+        "profit_factor": profit_factor,
+        "average_pnl_per_trade": float(total_pnl / len(pnls)) if pnls else 0.0,
+    }
+
+
+def _max_drawdown_from_pnls(pnls: list[float]) -> float:
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for pnl in pnls:
+        equity += pnl
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    return float(max_drawdown)
+
+
+def _format_optional_float(value: object, suffix: str = "") -> str:
+    if isinstance(value, (int, float)):
+        return f"{float(value):.2f}{suffix}"
+    return f"{value}{suffix}" if value is not None else "N/A"
 
 
 def _print_full_trading_session_report(report: TradingSessionReport) -> None:
@@ -2519,6 +2740,7 @@ def _run_backtest_scenario(
     backtest_max_iterations: int | None,
     export_backtest_trade_traces: bool,
     backtest_trace_dir: str,
+    simulate_orderflow_confirmation_ab: bool,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -2568,7 +2790,7 @@ def _run_backtest_scenario(
         spread_config,
         current_spread,
         orderflow_context_result,
-        collect_iteration_traces=export_backtest_trade_traces,
+        collect_iteration_traces=export_backtest_trade_traces or simulate_orderflow_confirmation_ab,
     )
 
     print("\nAI Trader Backtest")
@@ -2621,6 +2843,19 @@ def _run_backtest_scenario(
         print(f"- JSON: {json_path}")
         print(f"- TXT: {txt_path}")
         print("- Research-only diagnostic export; no live systems were connected")
+
+    if simulate_orderflow_confirmation_ab:
+        json_path, txt_path = _export_orderflow_confirmation_ab_report(
+            backtest_trace_dir,
+            name,
+            profile,
+            result,
+            performance,
+        )
+        print("\nOrder Flow Confirmation A/B Diagnostic")
+        print(f"- JSON: {json_path}")
+        print(f"- TXT: {txt_path}")
+        print("- Research-only simulation; no strategy rule was changed")
 
     _print_session_summary(
         result.session_status,
@@ -2849,6 +3084,9 @@ def main(args: list[str] | None = None) -> None:
     backtest_max_iterations = getattr(parsed_args, "backtest_max_iterations", None)
     export_backtest_trade_traces = bool(getattr(parsed_args, "export_backtest_trade_traces", False))
     backtest_trace_dir = getattr(parsed_args, "backtest_trace_dir", "reports") or "reports"
+    simulate_orderflow_confirmation_ab = bool(
+        getattr(parsed_args, "simulate_orderflow_confirmation_ab", False)
+    )
 
     if check_implementation_readiness:
         _check_saved_implementation_readiness(
@@ -3034,6 +3272,7 @@ def main(args: list[str] | None = None) -> None:
                     backtest_max_iterations,
                     export_backtest_trade_traces,
                     backtest_trace_dir,
+                    simulate_orderflow_confirmation_ab,
                 )
             print("\n" + "=" * 40)
             print()
@@ -3096,6 +3335,7 @@ def main(args: list[str] | None = None) -> None:
             backtest_max_iterations,
             export_backtest_trade_traces,
             backtest_trace_dir,
+            simulate_orderflow_confirmation_ab,
         )
 
 
