@@ -26,6 +26,8 @@ C:\Users\hosoo\Desktop\ai_trader_project\private_data\sierra_chart\gc_full_footp
 
 The output path is under `private_data` and must not be committed.
 
+The AI Trader Order Flow importer now supports this ACSIL CSV format directly.
+
 ## 3. How To Copy And Build It In Sierra Chart
 
 1. Open the project folder.
@@ -102,6 +104,8 @@ The expected CSV header is:
 DateTime,BarIndex,Price,BidVolume,AskVolume,TotalVolume,Delta,NumTrades
 ```
 
+This exact header is recognized by the Order Flow importer as `ACSIL_FULL_FOOTPRINT`.
+
 Expected row fields:
 
 - `DateTime`: chart bar timestamp.
@@ -133,6 +137,12 @@ The export is valid only if:
 - row count is greater than candle count.
 
 If each candle has only one row, the file is still summary data and should not be used as full footprint data.
+
+When imported successfully, data quality should show:
+
+- candle count equal to the number of unique loaded bars,
+- total levels equal to the number of price-level rows,
+- source format `ACSIL_FULL_FOOTPRINT`.
 
 ## 8. Safety Confirmation
 

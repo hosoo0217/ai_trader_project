@@ -23,9 +23,19 @@ BAR_SUMMARY_CSV = """Date, Time, Open, High, Low, Last, Volume, # of Trades, OHL
 2026-6-21, 18:05:00.000000, 4173.2, 4176.0, 4168.0, 4170.9, 300, 262, 4172.0, 4171.6, 4172.0, 138, 162, 4173.2, 4176.0, 4168.0, 4170.9, 24, -16, 300, 1
 """
 
+ACSIL_FULL_FOOTPRINT_CSV = """DateTime,BarIndex,Price,BidVolume,AskVolume,TotalVolume,Delta,NumTrades
+2026-06-28 18:00:00,0,4091.9,2,0,2,-2,2
+2026-06-28 18:00:00,0,4092.0,2,3,5,1,4
+2026-06-28 18:01:00,1,4092.1,1,5,6,4,3
+"""
+
 
 def _bar_summary_dataframe() -> pd.DataFrame:
     return pd.read_csv(StringIO(BAR_SUMMARY_CSV))
+
+
+def _acsil_full_footprint_dataframe() -> pd.DataFrame:
+    return pd.read_csv(StringIO(ACSIL_FULL_FOOTPRINT_CSV))
 
 
 def _sample_dataframe() -> pd.DataFrame:
@@ -376,3 +386,59 @@ def test_sierra_chart_bar_summary_explain_import_mentions_limited_format() -> No
 
     assert "source=BAR_SUMMARY" in text
     assert "not full price-level footprint data" in text
+
+
+def test_acsil_full_footprint_format_imports_candles_and_levels() -> None:
+    candles = SierraChartImporter().from_dataframe(_acsil_full_footprint_dataframe(), SierraChartImportConfig())
+
+    assert len(candles) == 2
+    assert candles[0].source_format == "ACSIL_FULL_FOOTPRINT"
+    assert candles[0].time == "2026-06-28 18:00:00"
+    assert len(candles[0].levels) == 2
+    assert len(candles[1].levels) == 1
+    assert candles[0].open == 4091.9
+    assert candles[0].high == 4092.0
+    assert candles[0].low == 4091.9
+    assert candles[0].close == 4092.0
+
+
+def test_acsil_full_footprint_parses_bid_ask_delta_and_trade_metadata() -> None:
+    candles = SierraChartImporter().from_dataframe(_acsil_full_footprint_dataframe(), SierraChartImportConfig())
+
+    first_level = candles[0].levels[0]
+    second_level = candles[0].levels[1]
+    third_level = candles[1].levels[0]
+
+    assert first_level.price == 4091.9
+    assert first_level.bid_volume == 2.0
+    assert first_level.ask_volume == 0.0
+    assert first_level.reported_total_volume == 2.0
+    assert first_level.reported_delta == -2.0
+    assert first_level.num_trades == 2.0
+    assert second_level.bid_volume == 2.0
+    assert second_level.ask_volume == 3.0
+    assert second_level.reported_delta == 1.0
+    assert third_level.bid_volume == 1.0
+    assert third_level.ask_volume == 5.0
+    assert third_level.reported_delta == 4.0
+
+
+def test_acsil_full_footprint_passes_data_quality() -> None:
+    candles = SierraChartImporter().from_dataframe(_acsil_full_footprint_dataframe(), SierraChartImportConfig())
+
+    result = OrderFlowDataQualityChecker().check(candles, OrderFlowDataQualityConfig())
+
+    assert result.passed is True
+    assert result.status == "PASSED"
+    assert result.candle_count == 2
+    assert result.total_levels == 3
+
+
+def test_acsil_full_footprint_explain_import_mentions_source() -> None:
+    candles = SierraChartImporter().from_dataframe(_acsil_full_footprint_dataframe(), SierraChartImportConfig())
+
+    text = SierraChartImporter().explain_import(candles)
+
+    assert "source=ACSIL_FULL_FOOTPRINT" in text
+    assert "candles=2" in text
+    assert "levels=3" in text

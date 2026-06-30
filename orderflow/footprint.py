@@ -22,6 +22,9 @@ class FootprintLevel:
     price: float
     bid_volume: float
     ask_volume: float
+    reported_total_volume: float | None = None
+    reported_delta: float | None = None
+    num_trades: float | None = None
 
     def delta(self) -> float:
         """Return ask volume minus bid volume."""

@@ -73,6 +73,8 @@ The required CSV header is:
 DateTime,BarIndex,Price,BidVolume,AskVolume,TotalVolume,Delta,NumTrades
 ```
 
+The AI Trader Order Flow importer supports this ACSIL full footprint header and marks imported candles as `ACSIL_FULL_FOOTPRINT`.
+
 Required columns:
 
 - `DateTime`: timestamp for the chart bar.
@@ -115,6 +117,8 @@ The exported file is valid only if:
 - row count is greater than candle count.
 
 If each candle has only one row, the file is still summary data and should not be treated as full footprint data.
+
+For a valid ACSIL full footprint import, Order Flow data quality should pass, candle count should equal the number of unique bars, and total levels should equal the number of price-level rows.
 
 ## 8. Safety Requirements
 

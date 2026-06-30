@@ -29,6 +29,9 @@ class SierraChartImportConfig:
     price_column: str = "price"
     bid_volume_column: str = "bid_volume"
     ask_volume_column: str = "ask_volume"
+    bar_index_column: str = "BarIndex"
+    total_volume_column: str = "TotalVolume"
+    num_trades_column: str = "NumTrades"
     date_aliases: list[str] = field(default_factory=lambda: ["date", "Date"])
     time_aliases: list[str] = field(default_factory=lambda: ["time", "datetime", "date_time", "timestamp", "Date Time", "DateTime"])
     open_aliases: list[str] = field(default_factory=lambda: ["open", "Open"])
@@ -44,6 +47,11 @@ class SierraChartImportConfig:
     ask_volume_aliases: list[str] = field(
         default_factory=lambda: ["ask_volume", "Ask Volume", "AskVolume", "ask", "Ask", "ask_vol"]
     )
+    bar_index_aliases: list[str] = field(default_factory=lambda: ["BarIndex", "bar_index", "bar index"])
+    total_volume_aliases: list[str] = field(
+        default_factory=lambda: ["TotalVolume", "total_volume", "Total Volume"]
+    )
+    num_trades_aliases: list[str] = field(default_factory=lambda: ["NumTrades", "num_trades", "NumberOfTrades"])
 
 
 def normalize_column_name(name: object) -> str:
@@ -88,6 +96,9 @@ def build_resolved_column_map(dataframe: pd.DataFrame, config: SierraChartImport
         "price": [config.price_column, *config.price_aliases],
         "bid_volume": [config.bid_volume_column, *config.bid_volume_aliases],
         "ask_volume": [config.ask_volume_column, *config.ask_volume_aliases],
+        "bar_index": [config.bar_index_column, *config.bar_index_aliases],
+        "total_volume": [config.total_volume_column, *config.total_volume_aliases],
+        "num_trades": [config.num_trades_column, *config.num_trades_aliases],
     }
 
     resolved: dict[str, str] = {}
@@ -117,6 +128,9 @@ class SierraChartImporter:
             return []
 
         column_map = build_resolved_column_map(dataframe, config)
+        if self._is_acsil_full_footprint_column_map(column_map):
+            return self._from_acsil_full_footprint_dataframe(dataframe, column_map)
+
         if self._is_bar_summary_column_map(column_map):
             return self._from_bar_summary_dataframe(dataframe, column_map)
 
@@ -186,7 +200,12 @@ class SierraChartImporter:
         first_time = candles[0].time
         last_time = candles[-1].time
         source_formats = {str(getattr(candle, "source_format", "PRICE_LEVEL_FOOTPRINT")) for candle in candles}
-        source_text = "BAR_SUMMARY" if source_formats == {"BAR_SUMMARY"} else "PRICE_LEVEL_FOOTPRINT"
+        if source_formats == {"BAR_SUMMARY"}:
+            source_text = "BAR_SUMMARY"
+        elif source_formats == {"ACSIL_FULL_FOOTPRINT"}:
+            source_text = "ACSIL_FULL_FOOTPRINT"
+        else:
+            source_text = "PRICE_LEVEL_FOOTPRINT"
         note = ""
         if "BAR_SUMMARY" in source_formats:
             note = " BAR_SUMMARY uses one synthetic close-price level per bar; it is not full price-level footprint data."
@@ -203,6 +222,85 @@ class SierraChartImporter:
         """Return True for Sierra Chart bar/study summary exports."""
         required_fields = {"date", "time", "open", "high", "low", "close", "bid_volume", "ask_volume"}
         return required_fields.issubset(column_map) and "price" not in column_map
+
+    def _is_acsil_full_footprint_column_map(self, column_map: dict[str, str]) -> bool:
+        """Return True for the AI Trader ACSIL full footprint export format."""
+        required_fields = {
+            "time",
+            "bar_index",
+            "price",
+            "bid_volume",
+            "ask_volume",
+            "total_volume",
+            "delta",
+            "num_trades",
+        }
+        return required_fields.issubset(column_map)
+
+    def _from_acsil_full_footprint_dataframe(
+        self,
+        dataframe: pd.DataFrame,
+        column_map: dict[str, str],
+    ) -> list[FootprintCandle]:
+        """Convert ACSIL Volume-at-Price rows into full footprint candles."""
+        candles: list[FootprintCandle] = []
+
+        grouped = dataframe.groupby([column_map["bar_index"], column_map["time"]], sort=False, dropna=False)
+        for (bar_index, group_time), group in grouped:
+            price_values = pd.to_numeric(self._series_from_column(group, column_map["price"]), errors="coerce")
+            bid_values = pd.to_numeric(self._series_from_column(group, column_map["bid_volume"]), errors="coerce")
+            ask_values = pd.to_numeric(self._series_from_column(group, column_map["ask_volume"]), errors="coerce")
+            total_values = pd.to_numeric(self._series_from_column(group, column_map["total_volume"]), errors="coerce")
+            delta_values = pd.to_numeric(self._series_from_column(group, column_map["delta"]), errors="coerce")
+            trade_values = pd.to_numeric(self._series_from_column(group, column_map["num_trades"]), errors="coerce")
+
+            valid_prices = price_values.dropna()
+            if valid_prices.empty:
+                continue
+
+            levels: list[FootprintLevel] = []
+            for index in range(len(group)):
+                price = price_values.iloc[index]
+                if pd.isna(price):
+                    continue
+
+                bid_raw = bid_values.iloc[index]
+                ask_raw = ask_values.iloc[index]
+                bid = 0.0 if pd.isna(bid_raw) else max(0.0, float(bid_raw))
+                ask = 0.0 if pd.isna(ask_raw) else max(0.0, float(ask_raw))
+
+                levels.append(
+                    FootprintLevel(
+                        price=float(price),
+                        bid_volume=bid,
+                        ask_volume=ask,
+                        reported_total_volume=self._optional_float(total_values.iloc[index]),
+                        reported_delta=self._optional_float(delta_values.iloc[index]),
+                        num_trades=self._optional_float(trade_values.iloc[index]),
+                    )
+                )
+
+            if not levels:
+                continue
+
+            candles.append(
+                FootprintCandle(
+                    time=group_time,
+                    open=float(valid_prices.iloc[0]),
+                    high=float(valid_prices.max()),
+                    low=float(valid_prices.min()),
+                    close=float(valid_prices.iloc[-1]),
+                    levels=levels,
+                    source_format="ACSIL_FULL_FOOTPRINT",
+                    source_note=(
+                        "Sierra Chart ACSIL full footprint export: one row per bar per price level."
+                    ),
+                    reported_volume=float(sum(level.reported_total_volume or 0.0 for level in levels)),
+                    reported_delta=float(sum(level.reported_delta or 0.0 for level in levels)),
+                )
+            )
+
+        return candles
 
     def _from_bar_summary_dataframe(
         self,
