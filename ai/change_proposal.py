@@ -45,6 +45,8 @@ class ChangeProposal:
     status: str
     human_review_required: bool
     auto_implementation_allowed: bool
+    implementation_allowed: bool = False
+    doc_path: str | None = None
     reasons: list[str] = field(default_factory=list)
     blocking_reasons: list[str] = field(default_factory=list)
 

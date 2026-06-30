@@ -21,5 +21,30 @@
       "A human approved this future reviewed change proposal"
     ],
     "blocking_reasons": []
+  },
+  {
+    "proposal_id": "proposal-doc-43861718",
+    "source_request_id": null,
+    "category": "STRATEGY",
+    "priority": "HIGH",
+    "title": "Require Order Flow confirmation before Apex execution",
+    "description": "This document proposes a possible future strategy rule for requiring directional Order Flow confirmation before execution.",
+    "reason": "Documentation-based proposal registration only",
+    "risk": "Backtesting and human review are required before implementation.",
+    "proposed_change": "Research whether this documentation proposal should become a strategy change. Do not implement code, execution rules, or risk changes until review and backtest evidence are complete.",
+    "status": "PROPOSED",
+    "human_review_required": true,
+    "auto_implementation_allowed": false,
+    "implementation_allowed": false,
+    "doc_path": "docs/orderflow_confirmation_change_proposal.md",
+    "reasons": [
+      "Documentation-based proposal registration only",
+      "No strategy rules changed",
+      "Backtesting required before implementation",
+      "Human review required"
+    ],
+    "blocking_reasons": [
+      "Backtesting is required before implementation"
+    ]
   }
 ]

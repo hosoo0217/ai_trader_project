@@ -47,6 +47,23 @@ The result status may also report:
 - `NO_APPROVED_DECISION`: The record was not approved, so no proposal was
   created.
 
+## Registering Documentation-Based Proposals
+
+Existing markdown proposal documents can be registered into the proposal store:
+
+```powershell
+.\venv\Scripts\python.exe main.py --register-change-proposal-doc docs/orderflow_confirmation_change_proposal.md --proposal-category STRATEGY --proposal-priority HIGH --proposal-title "Require Order Flow confirmation before Apex execution"
+```
+
+Registration creates a `PROPOSED` record in `reports/change_proposals.json`.
+
+Registration is not approval. Registration is not implementation. It does not
+create an implementation plan and does not change strategy logic.
+
+Documentation-based strategy proposals still require review, backtest evidence,
+and a `NEEDS_BACKTEST` / human-reviewed workflow before any strategy code change
+can be considered.
+
 ## Why This Protects Capital
 
 This protects capital by keeping a clean separation between ideas, approval,

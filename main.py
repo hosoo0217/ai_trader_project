@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pandas as pd
 
@@ -21,7 +22,7 @@ from ai.strategy_approval_pipeline import (
     StrategyApprovalPipelineResult,
 )
 from ai.human_approval import HumanApprovalConfig, HumanApprovalResult, HumanApprovalWorkflow
-from ai.change_proposal import ChangeProposalConfig, ChangeProposalResult, ChangeProposalEngine
+from ai.change_proposal import ChangeProposal, ChangeProposalConfig, ChangeProposalResult, ChangeProposalEngine
 from ai.change_proposal_review import (
     ChangeProposalReviewConfig,
     ChangeProposalReviewResult,
@@ -470,6 +471,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--proposal-dir",
         default="reports",
         help="Output folder for change_proposals.json",
+    )
+    parser.add_argument(
+        "--register-change-proposal-doc",
+        default="",
+        help="Register a documentation-based proposal into change_proposals.json",
+    )
+    parser.add_argument(
+        "--proposal-category",
+        default="STRATEGY",
+        help="Category for --register-change-proposal-doc records",
+    )
+    parser.add_argument(
+        "--proposal-priority",
+        default="MEDIUM",
+        help="Priority for --register-change-proposal-doc records",
+    )
+    parser.add_argument(
+        "--proposal-title",
+        default="",
+        help="Title for --register-change-proposal-doc records",
     )
     parser.add_argument(
         "--review-change-proposal",
@@ -1594,6 +1615,111 @@ def _create_and_store_change_proposal(
     _print_approved_change_proposal(proposal_result, store_result)
 
 
+def _register_change_proposal_doc(
+    doc_path_text: str,
+    category: str,
+    priority: str,
+    title: str,
+    proposal_config: ChangeProposalStoreConfig,
+) -> None:
+    """Register a markdown proposal document without approving or implementing it."""
+    print("\nDocumentation Change Proposal Registration")
+
+    doc_path = Path(doc_path_text)
+    normalized_doc_path = doc_path.as_posix()
+    safe_category = (category or "STRATEGY").strip() or "STRATEGY"
+    safe_priority = (priority or "MEDIUM").strip() or "MEDIUM"
+    safe_title = (title or doc_path.stem.replace("_", " ").replace("-", " ").title()).strip()
+    store = ChangeProposalStore()
+
+    try:
+        document_text = doc_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"- Registered: False")
+        print(f"- Status: BLOCKED")
+        print(f"- Document path: {normalized_doc_path}")
+        print(f"- Blocking reasons: Could not read proposal document: {exc}")
+        print("- No strategy rule was changed.")
+        print("- No implementation plan was created.")
+        return
+
+    existing = store.load_proposals(proposal_config)
+    normalized_title = safe_title.casefold()
+    normalized_path = normalized_doc_path.casefold()
+    for record in existing:
+        existing_title = str(record.get("title", "")).casefold()
+        existing_path = str(record.get("doc_path", "")).casefold()
+        if existing_title == normalized_title or (existing_path and existing_path == normalized_path):
+            print("- Registered: False")
+            print("- Status: DUPLICATE")
+            print(f"- Existing proposal ID: {record.get('proposal_id', 'UNKNOWN')}")
+            print(f"- Document path: {normalized_doc_path}")
+            print(f"- Proposals path: {Path(proposal_config.output_dir) / proposal_config.proposals_filename}")
+            print("- Duplicate title or document path already registered.")
+            print("- Registration is not approval.")
+            print("- No strategy rule was changed.")
+            print("- No implementation plan was created.")
+            return
+
+    description = _proposal_doc_description(document_text, normalized_doc_path)
+    proposal = ChangeProposal(
+        proposal_id=f"proposal-doc-{uuid4().hex[:8]}",
+        source_request_id=None,
+        category=safe_category,
+        priority=safe_priority,
+        title=safe_title,
+        description=description,
+        reason="Documentation-based proposal registration only",
+        risk="Backtesting and human review are required before implementation.",
+        proposed_change=(
+            "Research whether this documentation proposal should become a strategy change. "
+            "Do not implement code, execution rules, or risk changes until review and backtest evidence are complete."
+        ),
+        status="PROPOSED",
+        human_review_required=True,
+        auto_implementation_allowed=False,
+        implementation_allowed=False,
+        doc_path=normalized_doc_path,
+        reasons=[
+            "Documentation-based proposal registration only",
+            "No strategy rules changed",
+            "Backtesting required before implementation",
+            "Human review required",
+        ],
+        blocking_reasons=[
+            "Backtesting is required before implementation",
+        ],
+    )
+    store_result = store.append_proposal(proposal, proposal_config)
+
+    print(f"- Registered: {store_result.saved}")
+    print(f"- Proposal ID: {proposal.proposal_id}")
+    print(f"- Title: {proposal.title}")
+    print(f"- Category: {proposal.category}")
+    print(f"- Priority: {proposal.priority}")
+    print(f"- Status: {proposal.status}")
+    print(f"- Human review required: {proposal.human_review_required}")
+    print(f"- Auto implementation allowed: {proposal.auto_implementation_allowed}")
+    print(f"- Implementation allowed: {proposal.implementation_allowed}")
+    print(f"- Document path: {proposal.doc_path}")
+    print(f"- Proposals path: {store_result.proposals_path if store_result.proposals_path else 'None'}")
+    print("- Registration is not approval.")
+    print("- Registration is not implementation.")
+    print("- NEEDS_BACKTEST review is required before any strategy code change.")
+    print("- No strategy rule was changed.")
+    print("- No implementation plan was created.")
+
+
+def _proposal_doc_description(document_text: str, doc_path: str) -> str:
+    """Create a compact description from the markdown proposal text."""
+    for raw_line in document_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        return line[:500]
+    return f"Documentation-based change proposal from {doc_path}"
+
+
 def _print_change_proposal_review(
     proposal: object | None,
     review_result: ChangeProposalReviewResult | None,
@@ -2694,6 +2820,12 @@ def main(args: list[str] | None = None) -> None:
     proposal_store_config = ChangeProposalStoreConfig(
         output_dir=getattr(parsed_args, "proposal_dir", "reports") or "reports",
     )
+    register_change_proposal_doc = str(
+        getattr(parsed_args, "register_change_proposal_doc", "") or ""
+    ).strip()
+    proposal_category = str(getattr(parsed_args, "proposal_category", "STRATEGY") or "STRATEGY").strip()
+    proposal_priority = str(getattr(parsed_args, "proposal_priority", "MEDIUM") or "MEDIUM").strip()
+    proposal_title = str(getattr(parsed_args, "proposal_title", "") or "").strip()
     review_change_proposal = str(getattr(parsed_args, "review_change_proposal", "") or "").strip()
     change_proposal_index = int(getattr(parsed_args, "change_proposal_index", 0) or 0)
     proposal_reviewed_by = str(getattr(parsed_args, "proposal_reviewed_by", "") or "").strip()
@@ -2746,6 +2878,16 @@ def main(args: list[str] | None = None) -> None:
             proposal_store_config,
             proposal_review_log_config,
             implementation_plan_config,
+        )
+        return
+
+    if register_change_proposal_doc:
+        _register_change_proposal_doc(
+            register_change_proposal_doc,
+            proposal_category,
+            proposal_priority,
+            proposal_title,
+            proposal_store_config,
         )
         return
 

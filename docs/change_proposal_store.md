@@ -38,10 +38,15 @@ Each stored proposal keeps:
 
 - `human_review_required`
 - `auto_implementation_allowed`
+- `implementation_allowed`
+- `doc_path`, when registered from a markdown proposal document
 - `reasons`
 - `blocking_reasons`
 
 `auto_implementation_allowed` should remain `False`.
+
+`implementation_allowed` should remain `False` until the proposal has separate
+human review, required backtest evidence, and an approved implementation plan.
 
 ## Final Human Review Is Required
 
@@ -60,6 +65,16 @@ reports/change_proposals.json
 ```
 
 Use `ChangeProposalStoreConfig(output_dir=...)` to choose another folder.
+
+Markdown proposal documents can be registered through the CLI:
+
+```powershell
+.\venv\Scripts\python.exe main.py --register-change-proposal-doc docs/orderflow_confirmation_change_proposal.md
+```
+
+This registration step only stores the proposal. It is not approval, not
+implementation, and not permission to change strategy code. A `NEEDS_BACKTEST`
+review is required before any strategy rule change is considered.
 
 ## Future Plan
 

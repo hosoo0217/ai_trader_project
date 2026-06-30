@@ -131,6 +131,8 @@ class ChangeProposalStore:
             "status": self._text(self._get(proposal, "status", None), "UNKNOWN"),
             "human_review_required": bool(self._get(proposal, "human_review_required", True)),
             "auto_implementation_allowed": bool(self._get(proposal, "auto_implementation_allowed", False)),
+            "implementation_allowed": bool(self._get(proposal, "implementation_allowed", False)),
+            "doc_path": self._optional_text(self._get(proposal, "doc_path", None)),
             "reasons": self._safe_list(self._get(proposal, "reasons", [])),
             "blocking_reasons": self._dedupe(
                 self._safe_list(self._get(proposal, "blocking_reasons", []))

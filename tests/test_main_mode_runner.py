@@ -114,6 +114,90 @@ def test_help_includes_export_backtest_trade_traces() -> None:
     assert "executed backtest trade trace reports" in normalized_help
 
 
+def test_help_includes_register_change_proposal_doc() -> None:
+    help_text = main._build_parser().format_help()
+
+    assert "--register-change-proposal-doc" in help_text
+    assert "--proposal-category" in help_text
+    assert "--proposal-priority" in help_text
+    assert "--proposal-title" in help_text
+
+
+def test_register_change_proposal_doc_creates_record(tmp_path: Path) -> None:
+    proposal_doc = tmp_path / "orderflow_confirmation_change_proposal.md"
+    proposal_doc.write_text(
+        "# Order Flow Confirmation Change Proposal\n\n"
+        "Require directional Order Flow confirmation before execution.\n",
+        encoding="utf-8",
+    )
+    proposal_dir = tmp_path / "proposals"
+
+    output = _run_main(
+        "--register-change-proposal-doc",
+        str(proposal_doc),
+        "--proposal-category",
+        "STRATEGY",
+        "--proposal-priority",
+        "HIGH",
+        "--proposal-title",
+        "Require Order Flow confirmation before Apex execution",
+        "--proposal-dir",
+        str(proposal_dir),
+    )
+
+    proposals = json.loads((proposal_dir / "change_proposals.json").read_text(encoding="utf-8"))
+    record = proposals[0]
+
+    assert "Documentation Change Proposal Registration" in output
+    assert len(proposals) == 1
+    assert record["title"] == "Require Order Flow confirmation before Apex execution"
+    assert record["category"] == "STRATEGY"
+    assert record["priority"] == "HIGH"
+    assert record["status"] == "PROPOSED"
+    assert record["human_review_required"] is True
+    assert record["auto_implementation_allowed"] is False
+    assert record["implementation_allowed"] is False
+    assert record["doc_path"] == proposal_doc.as_posix()
+    assert "Documentation-based proposal registration only" in record["reasons"]
+    assert "Backtesting is required before implementation" in record["blocking_reasons"]
+
+
+def test_register_change_proposal_doc_does_not_duplicate_same_doc_or_title(tmp_path: Path) -> None:
+    proposal_doc = tmp_path / "orderflow_confirmation_change_proposal.md"
+    proposal_doc.write_text(
+        "# Order Flow Confirmation Change Proposal\n\n"
+        "Require directional Order Flow confirmation before execution.\n",
+        encoding="utf-8",
+    )
+    proposal_dir = tmp_path / "proposals"
+    args = (
+        "--register-change-proposal-doc",
+        str(proposal_doc),
+        "--proposal-title",
+        "Require Order Flow confirmation before Apex execution",
+        "--proposal-dir",
+        str(proposal_dir),
+    )
+
+    first_output = _run_main(*args)
+    second_output = _run_main(*args)
+
+    proposals = json.loads((proposal_dir / "change_proposals.json").read_text(encoding="utf-8"))
+
+    assert "- Registered: True" in first_output
+    assert "- Status: DUPLICATE" in second_output
+    assert len(proposals) == 1
+
+
+def test_default_behavior_does_not_register_change_proposal_doc(tmp_path: Path) -> None:
+    proposal_dir = tmp_path / "proposals"
+
+    output = _run_main("--mode", "backtest", "--scenario", "bullish", "--proposal-dir", str(proposal_dir))
+
+    assert "AI Trader Backtest" in output
+    assert not (proposal_dir / "change_proposals.json").exists()
+
+
 def test_backtest_max_iterations_is_passed_to_config(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, int | None] = {}
 
