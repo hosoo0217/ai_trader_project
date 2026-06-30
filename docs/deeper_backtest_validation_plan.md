@@ -73,6 +73,14 @@ This still reads local historical CSV files only. It does not connect to Sierra 
 
 For Sierra `BAR_SUMMARY` market candles, duplicate headers are handled positionally. The first price OHLC group is used as market data: `Date`, `Time`, `Open`, `High`, `Low`, `Last`, and `Volume`. Later duplicate study columns do not overwrite the price OHLC values.
 
+When executed trades lose during a research-only backtest, use the diagnostic trace export:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --profile apex --backtest-market-csv private_data/sierra_chart/gc_footprint_test.csv --orderflow-csv private_data/sierra_chart/gc_footprint_test.csv --backtest-max-iterations 50 --export-backtest-trade-traces
+```
+
+This creates `reports/backtest_trade_traces.json` and `reports/backtest_trade_traces.txt` by default. These files are for diagnosing executed trade decisions and simulated exits. They are not trading approval, do not weaken filters, and do not connect to live systems.
+
 ## 4. Minimum Deeper Backtest Requirements
 
 Future deeper validation should include:
@@ -112,6 +120,7 @@ The goal is not to force good results. The goal is to understand whether the sys
 - Use `--orderflow-csv` separately when the Sierra export should also provide Order Flow context.
 - Confirm Sierra `BAR_SUMMARY` market candles use the first price OHLC group, not later duplicate study columns.
 - Review total trades, blocked trades, risk behavior, and backtest quality grade.
+- Use `--export-backtest-trade-traces` to review executed losing trades before considering any rule changes.
 - Confirm quality grade improves beyond `INSUFFICIENT_DATA` only when enough iterations exist.
 
 ### Stage 3: Full Price-Level Footprint CSV Backtest

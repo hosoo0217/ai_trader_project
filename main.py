@@ -1,5 +1,7 @@
 import argparse
-from dataclasses import dataclass
+import json
+from collections import Counter
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -352,6 +354,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backtest-market-csv",
         default="",
         help="Optional OHLC CSV path to use as market candles for research-only backtests",
+    )
+    parser.add_argument(
+        "--export-backtest-trade-traces",
+        action="store_true",
+        help="Export research-only executed backtest trade trace reports",
+    )
+    parser.add_argument(
+        "--backtest-trace-dir",
+        default="reports",
+        help="Output folder for exported backtest trade trace reports",
     )
     parser.add_argument(
         "--show-trace",
@@ -1092,6 +1104,148 @@ def _print_performance_report(journal: TradeJournal):
     print(f"- Max drawdown: {performance.max_drawdown:.2f}")
 
     return performance
+
+
+def _export_backtest_trade_traces(
+    output_dir: str,
+    scenario: str,
+    profile: TradingProfile,
+    result,
+    performance,
+    quality,
+) -> tuple[Path, Path]:
+    """Export research-only backtest trade diagnostics as JSON and TXT."""
+    destination = Path(output_dir or "reports")
+    destination.mkdir(parents=True, exist_ok=True)
+    json_path = destination / "backtest_trade_traces.json"
+    txt_path = destination / "backtest_trade_traces.txt"
+
+    all_iterations = list(getattr(result, "iteration_traces", []))
+    executed_iterations = [item for item in all_iterations if item.trade_executed]
+    blocked_iterations = [item for item in all_iterations if not item.trade_executed]
+
+    blocking_counter: Counter[str] = Counter()
+    for item in blocked_iterations:
+        for reason in item.blocking_reasons:
+            blocking_counter[str(reason)] += 1
+
+    summary = {
+        "scenario": scenario,
+        "profile": profile.profile_name,
+        "research_only": True,
+        "safety": {
+            "live_trading": False,
+            "broker_connection": False,
+            "mt5_login": False,
+            "sierra_chart_live_connection": False,
+            "cme_live_data_connection": False,
+            "external_apis": False,
+        },
+        "total_iterations": result.total_iterations,
+        "executed_trades": result.trades_executed,
+        "blocked_trades": result.trades_blocked,
+        "final_balance": result.final_balance,
+        "total_pnl": result.total_pnl,
+        "win_rate": performance.win_rate,
+        "max_drawdown": performance.max_drawdown,
+        "profit_factor": "INF" if performance.profit_factor == float("inf") else performance.profit_factor,
+        "backtest_quality_grade": quality.grade,
+        "backtest_quality_passed": quality.passed,
+        "backtest_quality_failures": list(quality.failures),
+        "backtest_quality_warnings": list(quality.warnings),
+        "common_blocking_reasons": [
+            {"reason": reason, "count": count} for reason, count in blocking_counter.most_common()
+        ],
+    }
+
+    payload = {
+        "summary": summary,
+        "executed_trade_iterations": [asdict(item) for item in executed_iterations],
+        "blocked_trade_summary": {
+            "count": len(blocked_iterations),
+            "common_blocking_reasons": summary["common_blocking_reasons"],
+        },
+    }
+
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    lines = [
+        "Backtest Trade Trace Diagnostic Report",
+        "",
+        "Safety",
+        "- Research-only diagnostic export",
+        "- No live trading",
+        "- No broker connection",
+        "- No MT5 login",
+        "- No Sierra Chart live connection",
+        "- No CME live data connection",
+        "- No external APIs",
+        "",
+        "Summary",
+        f"- Scenario: {scenario}",
+        f"- Profile: {profile.profile_name}",
+        f"- Total iterations: {result.total_iterations}",
+        f"- Executed trades: {result.trades_executed}",
+        f"- Blocked trades: {result.trades_blocked}",
+        f"- Final balance: {result.final_balance:.2f}",
+        f"- Total PnL: {result.total_pnl:.2f}",
+        f"- Win rate: {performance.win_rate:.2f}%",
+        f"- Max drawdown: {performance.max_drawdown:.2f}",
+        f"- Backtest quality grade: {quality.grade}",
+        "",
+        "Common Blocking Reasons",
+    ]
+    if blocking_counter:
+        for reason, count in blocking_counter.most_common():
+            lines.append(f"- {reason}: {count}")
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "Executed Trade Iterations"])
+    if not executed_iterations:
+        lines.append("- None")
+    else:
+        for item in executed_iterations:
+            lines.extend(
+                [
+                    "",
+                    f"Iteration {item.iteration_index}",
+                    f"- Final action: {item.final_action}",
+                    f"- Final allowed: {item.final_allowed}",
+                    f"- Status: {item.status}",
+                    f"- Simulated PnL: {item.simulated_pnl if item.simulated_pnl is not None else 'N/A'}",
+                    f"- Outcome: {item.outcome or 'N/A'}",
+                    f"- Decision reasons: {'; '.join(item.reasons) if item.reasons else 'None'}",
+                    f"- Blocking reasons: {'; '.join(item.blocking_reasons) if item.blocking_reasons else 'None'}",
+                    (
+                        f"- Decision engine: {item.decision_engine_status or 'N/A'} | "
+                        f"{'; '.join(item.decision_engine_reasons) if item.decision_engine_reasons else 'None'}"
+                    ),
+                    f"- SMC: {item.smc_status or 'N/A'} | {'; '.join(item.smc_reasons) if item.smc_reasons else 'None'}",
+                    f"- CRT: {item.crt_status or 'N/A'} | {'; '.join(item.crt_reasons) if item.crt_reasons else 'None'}",
+                    (
+                        f"- Multi-timeframe: {item.multi_timeframe_status or 'N/A'} | "
+                        f"{'; '.join(item.multi_timeframe_reasons) if item.multi_timeframe_reasons else 'None'}"
+                    ),
+                    (
+                        f"- Order Flow: {item.orderflow_status or 'N/A'} | "
+                        f"{'; '.join(item.orderflow_reasons) if item.orderflow_reasons else 'None'}"
+                    ),
+                    f"- Safety gate: {item.safety_status or 'N/A'} | {'; '.join(item.safety_reasons) if item.safety_reasons else 'None'}",
+                    f"- Risk engine: {item.risk_status or 'N/A'} | {'; '.join(item.risk_reasons) if item.risk_reasons else 'None'}",
+                    (
+                        f"- Trade manager: {item.trade_manager_status or 'N/A'} | "
+                        f"{'; '.join(item.trade_manager_reasons) if item.trade_manager_reasons else 'None'}"
+                    ),
+                    (
+                        f"- Exit simulator: {item.exit_simulator_status or 'N/A'} | "
+                        f"{'; '.join(item.exit_simulator_reasons) if item.exit_simulator_reasons else 'None'}"
+                    ),
+                ]
+            )
+
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, txt_path
 
 
 def _print_full_trading_session_report(report: TradingSessionReport) -> None:
@@ -2237,6 +2391,8 @@ def _run_backtest_scenario(
     show_session_history_summary: bool,
     session_history_config: SessionHistoryConfig,
     backtest_max_iterations: int | None,
+    export_backtest_trade_traces: bool,
+    backtest_trace_dir: str,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -2286,6 +2442,7 @@ def _run_backtest_scenario(
         spread_config,
         current_spread,
         orderflow_context_result,
+        collect_iteration_traces=export_backtest_trade_traces,
     )
 
     print("\nAI Trader Backtest")
@@ -2324,6 +2481,20 @@ def _run_backtest_scenario(
     print(f"- Failures: {failures_text}")
     print(f"- Warnings: {warnings_text}")
     print(f"- Recommendation: {recommendation}")
+
+    if export_backtest_trade_traces:
+        json_path, txt_path = _export_backtest_trade_traces(
+            backtest_trace_dir,
+            name,
+            profile,
+            result,
+            performance,
+            quality,
+        )
+        print("\nBacktest Trade Trace Export")
+        print(f"- JSON: {json_path}")
+        print(f"- TXT: {txt_path}")
+        print("- Research-only diagnostic export; no live systems were connected")
 
     _print_session_summary(
         result.session_status,
@@ -2544,6 +2715,8 @@ def main(args: list[str] | None = None) -> None:
     )
     check_implementation_readiness = bool(getattr(parsed_args, "check_implementation_readiness", False))
     backtest_max_iterations = getattr(parsed_args, "backtest_max_iterations", None)
+    export_backtest_trade_traces = bool(getattr(parsed_args, "export_backtest_trade_traces", False))
+    backtest_trace_dir = getattr(parsed_args, "backtest_trace_dir", "reports") or "reports"
 
     if check_implementation_readiness:
         _check_saved_implementation_readiness(
@@ -2717,6 +2890,8 @@ def main(args: list[str] | None = None) -> None:
                     show_session_history_summary,
                     session_history_config,
                     backtest_max_iterations,
+                    export_backtest_trade_traces,
+                    backtest_trace_dir,
                 )
             print("\n" + "=" * 40)
             print()
@@ -2777,6 +2952,8 @@ def main(args: list[str] | None = None) -> None:
             show_session_history_summary,
             session_history_config,
             backtest_max_iterations,
+            export_backtest_trade_traces,
+            backtest_trace_dir,
         )
 
 

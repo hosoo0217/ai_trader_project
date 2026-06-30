@@ -1,11 +1,12 @@
 from contextlib import redirect_stdout
 from io import StringIO
+import json
 from pathlib import Path
 
 import pytest
 
 import main
-from core.backtest_runner import BacktestResult
+from core.backtest_runner import BacktestIterationTrace, BacktestResult
 
 
 def _run_main(*args: str) -> str:
@@ -104,6 +105,15 @@ def test_help_includes_backtest_market_csv() -> None:
     assert "research-only backtests" in help_text
 
 
+def test_help_includes_export_backtest_trade_traces() -> None:
+    help_text = main._build_parser().format_help()
+    normalized_help = " ".join(help_text.split())
+
+    assert "--export-backtest-trade-traces" in help_text
+    assert "--backtest-trace-dir" in help_text
+    assert "executed backtest trade trace reports" in normalized_help
+
+
 def test_backtest_max_iterations_is_passed_to_config(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, int | None] = {}
 
@@ -126,6 +136,152 @@ def test_backtest_max_iterations_is_passed_to_config(monkeypatch: pytest.MonkeyP
 
     assert "AI Trader Backtest" in output
     assert seen["max_iterations"] == 3
+
+
+def test_export_backtest_trade_trace_files_are_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "trace_reports"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=1,
+            trades_blocked=0,
+            final_balance=9990.0,
+            total_pnl=-10.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="BUY",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    reasons=["BUY", "diagnostic test trade"],
+                    trace_steps=[
+                        {
+                            "step_name": "TRADE_MANAGER",
+                            "status": "EXECUTED",
+                            "allowed": True,
+                            "reasons": ["Paper order accepted"],
+                            "blocking_reasons": [],
+                        }
+                    ],
+                    trade_manager_status="EXECUTED",
+                    trade_manager_reasons=["Paper order accepted"],
+                    exit_simulator_status="EXITED",
+                    exit_simulator_reasons=["Stop loss reached"],
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    output = _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--export-backtest-trade-traces",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    json_path = trace_dir / "backtest_trade_traces.json"
+    txt_path = trace_dir / "backtest_trade_traces.txt"
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert "Backtest Trade Trace Export" in output
+    assert json_path.exists()
+    assert txt_path.exists()
+    assert payload["summary"]["executed_trades"] == 1
+    assert payload["executed_trade_iterations"][0]["iteration_index"] == 1
+    assert payload["executed_trade_iterations"][0]["outcome"] == "LOSS"
+    assert "decision_engine_status" in payload["executed_trade_iterations"][0]
+    assert "Iteration 1" in txt_path.read_text(encoding="utf-8")
+
+
+def test_backtest_trade_trace_export_works_with_no_executed_trades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "empty_trace_reports"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=0,
+            trades_blocked=1,
+            final_balance=10000.0,
+            total_pnl=0.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="NO_TRADE",
+                    final_allowed=False,
+                    trade_executed=False,
+                    status="NO_TRADE",
+                    blocking_reasons=["Safety gate blocked trade"],
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--export-backtest-trade-traces",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    payload = json.loads((trace_dir / "backtest_trade_traces.json").read_text(encoding="utf-8"))
+    txt_report = (trace_dir / "backtest_trade_traces.txt").read_text(encoding="utf-8")
+
+    assert payload["executed_trade_iterations"] == []
+    assert payload["blocked_trade_summary"]["count"] == 1
+    assert "Executed Trade Iterations\n- None" in txt_report
+
+
+def test_backtest_trace_collection_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, bool] = {}
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        seen["collect_iteration_traces"] = bool(kwargs.get("collect_iteration_traces", False))
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=0,
+            trades_blocked=1,
+            final_balance=10000.0,
+            total_pnl=0.0,
+            reasons=["Backtest completed"],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main("--mode", "backtest", "--scenario", "bullish")
+
+    assert seen["collect_iteration_traces"] is False
 
 
 def test_backtest_max_iterations_rejects_zero() -> None:

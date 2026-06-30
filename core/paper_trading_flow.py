@@ -35,7 +35,7 @@ from smc.bos_choch import BOSCHOCHAnalyzer, BOSCHOCHConfig
 from smc.liquidity_sweep import LiquiditySweepAnalyzer, LiquiditySweepConfig
 from smc.market_structure import MarketStructureAnalyzer, MarketStructureConfig
 from smc.smc_context import SMCContextCombiner, SMCContextConfig, SMCContextResult
-from storage.decision_trace import DecisionTrace, DecisionTracer
+from storage.decision_trace import DecisionTrace, DecisionTraceStep, DecisionTracer
 from storage.trade_journal import TradeJournal, TradeJournalEntry
 
 
@@ -111,6 +111,7 @@ class PaperTradingFlowResult:
     pnl: Optional[float] = None
     trace_id: Optional[str] = None
     trace_explanation: Optional[str] = None
+    trace_steps: List[DecisionTraceStep] = field(default_factory=list)
     smc_checked: bool = False
     smc_bias: Optional[str] = None
     smc_confidence: Optional[float] = None
@@ -1474,6 +1475,7 @@ class PaperTradingFlow:
 
         result.trace_id = trace.trace_id
         result.trace_explanation = tracer.explain_trace(trace)
+        result.trace_steps = list(trace.steps)
         return result
 
     def _record_journal_entry(

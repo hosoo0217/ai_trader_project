@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -23,6 +23,7 @@ from core.multi_timeframe import MultiTimeframeConfig
 from core.paper_trading_flow import PaperTradingFlow, PaperTradingFlowConfig
 from orderflow.orderflow_context import OrderFlowContextResult
 from risk.risk_engine import RiskEngineConfig
+from storage.decision_trace import DecisionTracer
 from storage.performance_report import PerformanceReporter
 from storage.trade_journal import TradeJournal
 
@@ -75,6 +76,54 @@ class BacktestResult:
     spread: float | None = None
     spread_reasons: list[str] = field(default_factory=list)
     spread_blocking_reasons: list[str] = field(default_factory=list)
+    iteration_traces: list["BacktestIterationTrace"] = field(default_factory=list)
+
+
+@dataclass
+class BacktestIterationTrace:
+    """Research-only diagnostic details for one rolling backtest iteration."""
+
+    iteration_index: int
+    window_start: int
+    window_end: int
+    final_action: str
+    final_allowed: bool
+    trade_executed: bool
+    status: str
+    reasons: list[str] = field(default_factory=list)
+    blocking_reasons: list[str] = field(default_factory=list)
+    trace_id: str | None = None
+    trace_explanation: str | None = None
+    trace_steps: list[dict[str, Any]] = field(default_factory=list)
+    decision_engine_status: str | None = None
+    decision_engine_reasons: list[str] = field(default_factory=list)
+    decision_engine_blocking_reasons: list[str] = field(default_factory=list)
+    smc_status: str | None = None
+    smc_reasons: list[str] = field(default_factory=list)
+    smc_blocking_reasons: list[str] = field(default_factory=list)
+    crt_status: str | None = None
+    crt_reasons: list[str] = field(default_factory=list)
+    crt_blocking_reasons: list[str] = field(default_factory=list)
+    multi_timeframe_status: str | None = None
+    multi_timeframe_reasons: list[str] = field(default_factory=list)
+    multi_timeframe_blocking_reasons: list[str] = field(default_factory=list)
+    orderflow_status: str | None = None
+    orderflow_reasons: list[str] = field(default_factory=list)
+    orderflow_blocking_reasons: list[str] = field(default_factory=list)
+    safety_status: str | None = None
+    safety_reasons: list[str] = field(default_factory=list)
+    safety_blocking_reasons: list[str] = field(default_factory=list)
+    risk_status: str | None = None
+    risk_reasons: list[str] = field(default_factory=list)
+    risk_blocking_reasons: list[str] = field(default_factory=list)
+    trade_manager_status: str | None = None
+    trade_manager_reasons: list[str] = field(default_factory=list)
+    trade_manager_blocking_reasons: list[str] = field(default_factory=list)
+    exit_simulator_status: str | None = None
+    exit_simulator_reasons: list[str] = field(default_factory=list)
+    exit_simulator_blocking_reasons: list[str] = field(default_factory=list)
+    simulated_pnl: float | None = None
+    outcome: str | None = None
 
 
 class BacktestRunner:
@@ -100,6 +149,7 @@ class BacktestRunner:
         spread_config: Optional[SpreadFilterConfig] = None,
         current_spread: Optional[float] = None,
         orderflow_context_result: Optional[OrderFlowContextResult] = None,
+        collect_iteration_traces: bool = False,
     ) -> BacktestResult:
         """Execute rolling-window paper-flow runs and aggregate simple metrics."""
         if candles is None or not isinstance(candles, pd.DataFrame):
@@ -145,6 +195,7 @@ class BacktestRunner:
         blocked = 0
         last_flow_result = None
         time_parse_fallback_used = False
+        iteration_traces: list[BacktestIterationTrace] = []
 
         effective_flow_config = replace(
             flow_config,
@@ -180,6 +231,7 @@ class BacktestRunner:
                 volatility_config,
                 spread_config,
                 current_spread,
+                DecisionTracer() if collect_iteration_traces else None,
                 orderflow_context_result=orderflow_context_result,
             )
             last_flow_result = flow_result
@@ -189,6 +241,16 @@ class BacktestRunner:
                 executed += 1
             else:
                 blocked += 1
+
+            if collect_iteration_traces:
+                iteration_traces.append(
+                    self._build_iteration_trace(
+                        iteration_index=iterations,
+                        window_start=start,
+                        window_end=start + backtest_config.window_size - 1,
+                        flow_result=flow_result,
+                    )
+                )
 
         performance = PerformanceReporter().generate_report(target_journal)
         reasons = [
@@ -234,6 +296,112 @@ class BacktestRunner:
             spread=getattr(last_flow_result, "spread", None),
             spread_reasons=list(getattr(last_flow_result, "spread_reasons", [])),
             spread_blocking_reasons=list(getattr(last_flow_result, "spread_blocking_reasons", [])),
+            iteration_traces=iteration_traces,
+        )
+
+    def _build_iteration_trace(
+        self,
+        iteration_index: int,
+        window_start: int,
+        window_end: int,
+        flow_result,
+    ) -> BacktestIterationTrace:
+        """Convert one paper-flow result into a stable diagnostic record."""
+        trace_steps = [
+            {
+                "step_name": step.step_name,
+                "status": step.status,
+                "allowed": bool(step.allowed),
+                "reasons": list(step.reasons),
+                "blocking_reasons": list(step.blocking_reasons),
+            }
+            for step in getattr(flow_result, "trace_steps", [])
+        ]
+
+        def step_values(step_name: str) -> tuple[str | None, list[str], list[str]]:
+            for step in trace_steps:
+                if step["step_name"] == step_name:
+                    return (
+                        str(step["status"]),
+                        list(step["reasons"]),
+                        list(step["blocking_reasons"]),
+                    )
+            return None, [], []
+
+        decision_status, decision_reasons, decision_blocks = step_values("DECISION_ENGINE")
+        mtf_status, mtf_reasons, mtf_blocks = step_values("MULTI_TIMEFRAME")
+        smc_status, _, _ = step_values("SMC_CONTEXT")
+        crt_status, _, _ = step_values("CRT_CONTEXT")
+        orderflow_status, _, _ = step_values("ORDER_FLOW_CONTEXT")
+        risk_status, risk_reasons, risk_blocks = step_values("RISK_ENGINE")
+        trade_status, trade_reasons, trade_blocks = step_values("TRADE_MANAGER")
+        exit_status, exit_reasons, exit_blocks = step_values("EXIT_SIMULATOR")
+
+        blocking_reasons = list(getattr(flow_result, "session_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "news_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "volatility_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "spread_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "safety_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "risk_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "smc_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "crt_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "orderflow_blocking_reasons", []))
+        blocking_reasons.extend(getattr(flow_result, "alignment_blocking_reasons", []))
+        for step in trace_steps:
+            blocking_reasons.extend(step["blocking_reasons"])
+
+        pnl = getattr(flow_result, "pnl", None)
+        outcome = None
+        if pnl is not None:
+            if float(pnl) > 0:
+                outcome = "WIN"
+            elif float(pnl) < 0:
+                outcome = "LOSS"
+            else:
+                outcome = "BREAKEVEN"
+
+        return BacktestIterationTrace(
+            iteration_index=iteration_index,
+            window_start=window_start,
+            window_end=window_end,
+            final_action=str(getattr(flow_result, "decision_action", "NO_TRADE")),
+            final_allowed=bool(getattr(flow_result, "trade_executed", False)),
+            trade_executed=bool(getattr(flow_result, "trade_executed", False)),
+            status=str(getattr(flow_result, "status", "UNKNOWN")),
+            reasons=list(getattr(flow_result, "reasons", [])),
+            blocking_reasons=list(dict.fromkeys(blocking_reasons)),
+            trace_id=getattr(flow_result, "trace_id", None),
+            trace_explanation=getattr(flow_result, "trace_explanation", None),
+            trace_steps=trace_steps,
+            decision_engine_status=decision_status,
+            decision_engine_reasons=decision_reasons,
+            decision_engine_blocking_reasons=decision_blocks,
+            smc_status=smc_status or getattr(flow_result, "smc_bias", None),
+            smc_reasons=list(getattr(flow_result, "smc_reasons", [])),
+            smc_blocking_reasons=list(getattr(flow_result, "smc_blocking_reasons", [])),
+            crt_status=crt_status or getattr(flow_result, "crt_bias", None),
+            crt_reasons=list(getattr(flow_result, "crt_reasons", [])),
+            crt_blocking_reasons=list(getattr(flow_result, "crt_blocking_reasons", [])),
+            multi_timeframe_status=mtf_status,
+            multi_timeframe_reasons=mtf_reasons,
+            multi_timeframe_blocking_reasons=mtf_blocks,
+            orderflow_status=orderflow_status or getattr(flow_result, "orderflow_bias", None),
+            orderflow_reasons=list(getattr(flow_result, "orderflow_reasons", [])),
+            orderflow_blocking_reasons=list(getattr(flow_result, "orderflow_blocking_reasons", [])),
+            safety_status=getattr(flow_result, "safety_status", None),
+            safety_reasons=list(getattr(flow_result, "safety_reasons", [])),
+            safety_blocking_reasons=list(getattr(flow_result, "safety_blocking_reasons", [])),
+            risk_status=risk_status or ("ALLOWED" if bool(getattr(flow_result, "risk_allowed", False)) else "BLOCKED"),
+            risk_reasons=risk_reasons or list(getattr(flow_result, "risk_reasons", [])),
+            risk_blocking_reasons=risk_blocks or list(getattr(flow_result, "risk_blocking_reasons", [])),
+            trade_manager_status=trade_status,
+            trade_manager_reasons=trade_reasons,
+            trade_manager_blocking_reasons=trade_blocks,
+            exit_simulator_status=exit_status,
+            exit_simulator_reasons=exit_reasons,
+            exit_simulator_blocking_reasons=exit_blocks,
+            simulated_pnl=float(pnl) if pnl is not None else None,
+            outcome=outcome,
         )
 
     def _resolve_window_time(
