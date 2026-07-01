@@ -23,8 +23,11 @@ Completed validation checkpoints:
 - `matching-acsil-footprint-validation-checkpoint`
 - `matching-acsil-5m-validation-checkpoint`
 - `matching-acsil-10m-validation-checkpoint`
+- `matching-acsil-day2-multitimeframe-validation-checkpoint`
 
 These checkpoints confirm that the ACSIL full footprint data path has been validated across multiple matching OHLC pairs.
+
+The day2 multi-timeframe validation is recorded separately in [ACSIL Matching Day2 Multi-Timeframe Validation Result](acsil_matching_day2_multitimeframe_validation_result.md).
 
 ## 3. 1m Result
 
@@ -105,6 +108,14 @@ Important execution pattern:
 - Simulated Order Flow confirmation would have avoided the losing trades observed in 5m and 10m tests.
 
 This is strong safety evidence for continuing research on the Order Flow confirmation proposal.
+
+The day2 validation confirmed this same pattern on another independent local dataset:
+
+- data quality passed across 1m, 5m, and 10m;
+- 1m remained safe with zero executions;
+- 5m and 10m allowed losing trades while Order Flow was `NEUTRAL`;
+- simulated Order Flow confirmation would have blocked all observed losing 5m and 10m trades;
+- no strategy rule was changed or approved.
 
 ## 7. What This Proves
 
