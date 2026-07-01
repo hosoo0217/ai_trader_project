@@ -30,6 +30,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
 - [ACSIL Matching Day2 Multi-Timeframe Validation Result](acsil_matching_day2_multitimeframe_validation_result.md): Records day2 matching OHLC plus ACSIL full footprint validation across 1m, 5m, and 10m.
 - [ACSIL Day3 1-Day 10m Validation Result](acsil_day3_1day_10m_validation_result.md): Records one-session (1-day chart load) day3 matching OHLC plus ACSIL full footprint validation for 10m, including A/B diagnostic safety results.
+- [ACSIL Day3 1-Day 5m Validation Logic Gap](acsil_day3_1day_5m_validation_logic_gap.md): Records one-session (1-day chart load) day3 5m ACSIL validation and documents the A/B diagnostic opposite-bias blocking logic gap as an implementation-readiness stop.
 - [Order Flow Footprint Implementation Gap Audit](orderflow_footprint_implementation_gap_audit.md): Audits current Footprint / Order Flow capabilities, limitations, safety status, and the next validation phase.
 - [Order Flow Confirmation Implementation Readiness Plan](orderflow_confirmation_implementation_readiness_plan.md): Defines the documentation-only approval, test, rollback, and safety checklist before any future Order Flow confirmation implementation.
 - [Reports / .gitignore Safety Review](reports_gitignore_safety.md): Explains generated report safety, secrets safety, and ignore rules.
