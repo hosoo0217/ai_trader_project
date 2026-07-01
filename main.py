@@ -1293,6 +1293,7 @@ def _export_orderflow_confirmation_ab_report(
     b_blocked_by_orderflow = [
         item for item in executed_iterations if _would_block_by_orderflow_confirmation(item)
     ]
+    b_blocked_reason_counts = _orderflow_confirmation_block_reason_counts(b_blocked_by_orderflow)
     b_blocked_ids = {id(item) for item in b_blocked_by_orderflow}
     b_remaining_executed = [
         item for item in executed_iterations if id(item) not in b_blocked_ids
@@ -1342,6 +1343,10 @@ def _export_orderflow_confirmation_ab_report(
             "blocked_because_orderflow_neutral": sum(
                 1 for item in b_blocked_by_orderflow if str(item.orderflow_status or "").upper() == "NEUTRAL"
             ),
+            "blocked_because_low_confidence": b_blocked_reason_counts["low_confidence"],
+            "blocked_because_opposite_bias": b_blocked_reason_counts["opposite_bias"],
+            "blocked_because_data_quality": b_blocked_reason_counts["data_quality"],
+            "blocked_by_reason": b_blocked_reason_counts,
             "total_pnl": b_metrics["total_pnl"],
             "win_rate": b_metrics["win_rate"],
             "max_drawdown": b_metrics["max_drawdown"],
@@ -1356,6 +1361,7 @@ def _export_orderflow_confirmation_ab_report(
                 "orderflow_reasons": list(item.orderflow_reasons),
                 "simulated_pnl_avoided": item.simulated_pnl,
                 "outcome": item.outcome,
+                "simulated_blocking_category": _orderflow_confirmation_block_category(item),
                 "simulated_blocking_reason": _orderflow_confirmation_block_reason(item),
             }
             for item in b_blocked_by_orderflow
@@ -1397,6 +1403,9 @@ def _export_orderflow_confirmation_ab_report(
         f"- B simulated blocked trades: {result.trades_blocked + len(b_blocked_by_orderflow)}",
         f"- Trades B would block by Order Flow confirmation: {len(b_blocked_by_orderflow)}",
         f"- Trades B would block because Order Flow was NEUTRAL: {payload['b_simulated_behavior']['blocked_because_orderflow_neutral']}",
+        f"- Trades B would block because Order Flow confidence was low: {payload['b_simulated_behavior']['blocked_because_low_confidence']}",
+        f"- Trades B would block because Order Flow had opposite bias: {payload['b_simulated_behavior']['blocked_because_opposite_bias']}",
+        f"- Trades B would block because Order Flow data quality failed: {payload['b_simulated_behavior']['blocked_because_data_quality']}",
         f"- Simulated B PnL: {_format_optional_float(b_metrics['total_pnl'])}",
         f"- Simulated B win rate: {_format_optional_float(b_metrics['win_rate'], suffix='%')}",
         f"- Simulated B max drawdown: {_format_optional_float(b_metrics['max_drawdown'])}",
@@ -1431,6 +1440,10 @@ def _export_orderflow_confirmation_ab_report(
 
 def _would_block_by_orderflow_confirmation(item) -> bool:
     """Return whether simulated B would block one A executed trade."""
+    category = _orderflow_confirmation_block_category(item)
+    if category in {"neutral", "low_confidence", "data_quality"}:
+        return True
+
     action = str(getattr(item, "final_action", "") or "").upper()
     orderflow_status = str(getattr(item, "orderflow_status", "") or "").upper()
     if action == "BUY":
@@ -1440,16 +1453,95 @@ def _would_block_by_orderflow_confirmation(item) -> bool:
     return False
 
 
+def _orderflow_confirmation_block_reason_counts(items: list[object]) -> dict[str, int]:
+    """Count simulated B Order Flow block categories for the diagnostic report."""
+    counts = {
+        "neutral": 0,
+        "low_confidence": 0,
+        "opposite_bias": 0,
+        "data_quality": 0,
+        "missing_confirmation": 0,
+    }
+    for item in items:
+        category = _orderflow_confirmation_block_category(item)
+        if category not in counts:
+            category = "missing_confirmation"
+        counts[category] += 1
+    return counts
+
+
+def _orderflow_confirmation_block_category(item) -> str:
+    """Classify why simulated B would block one A executed trade."""
+    action = str(getattr(item, "final_action", "") or "").upper()
+    orderflow_status = str(getattr(item, "orderflow_status", "") or "UNKNOWN").upper()
+
+    if orderflow_status == "NEUTRAL":
+        return "neutral"
+
+    if _orderflow_trace_has_data_quality_failure(item):
+        return "data_quality"
+
+    if _orderflow_trace_has_low_confidence(item):
+        return "low_confidence"
+
+    if action == "BUY" and orderflow_status == "BEARISH":
+        return "opposite_bias"
+    if action == "SELL" and orderflow_status == "BULLISH":
+        return "opposite_bias"
+
+    if action == "BUY" and orderflow_status != "BULLISH":
+        return "missing_confirmation"
+    if action == "SELL" and orderflow_status != "BEARISH":
+        return "missing_confirmation"
+
+    return "confirmed"
+
+
 def _orderflow_confirmation_block_reason(item) -> str:
     action = str(getattr(item, "final_action", "") or "").upper()
     orderflow_status = str(getattr(item, "orderflow_status", "") or "UNKNOWN").upper()
-    if orderflow_status == "NEUTRAL":
+    category = _orderflow_confirmation_block_category(item)
+    if category == "neutral":
         return "Order Flow was NEUTRAL"
+    if category == "data_quality":
+        return "Order Flow data quality failed"
+    if category == "low_confidence":
+        return "Order Flow confidence is below the configured minimum"
     if action == "BUY":
         return f"BUY requires BULLISH Order Flow; observed {orderflow_status}"
     if action == "SELL":
         return f"SELL requires BEARISH Order Flow; observed {orderflow_status}"
     return f"Order Flow confirmation missing for action {action or 'UNKNOWN'}"
+
+
+def _orderflow_trace_text(item) -> str:
+    """Collect existing trace text used by research-only A/B diagnostics."""
+    text_parts: list[str] = []
+    for attr_name in ["orderflow_reasons", "orderflow_blocking_reasons", "blocking_reasons"]:
+        text_parts.extend(str(value) for value in list(getattr(item, attr_name, []) or []))
+    for step in list(getattr(item, "trace_steps", []) or []):
+        text_parts.extend(str(value) for value in list(step.get("reasons", []) or []))
+        text_parts.extend(str(value) for value in list(step.get("blocking_reasons", []) or []))
+    return " | ".join(text_parts).lower()
+
+
+def _orderflow_trace_has_low_confidence(item) -> bool:
+    trace_text = _orderflow_trace_text(item)
+    return "confidence" in trace_text and "below" in trace_text and "minimum" in trace_text
+
+
+def _orderflow_trace_has_data_quality_failure(item) -> bool:
+    trace_text = _orderflow_trace_text(item)
+    data_quality_markers = [
+        "orderflow_data_quality_passed=false",
+        "order flow data quality failed",
+        "order flow data is empty",
+        "order flow data input is invalid",
+        "data quality status=failed",
+        "data quality status=invalid",
+        "data quality status=empty",
+    ]
+    return any(marker in trace_text for marker in data_quality_markers)
 
 
 def _performance_metrics_from_pnls(pnls: list[float], executed_count: int) -> dict[str, object]:

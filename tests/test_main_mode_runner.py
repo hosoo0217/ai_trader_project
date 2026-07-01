@@ -424,6 +424,142 @@ def test_orderflow_confirmation_ab_report_counts_neutral_executed_trade_as_b_blo
     assert payload["b_simulated_blocked_trades"][0]["iteration_index"] == 1
 
 
+def _orderflow_confirmation_trace(
+    action: str,
+    orderflow_status: str,
+    orderflow_reasons: list[str] | None = None,
+    orderflow_blocking_reasons: list[str] | None = None,
+) -> BacktestIterationTrace:
+    return BacktestIterationTrace(
+        iteration_index=1,
+        window_start=0,
+        window_end=59,
+        final_action=action,
+        final_allowed=True,
+        trade_executed=True,
+        status="CLOSED",
+        orderflow_status=orderflow_status,
+        orderflow_reasons=list(orderflow_reasons or []),
+        orderflow_blocking_reasons=list(orderflow_blocking_reasons or []),
+        simulated_pnl=10.0,
+        outcome="WIN",
+    )
+
+
+def test_orderflow_confirmation_ab_blocks_opposite_bias_buy() -> None:
+    item = _orderflow_confirmation_trace("BUY", "BEARISH")
+
+    assert main._would_block_by_orderflow_confirmation(item) is True
+    assert main._orderflow_confirmation_block_reason(item) == (
+        "BUY requires BULLISH Order Flow; observed BEARISH"
+    )
+
+
+def test_orderflow_confirmation_ab_blocks_opposite_bias_sell() -> None:
+    item = _orderflow_confirmation_trace("SELL", "BULLISH")
+
+    assert main._would_block_by_orderflow_confirmation(item) is True
+    assert main._orderflow_confirmation_block_reason(item) == (
+        "SELL requires BEARISH Order Flow; observed BULLISH"
+    )
+
+
+def test_orderflow_confirmation_ab_allows_confirmed_bullish_buy() -> None:
+    item = _orderflow_confirmation_trace("BUY", "BULLISH")
+
+    assert main._would_block_by_orderflow_confirmation(item) is False
+
+
+def test_orderflow_confirmation_ab_allows_confirmed_bearish_sell() -> None:
+    item = _orderflow_confirmation_trace("SELL", "BEARISH")
+
+    assert main._would_block_by_orderflow_confirmation(item) is False
+
+
+def test_orderflow_confirmation_ab_blocks_low_confidence_orderflow() -> None:
+    item = _orderflow_confirmation_trace(
+        "BUY",
+        "BULLISH",
+        orderflow_blocking_reasons=["Confidence 30.0 is below minimum 50.0"],
+    )
+
+    assert main._would_block_by_orderflow_confirmation(item) is True
+    assert main._orderflow_confirmation_block_reason(item) == (
+        "Order Flow confidence is below the configured minimum"
+    )
+
+
+def test_orderflow_confirmation_ab_report_separates_block_reasons(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_reason_reports"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=5,
+            trades_executed=5,
+            trades_blocked=0,
+            final_balance=9970.0,
+            total_pnl=-30.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                _orderflow_confirmation_trace("BUY", "NEUTRAL"),
+                _orderflow_confirmation_trace(
+                    "BUY",
+                    "BULLISH",
+                    orderflow_blocking_reasons=["Confidence 30.0 is below minimum 50.0"],
+                ),
+                _orderflow_confirmation_trace("SELL", "BULLISH"),
+                _orderflow_confirmation_trace(
+                    "SELL",
+                    "BEARISH",
+                    orderflow_reasons=["orderflow_data_quality_passed=False"],
+                    orderflow_blocking_reasons=["Order Flow data quality failed"],
+                ),
+                _orderflow_confirmation_trace("BUY", "BULLISH"),
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    payload = json.loads((trace_dir / "orderflow_confirmation_ab_report.json").read_text(encoding="utf-8"))
+    behavior = payload["b_simulated_behavior"]
+    reason_counts = behavior["blocked_by_reason"]
+
+    assert behavior["executed_trades"] == 1
+    assert behavior["blocked_by_orderflow_confirmation"] == 4
+    assert behavior["blocked_because_orderflow_neutral"] == 1
+    assert behavior["blocked_because_low_confidence"] == 1
+    assert behavior["blocked_because_opposite_bias"] == 1
+    assert behavior["blocked_because_data_quality"] == 1
+    assert reason_counts == {
+        "neutral": 1,
+        "low_confidence": 1,
+        "opposite_bias": 1,
+        "data_quality": 1,
+        "missing_confirmation": 0,
+    }
+    assert [item["simulated_blocking_category"] for item in payload["b_simulated_blocked_trades"]] == [
+        "neutral",
+        "low_confidence",
+        "opposite_bias",
+        "data_quality",
+    ]
+
+
 def test_orderflow_confirmation_ab_report_warns_when_b_blocks_everything(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
