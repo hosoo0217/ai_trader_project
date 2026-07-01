@@ -629,6 +629,64 @@ def test_orderflow_confirmation_ab_uses_scenario_direction_for_real_trace_shape(
         assert blocked_trades[0]["simulated_blocking_category"] == "opposite_bias"
 
 
+def test_orderflow_confirmation_ab_counts_bearish_sell_vs_bullish_orderflow_as_opposite_bias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_bearish_opposite_bias"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=1,
+            trades_blocked=0,
+            final_balance=9990.0,
+            total_pnl=-10.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="BUY",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    orderflow_status="BULLISH",
+                    orderflow_reasons=["Order Flow confidence=70.0"],
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bearish",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    payload = json.loads((trace_dir / "orderflow_confirmation_ab_report.json").read_text(encoding="utf-8"))
+    behavior = payload["b_simulated_behavior"]
+    blocked_trade = payload["b_simulated_blocked_trades"][0]
+
+    assert behavior["blocked_by_orderflow_confirmation"] == 1
+    assert behavior["blocked_because_opposite_bias"] == 1
+    assert behavior["blocked_because_orderflow_neutral"] == 0
+    assert behavior["blocked_because_low_confidence"] == 0
+    assert blocked_trade["diagnostic_action"] == "SELL"
+    assert blocked_trade["simulated_blocking_category"] == "opposite_bias"
+    assert blocked_trade["simulated_blocking_reason"] == "SELL requires BEARISH Order Flow; observed BULLISH"
+
+
 def test_orderflow_confirmation_ab_report_warns_when_b_blocks_everything(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
