@@ -1421,7 +1421,7 @@ def _export_orderflow_confirmation_ab_report(
     if b_blocked_by_orderflow:
         for item in b_blocked_by_orderflow:
             lines.append(
-                f"- Iteration {item.iteration_index}: {item.final_action} blocked; "
+                f"- Iteration {item.iteration_index}: {_orderflow_confirmation_action(item)} blocked; "
                 f"Order Flow={item.orderflow_status or 'UNKNOWN'}; "
                 f"PnL avoided={item.simulated_pnl if item.simulated_pnl is not None else 'N/A'}; "
                 f"reason={_orderflow_confirmation_block_reason(item)}"

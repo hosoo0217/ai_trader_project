@@ -687,6 +687,58 @@ def test_orderflow_confirmation_ab_counts_bearish_sell_vs_bullish_orderflow_as_o
     assert blocked_trade["simulated_blocking_reason"] == "SELL requires BEARISH Order Flow; observed BULLISH"
 
 
+def test_orderflow_confirmation_ab_txt_report_uses_inferred_trade_side_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = tmp_path / "ab_bearish_txt_label"
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=1,
+            trades_executed=1,
+            trades_blocked=0,
+            final_balance=9990.0,
+            total_pnl=-10.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="BUY",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    orderflow_status="BULLISH",
+                    orderflow_reasons=["Order Flow confidence=70.0"],
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+
+    _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bearish",
+        "--simulate-orderflow-confirmation-ab",
+        "--backtest-trace-dir",
+        str(trace_dir),
+    )
+
+    txt_report = (trace_dir / "orderflow_confirmation_ab_report.txt").read_text(encoding="utf-8")
+
+    assert "Iteration 1: SELL blocked;" in txt_report
+    assert "Iteration 1: BUY blocked;" not in txt_report
+    assert "reason=SELL requires BEARISH Order Flow; observed BULLISH" in txt_report
+
+
 def test_orderflow_confirmation_ab_report_warns_when_b_blocks_everything(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
