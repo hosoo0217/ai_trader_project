@@ -29,6 +29,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
 - [ACSIL Matching Day2 Multi-Timeframe Validation Result](acsil_matching_day2_multitimeframe_validation_result.md): Records day2 matching OHLC plus ACSIL full footprint validation across 1m, 5m, and 10m.
+- [Order Flow Footprint Implementation Gap Audit](orderflow_footprint_implementation_gap_audit.md): Audits current Footprint / Order Flow capabilities, limitations, safety status, and the next validation phase.
 - [Reports / .gitignore Safety Review](reports_gitignore_safety.md): Explains generated report safety, secrets safety, and ignore rules.
 - [MVP Code Freeze Note](mvp_code_freeze.md): Explains that the project is moving from feature-building into cleanup, testing, and validation mode.
 
