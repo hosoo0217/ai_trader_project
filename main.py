@@ -1290,6 +1290,10 @@ def _export_orderflow_confirmation_ab_report(
     executed_iterations = [
         item for item in list(getattr(result, "iteration_traces", [])) if bool(getattr(item, "trade_executed", False))
     ]
+    diagnostic_action = _orderflow_confirmation_action_from_scenario(scenario)
+    for item in executed_iterations:
+        setattr(item, "_orderflow_confirmation_diagnostic_action", diagnostic_action)
+
     b_blocked_by_orderflow = [
         item for item in executed_iterations if _would_block_by_orderflow_confirmation(item)
     ]
@@ -1357,6 +1361,7 @@ def _export_orderflow_confirmation_ab_report(
             {
                 "iteration_index": item.iteration_index,
                 "final_action": item.final_action,
+                "diagnostic_action": _orderflow_confirmation_action(item),
                 "orderflow_status": item.orderflow_status,
                 "orderflow_reasons": list(item.orderflow_reasons),
                 "simulated_pnl_avoided": item.simulated_pnl,
@@ -1444,7 +1449,7 @@ def _would_block_by_orderflow_confirmation(item) -> bool:
     if category in {"neutral", "low_confidence", "data_quality"}:
         return True
 
-    action = str(getattr(item, "final_action", "") or "").upper()
+    action = _orderflow_confirmation_action(item)
     orderflow_status = str(getattr(item, "orderflow_status", "") or "").upper()
     if action == "BUY":
         return orderflow_status != "BULLISH"
@@ -1472,7 +1477,7 @@ def _orderflow_confirmation_block_reason_counts(items: list[object]) -> dict[str
 
 def _orderflow_confirmation_block_category(item) -> str:
     """Classify why simulated B would block one A executed trade."""
-    action = str(getattr(item, "final_action", "") or "").upper()
+    action = _orderflow_confirmation_action(item)
     orderflow_status = str(getattr(item, "orderflow_status", "") or "UNKNOWN").upper()
 
     if orderflow_status == "NEUTRAL":
@@ -1498,7 +1503,7 @@ def _orderflow_confirmation_block_category(item) -> str:
 
 
 def _orderflow_confirmation_block_reason(item) -> str:
-    action = str(getattr(item, "final_action", "") or "").upper()
+    action = _orderflow_confirmation_action(item)
     orderflow_status = str(getattr(item, "orderflow_status", "") or "UNKNOWN").upper()
     category = _orderflow_confirmation_block_category(item)
     if category == "neutral":
@@ -1512,6 +1517,24 @@ def _orderflow_confirmation_block_reason(item) -> str:
     if action == "SELL":
         return f"SELL requires BEARISH Order Flow; observed {orderflow_status}"
     return f"Order Flow confirmation missing for action {action or 'UNKNOWN'}"
+
+
+def _orderflow_confirmation_action(item) -> str:
+    """Resolve the simulated B direction without changing real execution."""
+    diagnostic_action = str(getattr(item, "_orderflow_confirmation_diagnostic_action", "") or "").upper()
+    if diagnostic_action in {"BUY", "SELL"}:
+        return diagnostic_action
+    return str(getattr(item, "final_action", "") or "").upper()
+
+
+def _orderflow_confirmation_action_from_scenario(scenario: str) -> str | None:
+    """Map the requested scenario to the simulated B confirmation side."""
+    normalized = str(scenario or "").strip().lower()
+    if normalized == "bullish":
+        return "BUY"
+    if normalized == "bearish":
+        return "SELL"
+    return None
 
 
 def _orderflow_trace_text(item) -> str:
