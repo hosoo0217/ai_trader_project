@@ -93,3 +93,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Day4 SC delayed orderflow validation summary](day4_sc_delayed_orderflow_validation_summary.md)
 
 - [Day4 SC delayed 1m extended validation addendum](day4_sc_delayed_1m_extended_validation_addendum.md)
+
+- [Order Flow confirmation validation evidence review](orderflow_confirmation_validation_evidence_review.md)
