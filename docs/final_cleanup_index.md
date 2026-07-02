@@ -89,3 +89,5 @@ The project is now being cleaned and validated before any real trading work.
 Think of this phase as proving the current system works safely. First run tests, then run demo validation, then check sample CSVs, then test real exported CSVs, then validate backtests, and only after that prepare paper trading.
 
 Live trading and broker connections are later separate phases, not part of this cleanup stage.
+
+- [Day4 SC delayed orderflow validation summary](day4_sc_delayed_orderflow_validation_summary.md)
