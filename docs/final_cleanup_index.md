@@ -91,3 +91,5 @@ Think of this phase as proving the current system works safely. First run tests,
 Live trading and broker connections are later separate phases, not part of this cleanup stage.
 
 - [Day4 SC delayed orderflow validation summary](day4_sc_delayed_orderflow_validation_summary.md)
+
+- [Day4 SC delayed 1m extended validation addendum](day4_sc_delayed_1m_extended_validation_addendum.md)
