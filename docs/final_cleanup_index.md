@@ -97,3 +97,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Order Flow confirmation validation evidence review](orderflow_confirmation_validation_evidence_review.md)
 
 - [Day3 5m aligned Order Flow loss audit](day3_5m_aligned_orderflow_loss_audit.md)
+
+- [Backtest-only context alignment research plan](context_alignment_research_plan.md)
