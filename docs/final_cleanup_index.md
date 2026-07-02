@@ -99,3 +99,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Day3 5m aligned Order Flow loss audit](day3_5m_aligned_orderflow_loss_audit.md)
 
 - [Backtest-only context alignment research plan](context_alignment_research_plan.md)
+
+- [Context alignment diagnostic implementation checklist](context_alignment_diagnostic_implementation_checklist.md)
