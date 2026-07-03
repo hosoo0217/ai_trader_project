@@ -46,14 +46,20 @@ The runner is intended to be used before any real 30-day bulk backtesting. Its j
 
 The runner in `analysis/bulk_sierra_backtest_runner.py` is a diagnostic wrapper around the existing `main.py --mode backtest` CLI path.
 
-It requires explicit `--market-csv`, `--footprint-csv`, `--timeframe`, `--max-iterations`, `--side`, and `--output-dir` arguments. It does not discover or read `private_data` automatically, and it writes summaries only under the provided output directory.
+It requires explicit `--market-csv`, `--footprint-csv`, `--timeframe`, `--max-iterations`, `--profile`, `--side`, and `--output-dir` arguments. `--profile` must be one of `apex`, `spot`, or `safe` and is passed through to the existing backtest CLI.
+
+It does not discover or read `private_data` automatically, and it writes summaries only under the provided output directory.
 
 The runner records the requested timeframe in its own summary files. It does not change the existing backtest engine or add a new timeframe implementation.
 
 When invoked, it can request the existing Order Flow A/B diagnostic export through the already-supported `--simulate-orderflow-confirmation-ab` CLI flag. This remains report-only and does not enforce Order Flow confirmation.
 
+Each side writes to a side-specific output folder, such as `output-dir/bullish` and `output-dir/bearish`. This prevents side-specific files such as `orderflow_confirmation_ab_report.txt` and `orderflow_confirmation_ab_report.json` from overwriting each other when `--side both` is used.
+
 ## Pilot boundary
 
 The helper and audit runner do not run real backtests. The backtest runner only runs the existing research-only backtest CLI when explicit CSV paths and an output directory are provided. These tools do not load private Sierra files by themselves, do not write to `reports` by default, and do not modify existing validation results.
+
+These tools do not approve live trading, paper trading, broker connection, or strategy enforcement.
 
 Synthetic unit tests cover the current behavior. Real 30-day export validation should remain a separate, explicitly reviewed step.

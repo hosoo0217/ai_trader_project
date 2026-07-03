@@ -30,6 +30,7 @@ class BulkSierraBacktestConfig:
     footprint_csv: str | Path
     timeframe: str
     max_iterations: int
+    profile: str
     side: str
     output_dir: str | Path
 
@@ -39,6 +40,7 @@ class BulkSierraBacktestRunResult:
     """Summary for one side-specific diagnostic run."""
 
     side: str
+    output_dir: str
     returncode: int
     command: list[str]
     stdout_path: str
@@ -56,6 +58,7 @@ class BulkSierraBacktestReport:
     footprint_csv: str
     timeframe: str
     max_iterations: int
+    profile: str
     side: str
     output_dir: str
     total_runs: int
@@ -69,11 +72,12 @@ class BulkSierraBacktestReport:
 def build_backtest_commands(config: BulkSierraBacktestConfig) -> list[list[str]]:
     """Build supported existing CLI commands without running them."""
     sides = _sides_for(config.side)
+    profile = _validate_profile(config.profile)
     commands: list[list[str]] = []
-    trace_dir = str(Path(config.output_dir))
     main_path = str(_main_py_path())
 
     for side in sides:
+        side_output_dir = str(_side_output_dir(config.output_dir, side))
         commands.append(
             [
                 sys.executable,
@@ -82,6 +86,8 @@ def build_backtest_commands(config: BulkSierraBacktestConfig) -> list[list[str]]
                 "backtest",
                 "--scenario",
                 side,
+                "--profile",
+                profile,
                 "--backtest-market-csv",
                 str(config.market_csv),
                 "--orderflow-csv",
@@ -89,7 +95,7 @@ def build_backtest_commands(config: BulkSierraBacktestConfig) -> list[list[str]]
                 "--backtest-max-iterations",
                 str(config.max_iterations),
                 "--backtest-trace-dir",
-                trace_dir,
+                side_output_dir,
                 "--simulate-orderflow-confirmation-ab",
             ]
         )
@@ -105,6 +111,7 @@ def run_bulk_sierra_backtests(
     market_path = Path(config.market_csv)
     footprint_path = Path(config.footprint_csv)
     output_dir = Path(config.output_dir)
+    profile = _validate_profile(config.profile)
 
     _require_existing_file(market_path)
     _require_existing_file(footprint_path)
@@ -113,6 +120,8 @@ def run_bulk_sierra_backtests(
     run_results: list[BulkSierraBacktestRunResult] = []
     for command in build_backtest_commands(config):
         side = _command_value(command, "--scenario") or "unknown"
+        side_output_dir = _side_output_dir(output_dir, side)
+        side_output_dir.mkdir(parents=True, exist_ok=True)
         completed = run_command(
             command,
             capture_output=True,
@@ -121,14 +130,15 @@ def run_bulk_sierra_backtests(
         )
         stdout = completed.stdout or ""
         stderr = completed.stderr or ""
-        stdout_path = output_dir / f"bulk_sierra_backtest_{config.timeframe}_{side}_stdout.txt"
-        stderr_path = output_dir / f"bulk_sierra_backtest_{config.timeframe}_{side}_stderr.txt"
+        stdout_path = side_output_dir / f"bulk_sierra_backtest_{config.timeframe}_{side}_stdout.txt"
+        stderr_path = side_output_dir / f"bulk_sierra_backtest_{config.timeframe}_{side}_stderr.txt"
         stdout_path.write_text(stdout)
         stderr_path.write_text(stderr)
 
         run_results.append(
             BulkSierraBacktestRunResult(
                 side=side,
+                output_dir=str(side_output_dir),
                 returncode=int(completed.returncode),
                 command=list(command),
                 stdout_path=str(stdout_path),
@@ -144,6 +154,7 @@ def run_bulk_sierra_backtests(
         footprint_csv=str(footprint_path),
         timeframe=str(config.timeframe),
         max_iterations=int(config.max_iterations),
+        profile=profile,
         side=str(config.side),
         output_dir=str(output_dir),
         total_runs=len(run_results),
@@ -173,14 +184,15 @@ def format_bulk_backtest_text(report: BulkSierraBacktestReport) -> str:
         f"- Footprint CSV: {report.footprint_csv}",
         f"- Timeframe: {report.timeframe}",
         f"- Max iterations: {report.max_iterations}",
+        f"- Profile: {report.profile}",
         f"- Requested side: {report.side}",
         f"- Total runs: {report.total_runs}",
         f"- Completed runs: {report.completed_runs}",
         f"- Failed runs: {report.failed_runs}",
         f"- Order Flow A/B diagnostic requested: {report.orderflow_ab_diagnostic_requested}",
         "",
-        "| Side | Return code | Iterations | Trades executed | Total PnL | Stdout | Stderr |",
-        "|---|---:|---:|---:|---:|---|---|",
+        "| Side | Return code | Iterations | Trades executed | Total PnL | Output dir | Stdout | Stderr |",
+        "|---|---:|---:|---:|---:|---|---|---|",
     ]
 
     for result in report.runs:
@@ -191,6 +203,7 @@ def format_bulk_backtest_text(report: BulkSierraBacktestReport) -> str:
             f"{_metric_text(result.total_iterations)} | "
             f"{_metric_text(result.trades_executed)} | "
             f"{_metric_text(result.total_pnl)} | "
+            f"{result.output_dir} | "
             f"{result.stdout_path} | "
             f"{result.stderr_path} |"
         )
@@ -213,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--footprint-csv", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--max-iterations", type=_positive_int, required=True)
+    parser.add_argument("--profile", choices=["apex", "spot", "safe"], required=True)
     parser.add_argument("--side", choices=["bullish", "bearish", "both"], required=True)
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args(argv)
@@ -223,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             footprint_csv=args.footprint_csv,
             timeframe=args.timeframe,
             max_iterations=args.max_iterations,
+            profile=args.profile,
             side=args.side,
             output_dir=args.output_dir,
         )
@@ -238,6 +253,17 @@ def _sides_for(side: str) -> list[str]:
     if normalized in {"bullish", "bearish"}:
         return [normalized]
     raise ValueError("side must be bullish, bearish, or both")
+
+
+def _validate_profile(profile: str) -> str:
+    normalized = str(profile or "").strip().lower()
+    if normalized in {"apex", "spot", "safe"}:
+        return normalized
+    raise ValueError("profile must be apex, spot, or safe")
+
+
+def _side_output_dir(output_dir: str | Path, side: str) -> Path:
+    return Path(output_dir) / str(side).strip().lower()
 
 
 def _require_existing_file(path: Path) -> None:
