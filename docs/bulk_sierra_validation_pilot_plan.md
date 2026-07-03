@@ -42,8 +42,18 @@ It reads explicitly provided market and footprint CSV paths, calls the bulk Sier
 
 The runner is intended to be used before any real 30-day bulk backtesting. Its job is to identify whether the exported market and footprint sessions line up, whether sessions are missing, and whether bad timestamp rows exist.
 
+## Backtest runner
+
+The runner in `analysis/bulk_sierra_backtest_runner.py` is a diagnostic wrapper around the existing `main.py --mode backtest` CLI path.
+
+It requires explicit `--market-csv`, `--footprint-csv`, `--timeframe`, `--max-iterations`, `--side`, and `--output-dir` arguments. It does not discover or read `private_data` automatically, and it writes summaries only under the provided output directory.
+
+The runner records the requested timeframe in its own summary files. It does not change the existing backtest engine or add a new timeframe implementation.
+
+When invoked, it can request the existing Order Flow A/B diagnostic export through the already-supported `--simulate-orderflow-confirmation-ab` CLI flag. This remains report-only and does not enforce Order Flow confirmation.
+
 ## Pilot boundary
 
-The helper and runner do not run real backtests. They do not load private Sierra files by themselves. They do not write reports by default. They do not modify existing validation results.
+The helper and audit runner do not run real backtests. The backtest runner only runs the existing research-only backtest CLI when explicit CSV paths and an output directory are provided. These tools do not load private Sierra files by themselves, do not write to `reports` by default, and do not modify existing validation results.
 
 Synthetic unit tests cover the current behavior. Real 30-day export validation should remain a separate, explicitly reviewed step.
