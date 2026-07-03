@@ -34,8 +34,16 @@ The helper in `analysis/bulk_sierra_validation.py` can:
 
 By default, grouping uses an 18:00 session start for GC-style futures validation. Timestamps at or after 18:00 belong to that date's session, while timestamps before 18:00 belong to the previous date's session. This keeps an overnight session such as `2026-07-02 18:00` through `2026-07-03 08:45` together as one validation session.
 
+## Audit runner
+
+The runner in `analysis/bulk_sierra_audit_runner.py` is a diagnostic wrapper around the helper.
+
+It reads explicitly provided market and footprint CSV paths, calls the bulk Sierra validation helper, counts session statuses, and can write JSON or Markdown summaries when output paths are supplied.
+
+The runner is intended to be used before any real 30-day bulk backtesting. Its job is to identify whether the exported market and footprint sessions line up, whether sessions are missing, and whether bad timestamp rows exist.
+
 ## Pilot boundary
 
-The helper does not run real backtests. It does not load private Sierra files by itself. It does not write reports. It does not modify existing validation results.
+The helper and runner do not run real backtests. They do not load private Sierra files by themselves. They do not write reports by default. They do not modify existing validation results.
 
 Synthetic unit tests cover the current behavior. Real 30-day export validation should remain a separate, explicitly reviewed step.
