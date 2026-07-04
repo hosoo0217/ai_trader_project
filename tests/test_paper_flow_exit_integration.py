@@ -170,3 +170,14 @@ def test_flow_result_includes_exit_reason_and_pnl() -> None:
     assert result.exit_reason == "TAKE_PROFIT"
     assert result.pnl == 1.0
     assert "Exit simulation: TAKE_PROFIT" in result.reasons
+
+
+def test_exit_simulation_does_not_use_pre_entry_candles() -> None:
+    """Regression test: exit simulation must not exit using candles before entry."""
+    candles = make_flow_candles("BUY", "TP")
+    result, _state = run_flow(
+        candles,
+        PaperTradingFlowConfig(stop_loss=50.0, take_profit=160.0, simulate_exit=True),
+    )
+
+    assert "Exited at candle 0" not in result.reasons

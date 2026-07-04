@@ -9,7 +9,7 @@ from core.backtest_runner import BacktestConfig, BacktestResult, BacktestRunner
 from core.capital_protection import CapitalProtectionConfig, CapitalProtectionState
 from core.market_analyzer import MarketAnalyzerConfig
 from core.multi_timeframe import MultiTimeframeConfig
-from core.paper_trading_flow import PaperTradingFlowConfig
+from core.paper_trading_flow import PaperTradingFlowConfig, PaperTradingFlowResult
 from risk.risk_engine import RiskEngineConfig
 from storage.trade_journal import TradeJournal
 
@@ -124,3 +124,39 @@ def test_explain_returns_readable_text() -> None:
     assert "Backtest status" in text
     assert "iterations" in text
     assert "total pnl" in text
+
+
+def test_backtest_passes_post_entry_candles_to_exit_simulation(monkeypatch) -> None:
+    captured_exit_candles = []
+
+    class CapturingFlow:
+        def run_single_timeframe(self, candles, *args, **kwargs):
+            captured_exit_candles.append(kwargs.get("exit_simulation_candles"))
+            return PaperTradingFlowResult(
+                completed=True,
+                status="BLOCKED",
+                trade_executed=False,
+                reasons=["test flow result"],
+            )
+
+    monkeypatch.setattr("core.backtest_runner.PaperTradingFlow", CapturingFlow)
+
+    candles = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-01", periods=65, freq="min"),
+            "open": [100.0 + index for index in range(65)],
+            "high": [101.0 + index for index in range(65)],
+            "low": [99.0 + index for index in range(65)],
+            "close": [100.0 + index for index in range(65)],
+        }
+    )
+
+    result = run_backtest(
+        candles,
+        BacktestConfig(window_size=60, step_size=1, max_iterations=1),
+    )
+
+    assert result.completed is True
+    assert len(captured_exit_candles) == 1
+    assert captured_exit_candles[0] is not None
+    assert list(captured_exit_candles[0].index) == [60, 61, 62, 63, 64]

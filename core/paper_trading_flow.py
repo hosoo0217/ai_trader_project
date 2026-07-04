@@ -167,6 +167,7 @@ class PaperTradingFlow:
         crt_config: Optional[CRTConfig] = None,
         alignment_config: Optional[ContextAlignmentConfig] = None,
         orderflow_context_result: Optional[OrderFlowContextResult] = None,
+        exit_simulation_candles: Optional[pd.DataFrame] = None,
     ) -> PaperTradingFlowResult:
         """Run the paper flow using a single candle dataset for all timeframes."""
         decision_trace = self._create_decision_trace(tracer, flow_config.symbol)
@@ -1282,7 +1283,15 @@ class PaperTradingFlow:
 
         if trade_result.executed and flow_config.simulate_exit:
             position = getattr(getattr(trade_result, "broker_result", None), "position", None)
-            exit_result = ExitSimulator().simulate_exit(position, candles, flow_config.exit_simulation_config)
+            # Use explicitly supplied post-entry candles when available.
+            # The paper-flow entry price is created from the last candle in the
+            # analysis window, so earlier lookback candles are pre-entry data.
+            exit_candles = (
+                exit_simulation_candles.copy()
+                if isinstance(exit_simulation_candles, pd.DataFrame)
+                else candles.iloc[-1:].copy()
+            )
+            exit_result = ExitSimulator().simulate_exit(position, exit_candles, flow_config.exit_simulation_config)
             exit_simulated = True
             exit_reason = exit_result.exit_reason
             exit_price = exit_result.exit_price

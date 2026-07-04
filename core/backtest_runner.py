@@ -209,6 +209,7 @@ class BacktestRunner:
                 break
 
             window = candles.iloc[start : start + backtest_config.window_size].copy()
+            exit_simulation_candles = candles.iloc[start + backtest_config.window_size :].copy()
             window_current_time = self._resolve_window_time(window, session_time_fallback)
             if window_current_time is None:
                 time_parse_fallback_used = True
@@ -233,6 +234,7 @@ class BacktestRunner:
                 current_spread,
                 DecisionTracer() if collect_iteration_traces else None,
                 orderflow_context_result=orderflow_context_result,
+                exit_simulation_candles=exit_simulation_candles,
             )
             last_flow_result = flow_result
 
