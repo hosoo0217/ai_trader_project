@@ -88,3 +88,38 @@ The next diagnostic step should investigate why the bulk Order Flow context is n
 - Whether context should be computed from a rolling pre-entry footprint window instead of the entire 30-day footprint file
 - Whether the context combiner thresholds neutralize meaningful 5m/10m imbalance evidence
 - Whether per-iteration Order Flow snapshots can be exported without changing trading behavior
+
+## Per-entry replay snapshot gate simulation
+
+After confirming that the bulk Order Flow context is global/latest rather than per-entry, a diagnostic-only replay snapshot comparison was run.
+
+Method:
+
+- Exported bullish full trace for 1m, 5m, and 10m after the future-exit fix.
+- Replayed footprint candles only up to each executed trade's `window_end`.
+- Matched each executed trade to the replay snapshot at its `window_end`.
+- Simulated two diagnostic gates:
+  - non-neutral Order Flow only
+  - direction-aligned Order Flow only
+
+Results:
+
+| Timeframe | Current executed | Current PnL | Non-neutral kept | Non-neutral PnL | Non-neutral outcomes | Aligned kept | Aligned PnL | Aligned outcomes |
+|---|---:|---:|---:|---:|---|---:|---:|---|
+| 1m | 18 | +20.00 | 1 | -10.00 | 0 WIN / 1 LOSS | 0 | 0.00 | 0 WIN / 0 LOSS |
+| 5m | 38 | +270.00 | 8 | +95.00 | 7 WIN / 1 LOSS | 3 | +45.00 | 3 WIN / 0 LOSS |
+| 10m | 46 | +15.00 | 11 | -35.00 | 3 WIN / 8 LOSS | 6 | -35.00 | 1 WIN / 5 LOSS |
+
+Interpretation:
+
+- Per-entry replay snapshots are more informative than the previous global/latest bulk Order Flow context.
+- However, per-entry Order Flow gating is not stable across timeframes.
+- The 5m result looks promising but has too few aligned trades to justify enforcement.
+- The 1m and 10m results argue against immediate Order Flow enforcement.
+- Order Flow should remain diagnostic-only until a stronger rolling pre-entry context study is implemented and validated.
+
+Decision:
+
+- Do not enforce Order Flow confirmation.
+- Do not change strategy rules.
+- Do not approve live trading, paper trading, broker connection, external API, or real orders.
