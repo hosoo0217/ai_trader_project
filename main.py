@@ -372,6 +372,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Export a research-only A/B diagnostic for simulated Order Flow confirmation",
     )
     parser.add_argument(
+        "--export-per-entry-orderflow-replay-diagnostic",
+        action="store_true",
+        help="Export a research-only per-entry Order Flow replay snapshot diagnostic",
+    )
+    parser.add_argument(
+        "--per-entry-orderflow-report-dir",
+        default="",
+        help="Output folder for per-entry Order Flow replay diagnostic reports",
+    )
+    parser.add_argument(
+        "--per-entry-orderflow-min-confidence",
+        type=float,
+        default=50.0,
+        help="Minimum confidence for per-entry Order Flow replay diagnostic snapshots",
+    )
+    parser.add_argument(
         "--show-trace",
         action="store_true",
         help="Show decision trace details in output",
@@ -1443,6 +1459,222 @@ def _export_orderflow_confirmation_ab_report(
     return json_path, txt_path
 
 
+def _export_per_entry_orderflow_replay_diagnostic(
+    output_dir: str,
+    scenario: str,
+    profile: TradingProfile,
+    result,
+    performance,
+    footprint_csv_path: str,
+    minimum_confidence: float = 50.0,
+) -> tuple[Path, Path]:
+    """Export per-entry replay snapshots without changing execution."""
+    destination = Path(output_dir or "reports")
+    destination.mkdir(parents=True, exist_ok=True)
+    json_path = destination / "per_entry_orderflow_replay_diagnostic.json"
+    txt_path = destination / "per_entry_orderflow_replay_diagnostic.txt"
+
+    executed_iterations = [
+        item for item in list(getattr(result, "iteration_traces", [])) if bool(getattr(item, "trade_executed", False))
+    ]
+    max_window_end = max((int(getattr(item, "window_end", -1)) for item in executed_iterations), default=-1)
+    replay_result: OrderFlowReplayResult | None = None
+    replay_steps_by_index = {}
+    replay_reasons: list[str] = []
+    replay_blocking_reasons: list[str] = []
+
+    if not str(footprint_csv_path or "").strip():
+        replay_blocking_reasons.append("Order Flow CSV is required for per-entry replay diagnostic")
+    elif max_window_end < 0:
+        replay_reasons.append("No executed trades required replay snapshots")
+    else:
+        resolved_csv = _resolve_orderflow_csv_path(str(footprint_csv_path))
+        if not resolved_csv.exists() or not resolved_csv.is_file():
+            replay_blocking_reasons.append(f"Order Flow CSV not found: {footprint_csv_path}")
+        else:
+            replay_result = OrderFlowReplayEngine().replay_csv(
+                str(resolved_csv),
+                OrderFlowReplayConfig(
+                    minimum_confidence=minimum_confidence,
+                    max_steps=max_window_end + 1,
+                ),
+            )
+            replay_reasons.extend(list(getattr(replay_result, "reasons", [])))
+            replay_blocking_reasons.extend(list(getattr(replay_result, "blocking_reasons", [])))
+            replay_steps_by_index = {
+                int(step.index): step for step in list(getattr(replay_result, "steps", []) or [])
+            }
+
+    trade_rows = []
+    missing_snapshot_count = 0
+    for item in executed_iterations:
+        window_end = int(getattr(item, "window_end", -1))
+        step = replay_steps_by_index.get(window_end)
+        if step is None:
+            missing_snapshot_count += 1
+        replay_bias = str(getattr(step, "orderflow_bias", "UNKNOWN") or "UNKNOWN") if step is not None else "UNKNOWN"
+        replay_confidence = (
+            float(getattr(step, "orderflow_confidence", 0.0) or 0.0)
+            if step is not None
+            else 0.0
+        )
+        action = str(getattr(item, "final_action", "") or "").upper()
+        is_non_neutral = replay_bias in {"BULLISH", "BEARISH"}
+        is_aligned = (
+            (action == "BUY" and replay_bias == "BULLISH")
+            or (action == "SELL" and replay_bias == "BEARISH")
+        )
+        trade_rows.append(
+            {
+                "iteration_index": item.iteration_index,
+                "window_start": item.window_start,
+                "window_end": item.window_end,
+                "final_action": item.final_action,
+                "diagnostic_action": action,
+                "outcome": item.outcome,
+                "simulated_pnl": item.simulated_pnl,
+                "replay_snapshot_found": step is not None,
+                "replay_step_index": getattr(step, "index", None) if step is not None else None,
+                "replay_time": str(getattr(step, "time", "")) if step is not None else None,
+                "replay_orderflow_bias": replay_bias,
+                "replay_orderflow_confidence": replay_confidence,
+                "replay_delta_direction": getattr(step, "delta_direction", None) if step is not None else None,
+                "replay_imbalance_bias": getattr(step, "imbalance_bias", None) if step is not None else None,
+                "replay_absorption_bias": getattr(step, "absorption_bias", None) if step is not None else None,
+                "replay_cumulative_delta": getattr(step, "cumulative_delta", None) if step is not None else None,
+                "replay_reasons": list(getattr(step, "reasons", [])) if step is not None else [],
+                "replay_blocking_reasons": list(getattr(step, "blocking_reasons", [])) if step is not None else [],
+                "non_neutral_kept": bool(is_non_neutral),
+                "aligned_kept": bool(is_aligned),
+            }
+        )
+
+    non_neutral_rows = [row for row in trade_rows if row["non_neutral_kept"]]
+    aligned_rows = [row for row in trade_rows if row["aligned_kept"]]
+    non_neutral_pnls = _pnls_from_trade_rows(non_neutral_rows)
+    aligned_pnls = _pnls_from_trade_rows(aligned_rows)
+    warning = None
+    if executed_iterations and missing_snapshot_count == len(executed_iterations):
+        warning = "No executed trades could be matched to replay snapshots"
+    elif missing_snapshot_count:
+        warning = f"{missing_snapshot_count} executed trade(s) could not be matched to replay snapshots"
+
+    payload = {
+        "summary": {
+            "scenario": scenario,
+            "profile": profile.profile_name,
+            "research_only": True,
+            "not_implementation": True,
+            "total_iterations": result.total_iterations,
+            "footprint_csv": str(footprint_csv_path or ""),
+            "minimum_confidence": float(minimum_confidence),
+            "max_replay_steps_requested": max_window_end + 1 if max_window_end >= 0 else 0,
+            "replay_steps": len(getattr(replay_result, "steps", []) or []) if replay_result is not None else 0,
+            "missing_snapshot_count": missing_snapshot_count,
+            "warning": warning,
+            "safety": {
+                "live_trading": False,
+                "paper_trading": False,
+                "broker_connection": False,
+                "mt5_login": False,
+                "sierra_live_connection": False,
+                "cme_live_data_connection": False,
+                "real_orders": False,
+                "external_apis": False,
+            },
+        },
+        "a_current_behavior": {
+            "executed_trades": result.trades_executed,
+            "blocked_trades": result.trades_blocked,
+            "total_pnl": result.total_pnl,
+            "win_rate": performance.win_rate,
+            "max_drawdown": performance.max_drawdown,
+            "profit_factor": "INF" if performance.profit_factor == float("inf") else performance.profit_factor,
+        },
+        "non_neutral_replay_snapshot_behavior": {
+            **_performance_metrics_from_pnls(non_neutral_pnls, len(non_neutral_rows)),
+            "blocked_trades": result.trades_blocked + (len(trade_rows) - len(non_neutral_rows)),
+        },
+        "aligned_replay_snapshot_behavior": {
+            **_performance_metrics_from_pnls(aligned_pnls, len(aligned_rows)),
+            "blocked_trades": result.trades_blocked + (len(trade_rows) - len(aligned_rows)),
+        },
+        "replay": {
+            "passed": bool(getattr(replay_result, "passed", False)) if replay_result is not None else False,
+            "data_quality_status": getattr(replay_result, "data_quality_status", None) if replay_result is not None else None,
+            "reasons": replay_reasons,
+            "blocking_reasons": replay_blocking_reasons,
+        },
+        "executed_trade_replay_snapshots": trade_rows,
+        "explanation": (
+            "This report matches completed backtest trade traces to Order Flow replay snapshots by window_end index. "
+            "It does not implement Order Flow confirmation, change trade execution, change risk behavior, or approve trading."
+        ),
+    }
+
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    lines = [
+        "Per-entry Order Flow Replay Diagnostic Report",
+        "",
+        "Safety",
+        "- Research-only diagnostic export",
+        "- This is not implementation",
+        "- No strategy rule was changed",
+        "- No risk rule was changed",
+        "- No live trading",
+        "- No paper trading",
+        "- No broker connection",
+        "- No MT5 login",
+        "- No Sierra live connection",
+        "- No CME live data connection",
+        "- No real orders",
+        "- No external APIs",
+        "",
+        "Summary",
+        f"- Scenario: {scenario}",
+        f"- Profile: {profile.profile_name}",
+        f"- Total iterations: {result.total_iterations}",
+        f"- A executed trades: {result.trades_executed}",
+        f"- A PnL: {result.total_pnl:.2f}",
+        f"- Replay steps: {payload['summary']['replay_steps']}",
+        f"- Missing replay snapshots: {missing_snapshot_count}",
+        f"- Warning: {warning or 'None'}",
+        "",
+        "Diagnostic Simulations",
+        f"- Non-neutral kept trades: {len(non_neutral_rows)}",
+        f"- Non-neutral PnL: {_format_optional_float(payload['non_neutral_replay_snapshot_behavior']['total_pnl'])}",
+        f"- Aligned kept trades: {len(aligned_rows)}",
+        f"- Aligned PnL: {_format_optional_float(payload['aligned_replay_snapshot_behavior']['total_pnl'])}",
+        "",
+        "Executed Trade Snapshots",
+    ]
+    if not trade_rows:
+        lines.append("- None")
+    else:
+        for row in trade_rows:
+            lines.append(
+                f"- Iteration {row['iteration_index']}: action={row['diagnostic_action']}; "
+                f"PnL={row['simulated_pnl'] if row['simulated_pnl'] is not None else 'N/A'}; "
+                f"Order Flow={row['replay_orderflow_bias']}; "
+                f"confidence={row['replay_orderflow_confidence']:.1f}; "
+                f"non_neutral_kept={row['non_neutral_kept']}; "
+                f"aligned_kept={row['aligned_kept']}"
+            )
+
+    lines.extend(
+        [
+            "",
+            "Interpretation",
+            "- This report is matched by window_end index.",
+            "- It is diagnostic-only and does not affect actual backtest execution.",
+            "- Direction-aligned replay snapshots are research evidence only, not an enforcement approval.",
+        ]
+    )
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, txt_path
+
+
 def _would_block_by_orderflow_confirmation(item) -> bool:
     """Return whether simulated B would block one A executed trade."""
     category = _orderflow_confirmation_block_category(item)
@@ -1586,6 +1818,20 @@ def _performance_metrics_from_pnls(pnls: list[float], executed_count: int) -> di
         "profit_factor": profit_factor,
         "average_pnl_per_trade": float(total_pnl / len(pnls)) if pnls else 0.0,
     }
+
+
+def _pnls_from_trade_rows(rows: list[dict[str, object]]) -> list[float]:
+    """Collect numeric PnL values from diagnostic trade rows."""
+    pnls: list[float] = []
+    for row in rows:
+        value = row.get("simulated_pnl")
+        if value is None:
+            continue
+        try:
+            pnls.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return pnls
 
 
 def _max_drawdown_from_pnls(pnls: list[float]) -> float:
@@ -2841,6 +3087,7 @@ def _run_backtest_scenario(
     show_trace: bool,
     show_orderflow: bool,
     orderflow_csv_result: OrderFlowCsvDemoResult,
+    orderflow_csv_path: str,
     backtest_market_csv_result: BacktestMarketCsvResult,
     orderflow_replay_result: OrderFlowReplayResult | None,
     show_orderflow_replay_steps: bool,
@@ -2856,6 +3103,9 @@ def _run_backtest_scenario(
     export_backtest_trade_traces: bool,
     backtest_trace_dir: str,
     simulate_orderflow_confirmation_ab: bool,
+    export_per_entry_orderflow_replay_diagnostic: bool,
+    per_entry_orderflow_report_dir: str,
+    per_entry_orderflow_min_confidence: float,
 ) -> None:
     """Run one backtest scenario and print aggregate results."""
     print(f"Scenario: {name}")
@@ -2905,7 +3155,11 @@ def _run_backtest_scenario(
         spread_config,
         current_spread,
         orderflow_context_result,
-        collect_iteration_traces=export_backtest_trade_traces or simulate_orderflow_confirmation_ab,
+        collect_iteration_traces=(
+            export_backtest_trade_traces
+            or simulate_orderflow_confirmation_ab
+            or export_per_entry_orderflow_replay_diagnostic
+        ),
     )
 
     print("\nAI Trader Backtest")
@@ -2971,6 +3225,21 @@ def _run_backtest_scenario(
         print(f"- JSON: {json_path}")
         print(f"- TXT: {txt_path}")
         print("- Research-only simulation; no strategy rule was changed")
+
+    if export_per_entry_orderflow_replay_diagnostic:
+        json_path, txt_path = _export_per_entry_orderflow_replay_diagnostic(
+            per_entry_orderflow_report_dir or backtest_trace_dir,
+            name,
+            profile,
+            result,
+            performance,
+            orderflow_csv_path,
+            per_entry_orderflow_min_confidence,
+        )
+        print("\nPer-entry Order Flow Replay Diagnostic")
+        print(f"- JSON: {json_path}")
+        print(f"- TXT: {txt_path}")
+        print("- Research-only export; no strategy or risk behavior was changed")
 
     _print_session_summary(
         result.session_status,
@@ -3138,7 +3407,8 @@ def main(args: list[str] | None = None) -> None:
     parsed_spread, spread_warning = _parse_spread(parsed_args.spread)
     show_trace = bool(getattr(parsed_args, "show_trace", False))
     show_orderflow = bool(getattr(parsed_args, "show_orderflow", False))
-    orderflow_csv_result = _build_orderflow_context_from_csv(getattr(parsed_args, "orderflow_csv", ""))
+    orderflow_csv_path = getattr(parsed_args, "orderflow_csv", "") or ""
+    orderflow_csv_result = _build_orderflow_context_from_csv(orderflow_csv_path)
     backtest_market_csv_result = _load_backtest_market_candles_from_csv(
         getattr(parsed_args, "backtest_market_csv", "")
     )
@@ -3201,6 +3471,15 @@ def main(args: list[str] | None = None) -> None:
     backtest_trace_dir = getattr(parsed_args, "backtest_trace_dir", "reports") or "reports"
     simulate_orderflow_confirmation_ab = bool(
         getattr(parsed_args, "simulate_orderflow_confirmation_ab", False)
+    )
+    export_per_entry_orderflow_replay_diagnostic = bool(
+        getattr(parsed_args, "export_per_entry_orderflow_replay_diagnostic", False)
+    )
+    per_entry_orderflow_report_dir = (
+        getattr(parsed_args, "per_entry_orderflow_report_dir", "") or backtest_trace_dir
+    )
+    per_entry_orderflow_min_confidence = float(
+        getattr(parsed_args, "per_entry_orderflow_min_confidence", 50.0) or 50.0
     )
 
     if check_implementation_readiness:
@@ -3373,6 +3652,7 @@ def main(args: list[str] | None = None) -> None:
                     show_trace,
                     show_orderflow,
                     orderflow_csv_result,
+                    orderflow_csv_path,
                     backtest_market_csv_result,
                     orderflow_replay_result,
                     show_orderflow_replay_steps,
@@ -3388,6 +3668,9 @@ def main(args: list[str] | None = None) -> None:
                     export_backtest_trade_traces,
                     backtest_trace_dir,
                     simulate_orderflow_confirmation_ab,
+                    export_per_entry_orderflow_replay_diagnostic,
+                    per_entry_orderflow_report_dir,
+                    per_entry_orderflow_min_confidence,
                 )
             print("\n" + "=" * 40)
             print()
@@ -3436,6 +3719,7 @@ def main(args: list[str] | None = None) -> None:
             show_trace,
             show_orderflow,
             orderflow_csv_result,
+            orderflow_csv_path,
             backtest_market_csv_result,
             orderflow_replay_result,
             show_orderflow_replay_steps,
@@ -3451,6 +3735,9 @@ def main(args: list[str] | None = None) -> None:
             export_backtest_trade_traces,
             backtest_trace_dir,
             simulate_orderflow_confirmation_ab,
+            export_per_entry_orderflow_replay_diagnostic,
+            per_entry_orderflow_report_dir,
+            per_entry_orderflow_min_confidence,
         )
 
 

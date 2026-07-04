@@ -2,6 +2,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,6 +120,14 @@ def test_help_includes_simulate_orderflow_confirmation_ab() -> None:
 
     assert "--simulate-orderflow-confirmation-ab" in help_text
     assert "Order Flow confirmation" in help_text
+
+
+def test_help_includes_per_entry_orderflow_replay_diagnostic() -> None:
+    help_text = main._build_parser().format_help()
+
+    assert "--export-per-entry-orderflow-replay-diagnostic" in help_text
+    assert "--per-entry-orderflow-report-dir" in help_text
+    assert "--per-entry-orderflow-min-confidence" in help_text
 
 
 def test_help_includes_register_change_proposal_doc() -> None:
@@ -837,6 +846,123 @@ def test_orderflow_confirmation_ab_report_works_with_no_executed_trades(
     assert payload["b_simulated_behavior"]["executed_trades"] == 0
     assert payload["b_simulated_behavior"]["blocked_by_orderflow_confirmation"] == 0
     assert payload["summary"]["warning"] is None
+
+
+def test_per_entry_orderflow_replay_diagnostic_exports_snapshot_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_dir = tmp_path / "per_entry_reports"
+    footprint_csv = tmp_path / "footprint.csv"
+    footprint_csv.write_text("DateTime,BarIndex,Price,BidVolume,AskVolume\n", encoding="utf-8")
+    seen: dict[str, bool] = {}
+
+    def fake_run(self, candles, backtest_config, *args, **kwargs):
+        seen["collect_iteration_traces"] = bool(kwargs.get("collect_iteration_traces", False))
+        return BacktestResult(
+            completed=True,
+            status="COMPLETED",
+            total_iterations=2,
+            trades_executed=2,
+            trades_blocked=0,
+            final_balance=10005.0,
+            total_pnl=5.0,
+            reasons=["Backtest completed"],
+            iteration_traces=[
+                BacktestIterationTrace(
+                    iteration_index=1,
+                    window_start=0,
+                    window_end=59,
+                    final_action="BUY",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    simulated_pnl=15.0,
+                    outcome="WIN",
+                ),
+                BacktestIterationTrace(
+                    iteration_index=2,
+                    window_start=5,
+                    window_end=64,
+                    final_action="SELL",
+                    final_allowed=True,
+                    trade_executed=True,
+                    status="CLOSED",
+                    simulated_pnl=-10.0,
+                    outcome="LOSS",
+                ),
+            ],
+        )
+
+    class FakeReplayEngine:
+        def replay_csv(self, path, config):
+            assert str(path).endswith("footprint.csv")
+            assert config.max_steps == 65
+            return SimpleNamespace(
+                passed=True,
+                data_quality_status="PASSED",
+                reasons=["fake replay"],
+                blocking_reasons=[],
+                steps=[
+                    SimpleNamespace(
+                        index=59,
+                        time="2026-06-21 18:59:00",
+                        orderflow_bias="BULLISH",
+                        orderflow_confidence=75.0,
+                        delta_direction="BULLISH",
+                        imbalance_bias="BULLISH",
+                        absorption_bias="UNKNOWN",
+                        cumulative_delta=100.0,
+                        reasons=["snapshot bullish"],
+                        blocking_reasons=[],
+                    ),
+                    SimpleNamespace(
+                        index=64,
+                        time="2026-06-21 19:04:00",
+                        orderflow_bias="BULLISH",
+                        orderflow_confidence=70.0,
+                        delta_direction="BULLISH",
+                        imbalance_bias="BULLISH",
+                        absorption_bias="UNKNOWN",
+                        cumulative_delta=120.0,
+                        reasons=["snapshot bullish"],
+                        blocking_reasons=[],
+                    ),
+                ],
+            )
+
+    monkeypatch.setattr(main.BacktestRunner, "run", fake_run)
+    monkeypatch.setattr(main, "OrderFlowReplayEngine", FakeReplayEngine)
+    monkeypatch.setattr(main, "_build_orderflow_context_from_csv", lambda raw_path: main.OrderFlowCsvDemoResult())
+
+    output = _run_main(
+        "--mode",
+        "backtest",
+        "--scenario",
+        "bullish",
+        "--profile",
+        "apex",
+        "--orderflow-csv",
+        str(footprint_csv),
+        "--export-per-entry-orderflow-replay-diagnostic",
+        "--per-entry-orderflow-report-dir",
+        str(report_dir),
+    )
+
+    payload = json.loads((report_dir / "per_entry_orderflow_replay_diagnostic.json").read_text(encoding="utf-8"))
+    txt_report = (report_dir / "per_entry_orderflow_replay_diagnostic.txt").read_text(encoding="utf-8")
+
+    assert "Per-entry Order Flow Replay Diagnostic" in output
+    assert seen["collect_iteration_traces"] is True
+    assert payload["summary"]["research_only"] is True
+    assert payload["summary"]["replay_steps"] == 2
+    assert payload["non_neutral_replay_snapshot_behavior"]["executed_count"] == 2
+    assert payload["non_neutral_replay_snapshot_behavior"]["total_pnl"] == 5.0
+    assert payload["aligned_replay_snapshot_behavior"]["executed_count"] == 1
+    assert payload["aligned_replay_snapshot_behavior"]["total_pnl"] == 15.0
+    assert payload["executed_trade_replay_snapshots"][0]["aligned_kept"] is True
+    assert payload["executed_trade_replay_snapshots"][1]["aligned_kept"] is False
+    assert "No strategy rule was changed" in txt_report
 
 
 def test_backtest_trace_collection_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
