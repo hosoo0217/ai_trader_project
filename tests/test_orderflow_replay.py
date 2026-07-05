@@ -116,3 +116,27 @@ def test_explain_returns_readable_text() -> None:
     assert "Order Flow replay" in text
     assert "steps=1" in text
     assert "final_bias=BULLISH" in text
+
+def test_incremental_replay_matches_standard_replay_snapshots() -> None:
+    candles = _load("data/sierra_chart_footprint_template.csv")
+    config = OrderFlowReplayConfig(minimum_confidence=50.0)
+
+    standard = OrderFlowReplayEngine().replay(candles, config)
+    incremental = OrderFlowReplayEngine().replay_incremental(candles, config)
+
+    assert incremental.passed == standard.passed
+    assert incremental.final_bias == standard.final_bias
+    assert incremental.final_confidence == standard.final_confidence
+    assert incremental.final_cvd == standard.final_cvd
+    assert len(incremental.steps) == len(standard.steps)
+
+    for incremental_step, standard_step in zip(incremental.steps, standard.steps):
+        assert incremental_step.index == standard_step.index
+        assert incremental_step.time == standard_step.time
+        assert incremental_step.candle_delta == standard_step.candle_delta
+        assert incremental_step.cumulative_delta == standard_step.cumulative_delta
+        assert incremental_step.delta_direction == standard_step.delta_direction
+        assert incremental_step.imbalance_bias == standard_step.imbalance_bias
+        assert incremental_step.absorption_bias == standard_step.absorption_bias
+        assert incremental_step.orderflow_bias == standard_step.orderflow_bias
+        assert incremental_step.orderflow_confidence == standard_step.orderflow_confidence

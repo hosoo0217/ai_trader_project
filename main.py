@@ -1492,8 +1492,9 @@ def _export_per_entry_orderflow_replay_diagnostic(
         if not resolved_csv.exists() or not resolved_csv.is_file():
             replay_blocking_reasons.append(f"Order Flow CSV not found: {footprint_csv_path}")
         else:
-            replay_result = OrderFlowReplayEngine().replay_csv(
-                str(resolved_csv),
+            replay_candles = SierraChartImporter().load_csv(str(resolved_csv), SierraChartImportConfig())
+            replay_result = OrderFlowReplayEngine().replay_incremental(
+                replay_candles,
                 OrderFlowReplayConfig(
                     minimum_confidence=minimum_confidence,
                     max_steps=max_window_end + 1,

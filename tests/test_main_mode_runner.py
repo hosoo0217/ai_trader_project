@@ -895,8 +895,8 @@ def test_per_entry_orderflow_replay_diagnostic_exports_snapshot_report(
         )
 
     class FakeReplayEngine:
-        def replay_csv(self, path, config):
-            assert str(path).endswith("footprint.csv")
+        def replay_incremental(self, candles, config):
+            seen["replay_incremental"] = True
             assert config.max_steps == 65
             return SimpleNamespace(
                 passed=True,
@@ -954,6 +954,7 @@ def test_per_entry_orderflow_replay_diagnostic_exports_snapshot_report(
 
     assert "Per-entry Order Flow Replay Diagnostic" in output
     assert seen["collect_iteration_traces"] is True
+    assert seen["replay_incremental"] is True
     assert payload["summary"]["research_only"] is True
     assert payload["summary"]["replay_steps"] == 2
     assert payload["non_neutral_replay_snapshot_behavior"]["executed_count"] == 2
