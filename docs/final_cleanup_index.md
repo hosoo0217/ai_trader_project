@@ -115,3 +115,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Backtest quality conditional cooldown A/B diagnostic summary](backtest_quality_conditional_cooldown_ab_diagnostic_summary.md)
 
 - [Backtest quality conditional cooldown A/B research module checklist](backtest_quality_conditional_cooldown_ab_research_module_checklist.md)
+
+- [Backtest quality conditional cooldown private report interpretation](backtest_quality_conditional_cooldown_private_report_interpretation.md)
