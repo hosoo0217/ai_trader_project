@@ -36,7 +36,7 @@ The reason text contains the specific cause, for example:
 - `Maximum consecutive losses reached`
 - `Maximum open positions reached`
 
-## Spec gap
+## Original spec gap
 
 `docs/capital_protection_spec.md` lists more specific protection statuses:
 - `DAILY_LOSS_LOCK`
@@ -50,7 +50,7 @@ The reason text contains the specific cause, for example:
 - `EMERGENCY_STOP`
 - `MANUAL_PAUSE`
 
-The implementation does not yet expose those specific status names from `CapitalProtectionDecision.status`.
+Resolved in `7c47d6e` by adding optional `CapitalProtectionDecision.protection_status` metadata while preserving the generic `CapitalProtectionDecision.status` contract.
 
 ## Compatibility note
 
@@ -62,10 +62,18 @@ Known examples:
 
 Changing status directly from `blocked` to specific values would require coordinated test updates.
 
-## Recommended next step
+## Resolution status
 
-Do not change enforcement behavior yet.
+The safe compatibility path was completed in `7c47d6e`.
 
-The safe next step is to add optional specific status metadata while preserving the existing generic `allowed` / `blocked` status contract, or to write a formal compatibility plan before changing code.
+`CapitalProtectionDecision.status` remains generic:
+- `allowed`
+- `blocked`
 
-Any code change must remain decision-only and must not touch broker, live trading, paper trading, MT5, Sierra live, CME live data, external API, or real order paths.
+`CapitalProtectionDecision.protection_status` now carries optional specific metadata for capital protection block reasons.
+
+Validation completed:
+- focused compatibility tests passed: `36 passed`
+- full pytest passed: `875 passed`
+
+Any future change must remain decision-only unless separately reviewed. This audit does not approve broker, live trading, paper trading behavior changes, MT5, Sierra live, CME live data, external API, or real order paths.
