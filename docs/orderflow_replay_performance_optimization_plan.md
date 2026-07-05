@@ -145,6 +145,35 @@ The optimization is acceptable only if:
 - no strategy/risk/live/paper/broker behavior changes
 - `git status --short` stays clean after generated reports remain under ignored `private_data`
 
+## Full 5m performance validation result
+
+Validated on 2026-07-05 after the incremental replay optimization.
+
+Command:
+
+```powershell
+.\venv\Scripts\python.exe main.py --mode backtest --scenario bullish --profile apex --backtest-market-csv private_data\sierra_chart\bulk_30d_sc_delayed\bulk_30d_5m_market_matched.csv --orderflow-csv private_data\sierra_chart\bulk_30d_sc_delayed\bulk_30d_5m_footprint.csv --export-per-entry-orderflow-replay-diagnostic --per-entry-orderflow-report-dir private_data\sierra_chart\bulk_30d_sc_delayed\per_entry_orderflow_5m_bullish_full_incremental
+```
+
+Result:
+- Completed successfully without manual interruption.
+- Wall time observed from the command runner: 26.9 seconds.
+- Backtest iterations: 1,014.
+- A executed trades: 188.
+- A PnL: +95.00.
+- Replay steps requested: 4,955.
+- Replay steps exported: 4,955.
+- Missing replay snapshots: 0.
+- Non-neutral replay snapshot behavior: 28 kept trades, -5.00 PnL.
+- Direction-aligned replay snapshot behavior: 17 kept trades, -20.00 PnL.
+- Replay data quality status: `PASSED`.
+- Generated reports stayed under ignored `private_data`.
+
+Interpretation:
+- The optimized per-entry diagnostic replay completed the larger/full 5m export quickly enough for local validation use.
+- The full 5m replay result does not support Order Flow enforcement because the direction-aligned diagnostic subset lost money.
+- Order Flow remains diagnostic-only.
+
 ## Decision
 
 Proceed only with performance optimization for diagnostic replay export.
