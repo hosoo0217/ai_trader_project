@@ -19,17 +19,19 @@ Known compatibility points:
 - `tests/test_safety_gate.py` creates blocked capital decisions with `status="blocked"`.
 - `SafetyGate` and `DecisionEngine` use `allowed` and `reasons` for blocking behavior, not specific status names.
 
-## Target improvement
+## Implementation status
 
-Future work may add specific protection metadata without breaking the generic status contract.
+Implemented in `7c47d6e` (`core: add capital protection status metadata`).
 
-Recommended future shape:
+The implemented change adds optional specific protection metadata without breaking the generic status contract.
+
+Implemented shape:
 - keep `status` as `allowed` or `blocked`
 - add optional `protection_status`
 - keep `reasons` human-readable
 - keep `allowed` as the main logic flag
 
-Example future blocked decision:
+Example blocked decision:
 - `allowed=False`
 - `status="blocked"`
 - `protection_status="DAILY_LOSS_LOCK"`
@@ -47,15 +49,16 @@ Example future blocked decision:
 | Consecutive losses | blocked | LOSS_STREAK |
 | Maximum open positions | blocked | MAX_POSITIONS |
 
-## Test plan for future code change
+## Validation
 
-Future code change should add or update tests to prove:
+Validation completed after implementation:
 - existing `status == "blocked"` tests still pass
 - allowed decisions keep `status == "allowed"`
 - blocked decisions expose the correct optional `protection_status`
 - `SafetyGate` behavior does not change
 - `DecisionEngine` behavior does not change
-- full pytest passes
+- focused compatibility tests passed: `36 passed`
+- full pytest passed: `875 passed`
 
 ## Not allowed
 
@@ -72,4 +75,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Implement only optional metadata in a small, backward-compatible code change after this plan is reviewed.
+Keep this change backward-compatible. Do not change strategy behavior, broker behavior, live trading behavior, paper trading behavior, or order execution behavior from this metadata-only improvement.
