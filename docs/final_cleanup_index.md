@@ -101,3 +101,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Backtest-only context alignment research plan](context_alignment_research_plan.md)
 
 - [Context alignment diagnostic implementation checklist](context_alignment_diagnostic_implementation_checklist.md)
+
+- [Backtest quality loss cluster diagnostic plan](backtest_quality_loss_cluster_diagnostic_plan.md)
