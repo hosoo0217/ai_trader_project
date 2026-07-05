@@ -1,5 +1,22 @@
 # Capital Protection Engine Specification
 
+## Current implementation note
+
+This specification is partially implemented in research-only form.
+
+Related status documents:
+- `capital_protection_status_gap_audit.md`
+- `capital_protection_status_compatibility_plan.md`
+- `capital_protection_todo_resolution_audit.md`
+
+`CapitalProtectionDecision.status` remains a generic compatibility contract:
+- `allowed`
+- `blocked`
+
+Specific capital protection metadata is exposed through optional `CapitalProtectionDecision.protection_status`.
+
+This specification does not approve broker integration, live trading, paper trading behavior changes, MT5, Sierra live, CME live data, external API usage, or real order execution.
+
 ## Purpose
 The Capital Protection Engine exists to protect trading capital before generating profit. It is the highest-authority safety layer in the system.
 
@@ -10,7 +27,7 @@ If this engine says "NO", no trade may be executed.
 - No trade is better than a bad trade.
 - Safety rules must be enforced before execution.
 - The engine should be modular, testable, and explainable.
-- This is a specification for future implementation, not trading logic.
+- This is a safety specification and implementation reference, not approval for trading execution.
 
 ## Authority and Enforcement
 The Capital Protection Engine has priority over all other decision layers.
