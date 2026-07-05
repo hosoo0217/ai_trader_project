@@ -67,7 +67,9 @@ The detected loss-cluster-zone variant appears more targeted because it blocks f
 
 Do not implement this as strategy code yet.
 
-Next research step: create a formal implementation checklist for a research-only A/B diagnostic module that can reproduce these conditional cooldown variants from existing trace data without touching live, paper, broker, MT5, Sierra live, CME live data, external API, or real order paths.
+Research module status: the formal checklist and research-only CLI module are completed in `c2b2c03 analysis: add conditional cooldown diagnostic`.
+
+Next research step: review generated ignored `private_data` reports and document interpretation only. Do not implement strategy enforcement yet.
 
 Order Flow confirmation remains diagnostic-only and should not be enforced.
 

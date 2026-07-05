@@ -88,6 +88,12 @@ The current best tested candidate is C3 detected loss-cluster-zone cooldown 10.
 
 This is not approved for strategy implementation.
 
+## Status
+
+Completed in `c2b2c03 analysis: add conditional cooldown diagnostic`.
+
+The research-only module and CLI path can reproduce conditional cooldown A/B reports from ignored `private_data` inputs without changing strategy, risk, broker, live, paper trading, MT5, Sierra live, CME live data, external API, or real order behavior.
+
 ## Next step
 
-Create a research-only script or CLI path that reproduces the conditional cooldown A/B report from ignored `private_data` inputs without changing strategy, risk, broker, live, or paper trading behavior.
+Review generated ignored `private_data` reports and document interpretation only. Do not implement strategy enforcement yet.
