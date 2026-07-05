@@ -27,6 +27,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Project Health Audit](project_health_audit.md): Reviews folder health, safety health, testing health, documentation health, generated reports, and known gaps.
 - [Capital Protection Status Gap Audit](capital_protection_status_gap_audit.md): Documents the gap between generic capital protection statuses and the specific protection statuses listed in the spec.
 - [Capital Protection Status Compatibility Plan](capital_protection_status_compatibility_plan.md): Defines the backward-compatible plan for adding optional specific protection metadata while preserving the existing generic capital protection status contract.
+- [Capital Protection TODO Resolution Audit](capital_protection_todo_resolution_audit.md): Audits the TODO items in the capital protection spec against the current research-only capital, session, news, spread, and volatility protection implementations.
 - [End-to-End Demo Validation](end_to_end_demo_validation.md): Lists the manual CLI commands for safely validating existing demo/research flows.
 - [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
