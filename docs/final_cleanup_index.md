@@ -107,3 +107,5 @@ Live trading and broker connections are later separate phases, not part of this 
 - [Backtest quality loss cluster diagnostic report](backtest_quality_loss_cluster_diagnostic_report.md)
 
 - [Backtest quality post-loss cooldown candidate diagnostic](backtest_quality_post_loss_cooldown_candidate_diagnostic.md)
+
+- [Backtest quality cooldown robustness diagnostic](backtest_quality_cooldown_robustness_diagnostic.md)
