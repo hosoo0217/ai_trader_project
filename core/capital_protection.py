@@ -44,6 +44,7 @@ class CapitalProtectionDecision:
 
     allowed: bool = True
     status: str = "allowed"
+    protection_status: str | None = None
     reasons: List[str] = field(default_factory=list)
 
 
@@ -61,26 +62,44 @@ class CapitalProtectionEngine:
         rules are the strongest and stop all trading immediately.
         """
         reasons: List[str] = []
+        protection_status: str | None = None
 
         if state.emergency_stop:
+            protection_status = "EMERGENCY_STOP"
             reasons.append("Emergency stop activated")
         elif not config.trading_enabled:
+            protection_status = "TRADING_DISABLED"
             reasons.append("Trading disabled")
         elif config.manual_pause:
+            protection_status = "MANUAL_PAUSE"
             reasons.append("Manual pause active")
         elif state.realized_daily_pnl <= -abs(config.max_daily_loss) and config.max_daily_loss > 0:
+            protection_status = "DAILY_LOSS_LOCK"
             reasons.append("Daily loss limit reached")
         elif state.realized_daily_pnl >= abs(config.daily_profit_target) and config.daily_profit_target > 0:
+            protection_status = "TARGET_REACHED"
             reasons.append("Daily profit target reached")
         elif state.consecutive_losses >= config.max_consecutive_losses and config.max_consecutive_losses > 0:
+            protection_status = "LOSS_STREAK"
             reasons.append("Maximum consecutive losses reached")
         elif state.open_positions >= config.max_open_positions and config.max_open_positions > 0:
+            protection_status = "MAX_POSITIONS"
             reasons.append("Maximum open positions reached")
 
         if reasons:
-            return CapitalProtectionDecision(allowed=False, status="blocked", reasons=reasons)
+            return CapitalProtectionDecision(
+                allowed=False,
+                status="blocked",
+                protection_status=protection_status,
+                reasons=reasons,
+            )
 
-        return CapitalProtectionDecision(allowed=True, status="allowed", reasons=[])
+        return CapitalProtectionDecision(
+            allowed=True,
+            status="allowed",
+            protection_status=None,
+            reasons=[],
+        )
 
     def should_stop_trading(self, config: CapitalProtectionConfig, state: CapitalProtectionState) -> bool:
         """Return True when trading should be blocked."""

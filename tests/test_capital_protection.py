@@ -150,3 +150,36 @@ def test_explain_decision_returns_readable_summary():
     explanation = engine.explain_decision(decision)
 
     assert "Emergency stop activated" in explanation
+
+
+def test_blocked_decisions_preserve_generic_status_and_expose_protection_status():
+    """Blocked decisions should keep generic status and expose optional specific metadata."""
+    engine = CapitalProtectionEngine()
+
+    cases = [
+        (make_config(), make_state(emergency_stop=True), "EMERGENCY_STOP"),
+        (make_config(trading_enabled=False), make_state(), "TRADING_DISABLED"),
+        (make_config(manual_pause=True), make_state(), "MANUAL_PAUSE"),
+        (make_config(max_daily_loss=100.0), make_state(realized_daily_pnl=-100.0), "DAILY_LOSS_LOCK"),
+        (make_config(daily_profit_target=50.0), make_state(realized_daily_pnl=50.0), "TARGET_REACHED"),
+        (make_config(max_consecutive_losses=3), make_state(consecutive_losses=3), "LOSS_STREAK"),
+        (make_config(max_open_positions=2), make_state(open_positions=2), "MAX_POSITIONS"),
+    ]
+
+    for config, state, expected_protection_status in cases:
+        decision = engine.evaluate(config, state)
+
+        assert not decision.allowed
+        assert decision.status == "blocked"
+        assert decision.protection_status == expected_protection_status
+
+
+def test_allowed_decision_has_no_specific_protection_status():
+    """Allowed decisions should keep generic allowed status and no specific protection metadata."""
+    engine = CapitalProtectionEngine()
+
+    decision = engine.evaluate(make_config(), make_state())
+
+    assert decision.allowed
+    assert decision.status == "allowed"
+    assert decision.protection_status is None
