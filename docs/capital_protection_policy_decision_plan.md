@@ -24,19 +24,17 @@ Resolve the remaining policy TODOs in this order.
 
 ### 1. Daily state policy
 
-Reason: daily loss, daily profit target, and loss streak all depend on the same reset boundary.
+Status: completed by capital_protection_daily_state_policy.md.
 
-Decisions needed:
-- daily reset boundary
-- timezone basis
-- whether commissions and slippage are included
-- whether state is in-memory only or persisted
+Resolved decisions:
+- daily reset boundary uses the UTC calendar day
+- timezone basis is UTC
+- daily PnL uses closed-trade realized PnL only by default
+- open and unrealized PnL do not affect daily loss lock or daily profit target by default
+- commission and slippage inclusion must be reported only when available
+- daily capital protection state remains in-memory unless a separate persistence policy is approved
 
-Safe output:
-- documentation-only policy
-- no broker connection
-- no live data
-- no order execution
+Safe output remains documentation-only and does not approve broker connection, live data, or order execution.
 
 ### 2. Loss counting policy
 
@@ -161,4 +159,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the daily state policy because it affects daily loss lock, profit target, and loss streak behavior.
+Start with the loss counting policy because daily state policy is now completed and loss streak behavior still depends on trade outcome classification.
