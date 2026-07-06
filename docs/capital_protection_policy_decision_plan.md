@@ -38,17 +38,18 @@ Safe output remains documentation-only and does not approve broker connection, l
 
 ### 2. Loss counting policy
 
-Reason: loss streak protection depends on how a closed trade is classified.
+Status: completed by capital_protection_loss_counting_policy.md.
 
-Decisions needed:
-- closed trades only versus partial losses
-- whether breakeven counts
-- reset after win, next day, or cooldown
-- source of truth for trade outcome
+Resolved decisions:
+- loss counting uses finalized closed trade records only
+- closed losses increment the consecutive loss streak
+- closed wins reset the consecutive loss streak to zero
+- breakeven trades do not increment or reset the streak by default
+- partial exits do not update the streak until the logical trade is closed
+- UTC daily reset clears the streak
+- cooldown completion does not reset the streak by default
 
-Safe output:
-- documentation-only policy
-- tests only after policy is explicit
+Safe output remains documentation-only and does not approve broker connection, live data, order execution, or automatic cooldown reset behavior.
 
 ### 3. Profit target policy
 
@@ -159,4 +160,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the loss counting policy because daily state policy is now completed and loss streak behavior still depends on trade outcome classification.
+Start with the profit target policy because daily state and loss counting policies are now completed, and target handling can alter future trading behavior.
