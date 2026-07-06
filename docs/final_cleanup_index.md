@@ -31,6 +31,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Capital Protection Policy Decision Plan](capital_protection_policy_decision_plan.md): Defines the safe order for resolving remaining capital protection policy decisions before any future enforcement or integration change.
 - [Capital Protection Daily State Policy](capital_protection_daily_state_policy.md): Defines the UTC daily reset, realized PnL basis, daily loss/profit checks, loss-streak reset, and persistence guardrails for daily capital protection state.
 - [Capital Protection Loss Counting Policy](capital_protection_loss_counting_policy.md): Defines closed-trade outcome classification, loss streak updates, breakeven handling, partial-exit handling, and reset behavior for capital protection loss streak logic.
+- [Capital Protection Profit Target Policy](capital_protection_profit_target_policy.md): Defines realized-PnL profit target triggering, new-entry hard stop behavior, open-position handling, trailing-target restrictions, and UTC reset behavior.
 - [End-to-End Demo Validation](end_to_end_demo_validation.md): Lists the manual CLI commands for safely validating existing demo/research flows.
 - [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
