@@ -29,6 +29,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Capital Protection Status Compatibility Plan](capital_protection_status_compatibility_plan.md): Defines the backward-compatible plan for adding optional specific protection metadata while preserving the existing generic capital protection status contract.
 - [Capital Protection TODO Resolution Audit](capital_protection_todo_resolution_audit.md): Audits the TODO items in the capital protection spec against the current research-only capital, session, news, spread, and volatility protection implementations.
 - [Capital Protection Policy Decision Plan](capital_protection_policy_decision_plan.md): Defines the safe order for resolving remaining capital protection policy decisions before any future enforcement or integration change.
+- [Capital Protection Daily State Policy](capital_protection_daily_state_policy.md): Defines the UTC daily reset, realized PnL basis, daily loss/profit checks, loss-streak reset, and persistence guardrails for daily capital protection state.
 - [End-to-End Demo Validation](end_to_end_demo_validation.md): Lists the manual CLI commands for safely validating existing demo/research flows.
 - [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
