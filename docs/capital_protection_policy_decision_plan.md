@@ -82,17 +82,19 @@ Safe output remains documentation-only and does not approve broker connection, l
 
 ### 5. Session policy
 
-Reason: session filter exists, but production policy is not fully defined.
+Status: completed by capital_protection_session_policy.md.
 
-Decisions needed:
-- official session schedule per strategy/system
-- UTC-only versus local exchange timezone
-- daylight saving time handling
-- instrument-specific sessions
+Resolved decisions:
+- session schedule uses UTC session windows by default
+- naive datetimes are treated as UTC and timezone-aware datetimes are converted to UTC
+- default enabled sessions are London, New York, and London New York Overlap
+- Asian session remains disabled by default unless explicitly enabled by a strategy-specific policy
+- weekend blocking remains enabled by default
+- daylight saving time and exchange-local timezone handling are not inferred dynamically
+- instrument-specific or profile-specific sessions require explicit configuration, documentation, and tests
+- session filtering blocks or allows new entries only and does not automatically close, reduce, reverse, or modify already-open positions
 
-Safe output:
-- documentation-only policy first
-- no live exchange connection
+Safe output remains documentation-only and does not approve live exchange connection, broker connection, external API usage, dynamic exchange calendar lookup, automatic DST inference, order execution, paper trading behavior changes, or automatic position changes.
 
 ### 6. Spread policy
 
@@ -162,4 +164,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the session policy because daily state, loss counting, profit target, and position limit policies are now completed, and session filter production behavior still needs an explicit policy.
+Start with the spread policy because daily state, loss counting, profit target, position limit, and session policies are now completed, and spread threshold behavior still needs explicit instrument and session guardrails.
