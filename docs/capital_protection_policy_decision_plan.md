@@ -68,16 +68,17 @@ Safe output remains documentation-only and does not approve broker connection, l
 
 ### 4. Position limit policy
 
-Reason: max position logic needs account/system/instrument scope before enforcement changes.
+Status: completed by capital_protection_position_limit_policy.md.
 
-Decisions needed:
-- global versus per-system limit
-- per-instrument limit
-- account-specific limit
-- whether pending orders count
+Resolved decisions:
+- MAX_POSITIONS triggers when open_positions is greater than or equal to max_open_positions
+- max_open_positions equal to zero disables the position limit check by default
+- max_open_positions is interpreted as a global limit for the evaluated capital protection state by default
+- per-system, per-strategy, per-instrument, and account-specific limits are not approved unless explicitly provided and tested
+- pending orders do not count toward MAX_POSITIONS by default
+- MAX_POSITIONS blocks new entries but does not automatically close, reduce, reverse, or modify already-open positions
 
-Safe output:
-- documentation-only policy first
+Safe output remains documentation-only and does not approve broker connection, live data, order execution, implicit scoped limits, pending-order counting, or automatic position changes.
 
 ### 5. Session policy
 
@@ -161,4 +162,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the position limit policy because daily state, loss counting, and profit target policies are now completed, and position limit behavior still needs account/system/instrument scope.
+Start with the session policy because daily state, loss counting, profit target, and position limit policies are now completed, and session filter production behavior still needs an explicit policy.
