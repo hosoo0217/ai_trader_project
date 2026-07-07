@@ -53,17 +53,18 @@ Safe output remains documentation-only and does not approve broker connection, l
 
 ### 3. Profit target policy
 
-Reason: target handling can alter trading behavior and must be explicit before code changes.
+Status: completed by capital_protection_profit_target_policy.md.
 
-Decisions needed:
-- hard stop versus soft stop
-- whether open positions continue
-- whether trailing profit target is allowed
-- reset boundary
+Resolved decisions:
+- TARGET_REACHED triggers from realized daily PnL only
+- open and unrealized PnL do not trigger TARGET_REACHED by default
+- after TARGET_REACHED, new entries are blocked for the rest of the UTC daily window by default
+- already-open positions are not automatically closed, reduced, reversed, or modified
+- trailing profit target behavior is not approved by default
+- TARGET_REACHED resets at the UTC daily reset boundary
+- independent reset schedulers are not approved
 
-Safe output:
-- documentation-only policy first
-- no automatic enforcement change without tests
+Safe output remains documentation-only and does not approve broker connection, live data, order execution, forced position closing, trailing target behavior, or independent reset schedulers.
 
 ### 4. Position limit policy
 
@@ -160,4 +161,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the profit target policy because daily state and loss counting policies are now completed, and target handling can alter future trading behavior.
+Start with the position limit policy because daily state, loss counting, and profit target policies are now completed, and position limit behavior still needs account/system/instrument scope.
