@@ -98,16 +98,19 @@ Safe output remains documentation-only and does not approve live exchange connec
 
 ### 6. Spread policy
 
-Reason: spread threshold exists, but instrument/session thresholds are undefined.
+Status: completed by capital_protection_spread_policy.md.
 
-Decisions needed:
-- max spread per instrument
-- max spread per session
-- behavior when spread is unknown
-- account/data-source differences
+Resolved decisions:
+- spread protection runs before every new entry attempt when spread configuration is available
+- default spread filter behavior blocks unknown spread, negative spread, and spread greater than max_spread
+- spread values less than or equal to max_spread are allowed when no other safety rule blocks the setup
+- instrument-specific thresholds are not approved implicitly and require explicit configuration, documentation, and tests
+- session-specific thresholds are not approved implicitly and require explicit policy, configuration, and tests
+- account-specific or data-source-specific spread behavior must not be inferred automatically
+- unknown spread may be allowed only when an explicit profile configuration approves it and tests cover that behavior
+- spread protection blocks or allows new entries only and does not automatically close, reduce, reverse, or modify already-open positions
 
-Safe output:
-- documentation-only policy first
+Safe output remains documentation-only and does not approve broker connection, live data, external API usage, automatic broker spread lookup, automatic feed-specific threshold inference, automatic session threshold widening, order execution, paper trading behavior changes, or automatic position changes.
 
 ### 7. Volatility policy
 
@@ -164,4 +167,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the spread policy because daily state, loss counting, profit target, position limit, and session policies are now completed, and spread threshold behavior still needs explicit instrument and session guardrails.
+Start with the volatility policy because daily state, loss counting, profit target, position limit, session, and spread policies are now completed, and ATR threshold behavior still needs explicit instrument and timeframe guardrails.
