@@ -132,16 +132,23 @@ Safe output remains documentation-only and does not approve live trading, broker
 
 ### 8. Manual pause and emergency stop policy
 
-Reason: controls exist as state/config fields, but trigger/reset authority is not defined.
+Status: completed by capital_protection_manual_pause_emergency_stop_policy.md.
 
-Decisions needed:
-- who can trigger emergency stop
-- who can reset emergency stop
-- manual pause scope
-- persistence and audit trail
+Resolved decisions:
+- emergency stop remains the highest-priority capital protection state
+- manual pause remains below emergency stop and explicit trading-disabled status but above ordinary loss, target, and position-limit checks
+- emergency stop may be activated only by an authorized human operator or a separately approved deterministic safety rule
+- emergency stop reset requires an authorized human operator, deliberate confirmation, and a recorded reason
+- automatic, restart-based, time-based, or agent-initiated reset is not approved
+- manual pause activation and resume require an authorized human operator and an explicit control surface
+- emergency stop has platform-wide scope and manual pause blocks all new entries by default
+- narrower pause scopes require explicit configuration, documentation, and tests
+- future implementations must persist active states across restarts and audit every state change
+- missing, invalid, or unauthenticated persisted control state must block new entries
+- both controls block new entries and re-entries only and do not automatically modify existing positions
+- existing boolean fields remain research and test inputs rather than production-ready operator controls
 
-Safe output:
-- documentation-only policy first
+Safe output remains documentation-only and does not approve a production control interface, unauthenticated remote controls, automatic reset or resume, broker connectivity, live execution, MT5 integration, Sierra live integration, CME live data, external APIs, real orders, automatic liquidation, paper trading behavior changes, or automatic position changes.
 
 ### 9. News policy
 
