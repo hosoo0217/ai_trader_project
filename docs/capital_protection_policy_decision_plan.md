@@ -152,17 +152,24 @@ Safe output remains documentation-only and does not approve a production control
 
 ### 9. News policy
 
-Reason: manual news windows exist, but external calendar feed is unresolved and not approved.
+Status: completed by capital_protection_news_policy.md.
 
-Decisions needed:
-- manual-only versus external feed
-- official high-impact source
-- update workflow
-- event buffer rules
+Resolved decisions:
+- version 1 remains manual-only
+- external economic-calendar feeds, scraping, automatic ingestion, and unattended updates are not approved
+- each configured event requires an identified manual source and auditable source/update record
+- event times are normalized to UTC before evaluation
+- valid impact values are HIGH, MEDIUM, and LOW
+- the default event window remains 30 minutes before through 30 minutes after the event
+- standard defaults block HIGH impact and allow MEDIUM and LOW impact
+- SAFE_DEFAULT or disabled-profile fallback behavior blocks HIGH, MEDIUM, and LOW impact conservatively
+- missing or invalid current time blocks with INVALID_TIME
+- naive current and event datetimes are treated as UTC
+- disabled filters allow with an explicit FILTER_DISABLED reason, while disabled events are ignored
+- malformed CLI events warn and are excluded from the active event list
+- news protection blocks new entries only and does not automatically modify existing positions
 
-Safe output:
-- manual-only policy can be documented
-- external economic calendar feed remains not approved unless separately reviewed
+Safe output remains documentation-only and does not approve live trading, broker connectivity, MT5 integration, Sierra live integration, CME live data, external APIs, automatic calendar ingestion, scraping, unattended updates, real orders, paper trading behavior changes, or automatic position changes.
 
 ## Not allowed from this plan
 
@@ -179,4 +186,4 @@ This plan does not approve:
 
 ## Recommended next step
 
-Start with the volatility policy because daily state, loss counting, profit target, position limit, session, and spread policies are now completed, and ATR threshold behavior still needs explicit instrument and timeframe guardrails.
+All listed capital protection policy decisions are now documented. Begin the next offline simulation and backtest validation phase without enabling live trading, broker connectivity, external APIs, real orders, or production strategy and risk-behavior changes.
