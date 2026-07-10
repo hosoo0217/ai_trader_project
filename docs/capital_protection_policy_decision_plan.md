@@ -114,16 +114,21 @@ Safe output remains documentation-only and does not approve broker connection, l
 
 ### 7. Volatility policy
 
-Reason: ATR-based filter exists, but official thresholds are not defined.
+Status: completed by capital_protection_volatility_policy.md.
 
-Decisions needed:
-- authoritative timeframe
-- ATR thresholds per instrument/timeframe
-- abnormal candle definition
-- whether ATR alone is sufficient
+Resolved decisions:
+- ATR remains the primary v1 volatility measurement for the explicitly evaluated candle timeframe
+- the authoritative timeframe is the timeframe of the candle dataset passed to the volatility filter
+- the filter does not implicitly infer, substitute, merge, or combine other timeframes
+- FUTURES_PROP and SPOT_GOLD retain their explicit current research profile thresholds
+- fallback profiles retain intentionally conservative blocking behavior
+- instrument-specific and timeframe-specific thresholds require explicit configuration, documentation, and tests
+- ATR is not the only abnormality safeguard because last-candle range relative to ATR remains required
+- missing, malformed, non-numeric, or insufficient candle data blocks new entries conservatively
+- an explicitly disabled filter may allow entries only when that status is configured and recorded
+- volatility protection blocks or allows new entries only and does not automatically close, reduce, reverse, or modify already-open positions
 
-Safe output:
-- documentation-only policy first
+Safe output remains documentation-only and does not approve live trading, broker connectivity, MT5 integration, Sierra live integration, CME live data, external APIs, real orders, automatic threshold calibration, implicit timeframe inference, alternative volatility metrics without separate review, paper trading behavior changes, or automatic position changes.
 
 ### 8. Manual pause and emergency stop policy
 
