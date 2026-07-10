@@ -35,6 +35,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Capital Protection Position Limit Policy](capital_protection_position_limit_policy.md): Defines global default max position scope, MAX_POSITIONS trigger behavior, pending-order exclusion, and new-entry blocking behavior.
 - [Capital Protection Session Policy](capital_protection_session_policy.md): Defines UTC session schedule defaults, weekend blocking, timezone and daylight saving guardrails, instrument-specific restrictions, and new-entry behavior.
 - [Capital Protection Spread Policy](capital_protection_spread_policy.md): Defines conservative spread threshold behavior, unknown-spread handling, instrument/session threshold guardrails, account/data-source restrictions, and new-entry behavior.
+- [Capital Protection Volatility Policy](capital_protection_volatility_policy.md): Defines ATR-based v1 measurement, authoritative input timeframe guardrails, profile thresholds, abnormal-candle blocking, and new-entry behavior.
 - [End-to-End Demo Validation](end_to_end_demo_validation.md): Lists the manual CLI commands for safely validating existing demo/research flows.
 - [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
