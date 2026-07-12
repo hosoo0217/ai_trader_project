@@ -40,6 +40,13 @@ The run also used:
 
 The private Sierra CSV must not be committed.
 
+Important scenario-label limitation:
+
+- Because an explicit `--backtest-market-csv` was supplied, both commands used the same historical candles.
+- `--scenario bullish` and `--scenario bearish` changed the printed scenario label only.
+- The flag did not transform the CSV, force market direction, or create independent bullish and bearish datasets.
+- These two outputs must not be counted as separate directional confirmation.
+
 ## 3. Bullish A/B Result
 
 ### A Current Behavior
@@ -98,7 +105,7 @@ In the bearish scenario, B would also have blocked all 8 losing A trades.
 
 ## 5. Shared Pattern
 
-Both scenarios produced the same A/B result.
+The two scenario-labeled runs produced the same A/B result because both used the same explicit historical market CSV.
 
 Shared pattern:
 
@@ -118,8 +125,8 @@ It supports these points:
 
 - Neutral Order Flow was present on the losing executed trades.
 - The proposed B diagnostic would have avoided the known losing trades.
-- The same pattern appeared in both bullish and bearish scenario runs.
-- The current validation evidence is strong enough to continue A/B testing.
+- The matching scenario-labeled outputs came from the same historical candles and are not independent directional evidence.
+- The single-dataset result is sufficient to continue diagnostic A/B testing, but not because it was independently repeated across market directions.
 
 This is useful evidence for research.
 
@@ -185,10 +192,10 @@ The next goal is to determine whether B can reduce bad trades without eliminatin
 
 ## 11. Beginner Summary
 
-The bullish and bearish A/B diagnostics produced the same result.
+The bullish-labeled and bearish-labeled A/B runs produced the same result because both used the same explicit historical CSV.
 
-In both cases, the current system took 8 SELL trades, and all 8 lost while Order Flow was neutral. The simulated Order Flow confirmation rule would have blocked those losing trades.
+The same historical run showed 8 SELL trades, all losing while Order Flow was neutral. Re-running it under the other scenario label produced the same output; this was not a second independent directional test.
 
 That is useful, but there is a catch: the simulated rule blocked every trade. A rule that blocks everything may avoid losses, but it also gives no proof that the strategy can still find good trades.
 
-So this result strengthens the case for more research, not implementation. More Sierra sessions and later full footprint data are still required.
+This result supports more research, not implementation. Its value comes from the observed single-dataset behavior, not from duplicated bullish and bearish labels. More Sierra sessions and later full footprint data are still required.

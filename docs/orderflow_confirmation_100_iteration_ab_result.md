@@ -37,6 +37,13 @@ The file was used as:
 
 The private Sierra CSV must not be committed.
 
+Important scenario-label limitation:
+
+- Because an explicit `--backtest-market-csv` was supplied, both commands used the same historical candles.
+- `--scenario bullish` and `--scenario bearish` changed the printed scenario label only.
+- The flag did not transform the CSV, force market direction, or create independent bullish and bearish datasets.
+- These two outputs must not be counted as separate directional confirmation.
+
 ## 3. Bullish 100-Iteration Result
 
 ### A Current Behavior
@@ -99,7 +106,7 @@ In the bearish 100-iteration test, B would also have blocked all 21 losing A tra
 
 ## 5. Shared Pattern
 
-Both bullish and bearish scenarios produced the same result.
+The two scenario-labeled runs produced the same result because both used the same explicit historical market CSV.
 
 Shared pattern:
 
@@ -109,7 +116,7 @@ Shared pattern:
 - B would avoid `-210.00` simulated loss.
 - B leaves zero executed trades in this dataset.
 
-The repeated pattern strengthens the evidence that neutral Order Flow execution is a major risk signal in this limited `BAR_SUMMARY` dataset.
+This is one historical dataset result repeated under two output labels, not independent directional confirmation. It supports continued diagnosis of neutral Order Flow behavior, but it does not strengthen the evidence through replication.
 
 ## 6. What This Supports
 
@@ -120,7 +127,7 @@ It supports these points:
 - Current A behavior failed on this 100-iteration `BAR_SUMMARY` test.
 - Neutral Order Flow execution remained associated with losing trades.
 - B would have avoided every known losing A trade in this dataset.
-- The same A/B pattern appeared in bullish and bearish scenarios.
+- The matching bullish and bearish labels are duplicate evidence from the same historical candles, not independent directional validation.
 - The proposed rule is worth testing on more data.
 
 This result supports more validation.
