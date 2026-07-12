@@ -30,7 +30,7 @@ Run the full test suite first:
 Expected result:
 
 - Pytest should pass.
-- Current known test status from cleanup mode: `793 tests passed`.
+- Current known test status from cleanup mode: `881 tests passed`.
 - If pytest fails, stop and fix or document the failure before running CLI validation.
 
 ## 3. Demo Mode Validation
@@ -196,3 +196,33 @@ This checklist proves that the project can run from start to finish in demo and 
 You are checking that the main terminal commands work before moving into deeper backtest validation, real Sierra Chart CSV testing, or paper-trading validation.
 
 The project is not going live during this step. Everything should stay local, simulated, and safe.
+
+## 12. Validation Result - 2026-07-12
+
+Current result: **PASSED**
+
+Validated commands:
+
+- full pytest suite: `881 passed`
+- default safe demo
+- all built-in scenarios
+- bullish and bearish Apex demo flows
+- bullish Apex and Spot backtests
+- local Order Flow CSV context with decision trace
+- local Order Flow replay with step output
+- saved session trend output
+- implementation readiness check
+
+Observed safety behavior:
+
+- no command crashed
+- safe and weekend filters blocked trades where expected
+- built-in backtests reported insufficient data rather than deployment readiness
+- missing drawdown threshold remained fail-closed
+- Order Flow remained local and research-only
+- implementation readiness returned `NEEDS_BACKTEST`
+- no broker connection, external API, live data, or real order execution was used
+- no strategy rule or code change was applied automatically
+- Git working tree remained clean after validation
+
+This result validates the current local CLI workflows only. It does not approve live trading, strategy deployment, or real-money use.
