@@ -59,14 +59,15 @@ Safety rule: cleanup work must not introduce live trading, broker credentials, e
 
 ## 4. Testing Health Checklist
 
-- [ ] Full pytest must pass before code changes are considered healthy.
-- [x] Current known result: 793 tests passed.
-- [ ] Future changes must keep pytest passing.
-- [ ] CLI demo commands should be manually validated.
-- [ ] Order Flow replay should be manually validated.
-- [ ] Session report output should be manually validated.
-- [ ] Session trend output should be manually validated.
-- [ ] Approval / proposal / readiness flow should be manually validated.
+- [x] Full pytest passes at the current cleanup checkpoint.
+- [x] Current known result: 881 tests passed.
+- [x] CLI demo commands have been manually smoke-tested.
+- [x] Order Flow CSV and replay commands have been manually smoke-tested.
+- [x] Session report and export workflows have been manually smoke-tested.
+- [x] Session trend output has been manually smoke-tested.
+- [x] Approval, proposal, and readiness workflows have been manually smoke-tested.
+- [ ] Future changes must keep the full pytest suite passing.
+- [ ] Final end-to-end CLI validation should be rerun and recorded against the current codebase.
 
 Recommended baseline test command:
 
@@ -86,13 +87,13 @@ Important documentation currently exists:
 - [x] Approval/proposal/implementation docs: human approval, approval log, strategy improvement, change proposal, proposal review, implementation plan, final review, and logs.
 - [x] Implementation readiness docs: readiness checklist and `main.py` readiness output docs.
 
-Documentation cleanup still needed:
+Documentation status:
 
-- [ ] End-to-end demo validation checklist.
-- [ ] Backtest validation checklist.
-- [ ] Real Sierra Chart CSV test guide.
-- [ ] Reports / `.gitignore` safety review.
-- [ ] MVP code freeze note.
+- [x] End-to-end demo validation checklist exists; final rerun and result update remain pending.
+- [x] Backtest validation checklist exists; deeper historical validation remains pending.
+- [x] Real Sierra Chart CSV test guide exists; real exported CSV validation remains pending.
+- [x] Reports / `.gitignore` safety review exists; tracked report files still require an explicit keep-or-untrack decision.
+- [x] MVP code freeze note exists; final freeze criteria are not yet complete.
 
 ## 6. Generated Files / Reports Safety
 
@@ -111,42 +112,41 @@ Current generated report area:
 - `reports/trading_session_report.json`
 - `reports/trading_session_report.txt`
 
-Safety requirements:
+Safety status and requirements:
 
-- [ ] Review generated reports before committing.
-- [ ] Do not commit sensitive data.
-- [ ] Never commit API keys.
-- [ ] Never commit broker credentials.
-- [ ] Never commit account numbers.
-- [ ] Never commit secrets.
-- [ ] Reports / `.gitignore` safety review is still needed.
+- [x] New `reports/*.json`, `reports/*.txt`, and `reports/*.csv` files are ignored.
+- [x] `logs/`, `private_data/`, `secrets/`, `.env`, virtual environments, and Python caches are ignored.
+- [x] The currently tracked report files were scanned for common credential, token, account-number, email, and local-user-path patterns; none were found at this checkpoint.
+- [ ] Existing tracked report files require an explicit decision to remain intentional examples or be removed from Git tracking.
+- [ ] Continue reviewing generated reports before committing or sharing them.
+- [ ] Never commit API keys, broker credentials, account numbers, secrets, or private trading data.
 
-Current `.gitignore` protects `venv/`, `__pycache__/`, `.pytest_cache/`, `*.pyc`, and `.env`. It does not currently ignore `reports/`.
+Important Git behavior: `.gitignore` protects new matching files but does not automatically untrack report files committed earlier.
 
 ## 7. Known Gaps
 
-- [ ] Real historical backtest validation is still needed.
-- [ ] Real Sierra Chart CSV export test is still needed.
-- [ ] End-to-end CLI validation is still needed.
-- [ ] Reports / `.gitignore` safety review is still needed.
-- [ ] Emergency stop / manual pause should remain a future safety item.
-- [ ] Live trading is not allowed yet.
-- [ ] Live broker connection is not allowed yet.
-- [ ] Real-money trading is not allowed yet.
+- [ ] Deeper real historical backtest validation is still needed.
+- [ ] Real Sierra Chart exported CSV validation is still needed.
+- [ ] Final end-to-end CLI validation must be rerun and recorded against the current codebase.
+- [ ] Existing tracked report files need an explicit keep-or-untrack decision.
+- [ ] Emergency stop / manual pause remains a future safety item before live consideration.
+- [ ] Live trading is not allowed.
+- [ ] Live broker connection is not allowed.
+- [ ] Real-money trading is not allowed.
 
 ## 8. Recommended Next Cleanup Steps
 
-1. End-to-End Demo Validation checklist.
-2. Backtest Validation Checklist.
-3. Real Sierra Chart CSV Test Guide.
-4. Reports / `.gitignore` Safety Review.
-5. MVP Code Freeze Note.
+1. Run and record the final End-to-End CLI Validation.
+2. Complete the Backtest Validation Checklist with deeper historical evidence.
+3. Validate real Sierra Chart exported CSV data.
+4. Decide whether existing tracked report files remain intentional examples or are removed from Git tracking.
+5. Review the MVP Code Freeze criteria.
 
 These steps should remain documentation, validation, and safety focused. They should not add new trading features.
 
 ## 9. End-to-End Demo Validation Checklist
 
-Create a separate checklist that verifies the main user flows from the command line.
+The checklist exists in `docs/end_to_end_demo_validation.md`; final rerun and current-result recording remain pending.
 
 Suggested items:
 
@@ -170,7 +170,7 @@ Suggested items:
 
 ## 10. Backtest Validation Checklist
 
-Create a separate checklist that proves backtest results are meaningful before trusting them.
+The checklist exists in `docs/backtest_validation_checklist.md`; deeper historical evidence remains pending.
 
 Suggested items:
 
@@ -187,7 +187,7 @@ Suggested items:
 
 ## 11. Real Sierra Chart CSV Test Guide
 
-Create a separate guide that validates real exported Sierra Chart CSV data safely.
+The guide exists in `docs/real_sierra_chart_csv_test_guide.md`; validation with real exported CSV data remains pending.
 
 Suggested items:
 
@@ -206,7 +206,7 @@ Suggested items:
 
 ## 12. Reports / .gitignore Safety Review
 
-Create a separate review that decides how generated files should be handled.
+The review exists in `docs/reports_gitignore_safety.md`; existing tracked report files still need an explicit keep-or-untrack decision.
 
 Suggested items:
 
@@ -220,7 +220,7 @@ Suggested items:
 
 ## 13. MVP Code Freeze Note
 
-Create a short freeze note after validation is complete.
+The freeze note exists in `docs/mvp_code_freeze.md`; final freeze criteria are not yet complete.
 
 Suggested freeze statement:
 
@@ -239,7 +239,7 @@ Freeze note checklist:
 
 The project structure is strong. The code is split into clear folders for AI review logic, market analysis, core decision flow, risk, paper broker simulation, SMC, CRT, Order Flow, storage, docs, and tests.
 
-Tests are passing based on the current known result of 793 passed tests. Future changes should keep the full pytest suite passing.
+Tests are passing based on the current known result of 881 passed tests. Future changes should keep the full pytest suite passing.
 
 Docs are being cleaned so a beginner or future AI coding agent can understand what exists, what is missing, and what must not be changed during cleanup.
 
