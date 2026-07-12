@@ -43,6 +43,7 @@ class ExitSimulator:
         position: Optional[PaperPosition],
         candles: Optional[pd.DataFrame],
         config: ExitSimulationConfig,
+        point_value: float = 1.0,
     ) -> ExitSimulationResult:
         """Check a position against candle data and return a simple exit result."""
         if position is None:
@@ -64,7 +65,7 @@ class ExitSimulator:
         if not position.stop_loss and not position.take_profit:
             if config.close_at_final_candle:
                 last_close = float(candles["close"].iloc[-1])
-                return ExitSimulationResult(True, "FINAL_CANDLE", last_close, self._calculate_pnl(position, last_close), len(candles) - 1, ["Closed at final candle"])
+                return ExitSimulationResult(True, "FINAL_CANDLE", last_close, self._calculate_pnl(position, last_close, point_value), len(candles) - 1, ["Closed at final candle"])
             return ExitSimulationResult(False, "STILL_OPEN", None, None, None, ["No stop loss or take profit set"])
 
         for index, row in candles.iterrows():
@@ -97,12 +98,12 @@ class ExitSimulator:
             else:
                 continue
 
-            pnl = self._calculate_pnl(position, exit_price)
+            pnl = self._calculate_pnl(position, exit_price, point_value)
             return ExitSimulationResult(True, exit_reason, exit_price, pnl, index, [f"Exited at candle {index}"])
 
         if config.close_at_final_candle:
             last_close = float(candles["close"].iloc[-1])
-            return ExitSimulationResult(True, "FINAL_CANDLE", last_close, self._calculate_pnl(position, last_close), len(candles) - 1, ["Closed at final candle"])
+            return ExitSimulationResult(True, "FINAL_CANDLE", last_close, self._calculate_pnl(position, last_close, point_value), len(candles) - 1, ["Closed at final candle"])
 
         return ExitSimulationResult(False, "STILL_OPEN", None, None, None, ["No exit condition reached"])
 
@@ -126,12 +127,17 @@ class ExitSimulator:
         """Basic validation for a paper position."""
         return bool(position.position_id and position.side in {"BUY", "SELL"} and position.entry_price > 0 and position.volume > 0)
 
-    def _calculate_pnl(self, position: PaperPosition, exit_price: float) -> float:
-        """Calculate PnL using the same simple logic as the paper broker."""
+    def _calculate_pnl(
+        self,
+        position: PaperPosition,
+        exit_price: float,
+        point_value: float = 1.0,
+    ) -> float:
+        """Calculate monetary PnL using price distance, volume, and point value."""
         if position.side == "BUY":
-            return (exit_price - position.entry_price) * position.volume
+            return (exit_price - position.entry_price) * position.volume * float(point_value)
         if position.side == "SELL":
-            return (position.entry_price - exit_price) * position.volume
+            return (position.entry_price - exit_price) * position.volume * float(point_value)
         return 0.0
 
     def _stop_loss_price(self, position: PaperPosition) -> float:

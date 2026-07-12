@@ -1291,7 +1291,12 @@ class PaperTradingFlow:
                 if isinstance(exit_simulation_candles, pd.DataFrame)
                 else candles.iloc[-1:].copy()
             )
-            exit_result = ExitSimulator().simulate_exit(position, exit_candles, flow_config.exit_simulation_config)
+            exit_result = ExitSimulator().simulate_exit(
+                position,
+                exit_candles,
+                flow_config.exit_simulation_config,
+                point_value=float(effective_risk_config.point_value),
+            )
             exit_simulated = True
             exit_reason = exit_result.exit_reason
             exit_price = exit_result.exit_price
@@ -1314,6 +1319,7 @@ class PaperTradingFlow:
                     position.position_id,
                     exit_result.exit_price,
                     exit_result.exit_reason,
+                    point_value=float(effective_risk_config.point_value),
                 )
                 result_reasons.append(f"Exit simulation: {exit_result.exit_reason}")
                 if close_result.accepted:

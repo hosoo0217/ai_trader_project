@@ -144,3 +144,29 @@ def test_get_open_positions_returns_only_open_positions():
 
     assert len(open_positions) == 1
     assert open_positions[0].side == "SELL"
+
+
+def test_close_position_applies_point_value():
+    """Closing balance should use the configured monetary point value."""
+    broker = PaperBroker()
+    config = make_config()
+    state = make_state(config)
+
+    order = broker.place_market_order(
+        config,
+        state,
+        "GC",
+        "BUY",
+        100.0,
+        1.0,
+    )
+    result = broker.close_position(
+        state,
+        order.position.position_id,
+        110.0,
+        "take profit",
+        point_value=10.0,
+    )
+
+    assert result.accepted
+    assert broker.get_balance(state) == 10100.0

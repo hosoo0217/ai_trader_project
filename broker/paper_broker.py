@@ -109,17 +109,20 @@ class PaperBroker:
         position_id: str,
         exit_price: float,
         reason: str = "",
+        point_value: float = 1.0,
     ) -> PaperOrderResult:
         """Close an existing position and update the simulated balance."""
         if exit_price <= 0:
             return PaperOrderResult(False, "REJECTED", "Exit price must be positive")
+        if point_value <= 0:
+            return PaperOrderResult(False, "REJECTED", "Point value must be positive")
 
         for index, position in enumerate(state.open_positions):
             if position.position_id == position_id:
                 if position.side == "BUY":
-                    pnl = (exit_price - position.entry_price) * position.volume
+                    pnl = (exit_price - position.entry_price) * position.volume * float(point_value)
                 elif position.side == "SELL":
-                    pnl = (position.entry_price - exit_price) * position.volume
+                    pnl = (position.entry_price - exit_price) * position.volume * float(point_value)
                 else:
                     pnl = 0.0
 

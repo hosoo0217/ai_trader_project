@@ -143,3 +143,21 @@ def test_explain_returns_readable_text() -> None:
 
     assert "TAKE_PROFIT" in text
     assert "110.0" in text
+
+
+def test_point_value_scales_simulated_pnl() -> None:
+    simulator = ExitSimulator()
+    candles = make_candles([
+        {"time": "t1", "open": 100.0, "high": 110.0, "low": 99.0, "close": 109.0},
+    ])
+    position = make_position("BUY", 100.0, stop_loss=95.0, take_profit=110.0)
+
+    result = simulator.simulate_exit(
+        position,
+        candles,
+        ExitSimulationConfig(),
+        point_value=10.0,
+    )
+
+    assert result.exit_reason == "TAKE_PROFIT"
+    assert result.pnl == 100.0

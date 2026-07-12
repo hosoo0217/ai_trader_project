@@ -46,7 +46,12 @@ def make_flow_candles(direction: str, exit_kind: str | None = None) -> pd.DataFr
     )
 
 
-def run_flow(candles: pd.DataFrame, config: PaperTradingFlowConfig, journal: TradeJournal | None = None):
+def run_flow(
+    candles: pd.DataFrame,
+    config: PaperTradingFlowConfig,
+    journal: TradeJournal | None = None,
+    point_value: float = 1.0,
+):
     """Run the paper flow with permissive test defaults."""
     state = PaperBrokerState()
     risk_config = RiskEngineConfig(
@@ -56,7 +61,7 @@ def run_flow(candles: pd.DataFrame, config: PaperTradingFlowConfig, journal: Tra
         default_stop_distance=1.0,
         min_volume=1.0,
         max_volume=1.0,
-        point_value=1.0,
+        point_value=point_value,
     )
     result = PaperTradingFlow().run_single_timeframe(
         candles,
@@ -181,3 +186,24 @@ def test_exit_simulation_does_not_use_pre_entry_candles() -> None:
     )
 
     assert "Exited at candle 0" not in result.reasons
+
+
+def test_point_value_keeps_result_journal_and_balance_in_same_unit() -> None:
+    journal = TradeJournal()
+    result, state = run_flow(
+        make_flow_candles("BUY", "TP"),
+        PaperTradingFlowConfig(
+            stop_loss=50.0,
+            take_profit=160.0,
+            simulate_exit=True,
+        ),
+        journal,
+        point_value=10.0,
+    )
+
+    entries = journal.get_all_entries()
+
+    assert result.pnl == 10.0
+    assert entries[0].pnl == 10.0
+    assert journal.summarize()["total_pnl"] == 10.0
+    assert state.balance == 10010.0
