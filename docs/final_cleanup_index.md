@@ -115,6 +115,8 @@ Live trading and broker connections are later separate phases, not part of this 
 
 - [Context alignment diagnostic implementation checklist](context_alignment_diagnostic_implementation_checklist.md)
 
+- [Backtest quality drawdown unit contract](backtest_quality_drawdown_unit_contract.md)
+
 - [Backtest quality loss cluster diagnostic plan](backtest_quality_loss_cluster_diagnostic_plan.md)
 
 - [Backtest quality loss cluster diagnostic report](backtest_quality_loss_cluster_diagnostic_report.md)

@@ -19,7 +19,7 @@ class BacktestQualityConfig:
     min_iterations: int = 30
     min_executed_trades: int = 20
     min_win_rate: float = 50.0
-    max_drawdown_allowed: float = 10.0
+    max_drawdown_percent_allowed: float | None = None
     min_profit_factor: float = 1.2
     require_positive_pnl: bool = True
 
@@ -44,6 +44,7 @@ class BacktestQualityChecker:
         backtest_result: BacktestResult,
         performance_report: PerformanceReport,
         config: BacktestQualityConfig,
+        account_balance: float | None = None,
     ) -> BacktestQualityResult:
         """Evaluate backtest quality using safe minimum thresholds."""
         warnings: list[str] = []
@@ -80,8 +81,27 @@ class BacktestQualityChecker:
         if performance_report.win_rate < config.min_win_rate:
             failures.append("Win rate is below required minimum")
 
-        if performance_report.max_drawdown > config.max_drawdown_allowed:
-            failures.append("Max drawdown exceeds allowed threshold")
+        drawdown_percent: float | None = None
+        if account_balance is None or account_balance <= 0:
+            failures.append(
+                "Positive account balance is required for drawdown percentage evaluation"
+            )
+        elif config.max_drawdown_percent_allowed is None:
+            failures.append(
+                "Max drawdown percent threshold is not configured"
+            )
+        elif config.max_drawdown_percent_allowed <= 0:
+            failures.append("Max drawdown percent threshold must be positive")
+        else:
+            drawdown_percent = (
+                float(performance_report.max_drawdown)
+                / float(account_balance)
+                * 100.0
+            )
+            if drawdown_percent > config.max_drawdown_percent_allowed:
+                failures.append(
+                    "Max drawdown percentage exceeds allowed threshold"
+                )
 
         if performance_report.profit_factor < config.min_profit_factor:
             failures.append("Profit factor is below required minimum")
@@ -93,8 +113,11 @@ class BacktestQualityChecker:
         if performance_report.profit_factor < config.min_profit_factor + 0.2:
             warnings.append("Profit factor margin is thin")
 
-        if performance_report.max_drawdown > config.max_drawdown_allowed * 0.8:
-            warnings.append("Drawdown is close to maximum allowed")
+        if (
+            drawdown_percent is not None
+            and drawdown_percent > config.max_drawdown_percent_allowed * 0.8
+        ):
+            warnings.append("Drawdown percentage is close to maximum allowed")
 
         score = self._compute_score(warnings, failures)
 

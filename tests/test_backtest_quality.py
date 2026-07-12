@@ -74,6 +74,7 @@ def test_negative_pnl_fails() -> None:
         make_backtest_result(total_pnl=-5.0),
         make_performance_report(total_pnl=-5.0),
         BacktestQualityConfig(require_positive_pnl=True),
+        account_balance=100.0,
     )
 
     assert result.grade == "FAILED"
@@ -86,6 +87,7 @@ def test_low_win_rate_fails() -> None:
         make_backtest_result(),
         make_performance_report(win_rate=40.0),
         BacktestQualityConfig(min_win_rate=50.0),
+        account_balance=100.0,
     )
 
     assert result.grade == "FAILED"
@@ -97,7 +99,8 @@ def test_high_drawdown_fails() -> None:
     result = checker.evaluate(
         make_backtest_result(),
         make_performance_report(max_drawdown=12.0),
-        BacktestQualityConfig(max_drawdown_allowed=10.0),
+        BacktestQualityConfig(max_drawdown_percent_allowed=10.0),
+        account_balance=100.0,
     )
 
     assert result.grade == "FAILED"
@@ -110,6 +113,7 @@ def test_low_profit_factor_fails() -> None:
         make_backtest_result(),
         make_performance_report(profit_factor=1.0),
         BacktestQualityConfig(min_profit_factor=1.2),
+        account_balance=100.0,
     )
 
     assert result.grade == "FAILED"
@@ -121,7 +125,8 @@ def test_good_report_passes() -> None:
     result = checker.evaluate(
         make_backtest_result(),
         make_performance_report(),
-        BacktestQualityConfig(),
+        BacktestQualityConfig(max_drawdown_percent_allowed=10.0),
+        account_balance=100.0,
     )
 
     assert result.passed is True
@@ -134,7 +139,8 @@ def test_explain_returns_readable_text() -> None:
     result = checker.evaluate(
         make_backtest_result(),
         make_performance_report(),
-        BacktestQualityConfig(),
+        BacktestQualityConfig(max_drawdown_percent_allowed=10.0),
+        account_balance=100.0,
     )
 
     text = checker.explain(result)
@@ -142,3 +148,64 @@ def test_explain_returns_readable_text() -> None:
     assert "grade" in text.lower()
     assert "score" in text.lower()
     assert "recommendation" in text.lower()
+
+
+def test_drawdown_quality_uses_account_percentage() -> None:
+    checker = BacktestQualityChecker()
+    config = BacktestQualityConfig(max_drawdown_percent_allowed=10.0)
+    report = make_performance_report(max_drawdown=300.0)
+
+    small_account_result = checker.evaluate(
+        make_backtest_result(),
+        report,
+        config,
+        account_balance=1000.0,
+    )
+    large_account_result = checker.evaluate(
+        make_backtest_result(),
+        report,
+        config,
+        account_balance=50000.0,
+    )
+
+    assert any(
+        "drawdown percentage" in failure.lower()
+        for failure in small_account_result.failures
+    )
+    assert not any(
+        "drawdown percentage" in failure.lower()
+        for failure in large_account_result.failures
+    )
+
+
+def test_missing_account_balance_fails_closed() -> None:
+    checker = BacktestQualityChecker()
+
+    result = checker.evaluate(
+        make_backtest_result(),
+        make_performance_report(),
+        BacktestQualityConfig(),
+    )
+
+    assert result.passed is False
+    assert any(
+        "account balance" in failure.lower()
+        for failure in result.failures
+    )
+
+
+def test_missing_drawdown_threshold_fails_closed() -> None:
+    checker = BacktestQualityChecker()
+
+    result = checker.evaluate(
+        make_backtest_result(),
+        make_performance_report(),
+        BacktestQualityConfig(),
+        account_balance=100.0,
+    )
+
+    assert result.passed is False
+    assert any(
+        "threshold is not configured" in failure.lower()
+        for failure in result.failures
+    )

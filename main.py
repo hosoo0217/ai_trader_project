@@ -3175,10 +3175,12 @@ def _run_backtest_scenario(
 
     performance = _print_performance_report(journal)
 
+    quality_config = BacktestQualityConfig()
     quality = BacktestQualityChecker().evaluate(
         result,
         performance,
-        BacktestQualityConfig(),
+        quality_config,
+        account_balance=profile.starting_balance,
     )
 
     failures_text = "; ".join(quality.failures) if quality.failures else "None"
@@ -3192,10 +3194,29 @@ def _run_backtest_scenario(
     else:
         recommendation = "Good research result, still not live-ready"
 
+    drawdown_percent = (
+        performance.max_drawdown / profile.starting_balance * 100.0
+        if profile.starting_balance > 0
+        else None
+    )
+
     print("\nBacktest Quality Check")
     print(f"- Grade: {quality.grade}")
     print(f"- Score: {quality.score:.1f}")
     print(f"- Passed: {quality.passed}")
+    print(
+        f"- Max drawdown percent: {drawdown_percent:.2f}%"
+        if drawdown_percent is not None
+        else "- Max drawdown percent: UNKNOWN"
+    )
+    print(
+        "- Max drawdown percent allowed: "
+        + (
+            f"{quality_config.max_drawdown_percent_allowed:.2f}%"
+            if quality_config.max_drawdown_percent_allowed is not None
+            else "NOT_CONFIGURED"
+        )
+    )
     print(f"- Failures: {failures_text}")
     print(f"- Warnings: {warnings_text}")
     print(f"- Recommendation: {recommendation}")
