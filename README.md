@@ -58,10 +58,10 @@ Completed or mostly complete areas:
 
 Still needed before any future live-trading discussion:
 
-- Final project health audit
-- End-to-end demo validation
+- Refresh the project health audit with current test and validation results
+- Final end-to-end CLI validation rerun and result update
 - Deeper historical backtest validation
-- Real Sierra Chart exported CSV testing
+- Real Sierra Chart exported CSV validation
 - Reports / `.gitignore` safety review
 - MVP code freeze note
 
@@ -200,11 +200,12 @@ No new major features should be added during cleanup. Live trading, broker conne
 
 ## Next Recommended Cleanup Steps
 
-1. Project Health Audit
-2. End-to-End Demo Validation
-3. Backtest Validation Checklist
-4. Real Sierra Chart CSV Test Guide
-5. Reports / `.gitignore` safety review
+1. Refresh the Project Health Audit
+2. Run the final End-to-End CLI Validation
+3. Complete the Backtest Validation Checklist
+4. Validate real Sierra Chart exported CSV data
+5. Review reports and `.gitignore` safety
+6. Review the MVP code freeze note
 
 ## Beginner Summary
 
