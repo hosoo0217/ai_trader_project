@@ -83,10 +83,10 @@ Activate it:
 .\venv\Scripts\Activate.ps1
 ```
 
-Install requirements:
+Install runtime and test requirements:
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
 Run the test suite:
