@@ -16,10 +16,10 @@ Current status:
 - [x] Local CSV-based Order Flow workflow exists.
 - [x] Reporting and review workflows exist.
 - [x] Human approval and implementation-readiness workflows exist.
-- [ ] Final README / usage cleanup is still needed.
-- [ ] Final end-to-end CLI validation checklist is still needed.
-- [ ] Deeper real historical backtest validation is still needed.
-- [ ] Real Sierra Chart exported CSV testing is still needed.
+- [x] Final README / usage cleanup is complete and current.
+- [x] Final end-to-end CLI validation is complete and recorded.
+- [x] The current deeper historical baseline is complete; broader robustness validation remains.
+- [x] Real Sierra Chart exported CSV validation is complete.
 
 Safety status:
 
@@ -73,11 +73,11 @@ Safety status:
 
 ## 3. Partially Complete Areas
 
-- [ ] Backtest validation needs deeper real historical testing.
-- [ ] Real Sierra Chart CSV support needs testing with actual exported data from Sierra Chart.
-- [ ] README / usage guide still needs final cleanup so beginners can run the current MVP without reading old placeholder language.
-- [ ] End-to-end CLI demo validation still needs a final checklist with known-good commands and expected outputs.
-- [ ] Reports / generated files safety review is still needed before deciding what should be committed, ignored, or cleaned.
+- [ ] More independent historical periods are still needed.
+- [ ] Out-of-sample and regime-separated validation are still needed.
+- [ ] MVP code-freeze criteria still require final review.
+- [ ] Research drawdown acceptance criteria still need definition and review.
+- [ ] Losing-trade traces and conditional-cooldown robustness still need review.
 
 ## 4. Not Started / Not Allowed Yet
 
@@ -97,21 +97,21 @@ Clear boundary: none of these should be started until the research, backtest, pa
 
 Before any future live-trading discussion, the following must be checked:
 
-- [ ] Full pytest suite must pass.
-- [ ] `main.py` demo command must run.
-- [ ] Backtest command must run.
-- [ ] Order Flow CSV command must run.
-- [ ] Order Flow replay command must run.
-- [ ] Session report command must run.
-- [ ] Session trend command must run.
-- [ ] Approval / proposal / implementation readiness flow must run.
+- [x] Full pytest suite passes (881 passed).
+- [x] `main.py` demo command runs.
+- [x] Backtest command runs.
+- [x] Order Flow CSV command runs locally.
+- [x] Order Flow replay command runs locally.
+- [x] Session report and export workflows run.
+- [x] Session trend command runs.
+- [x] Approval, proposal, and implementation readiness workflows run.
 - [ ] Generated reports should be reviewed for correctness and accidental sensitive data.
-- [ ] Codebase review should confirm no live trading code exists.
-- [ ] Codebase review should confirm no real broker connection exists.
-- [ ] Codebase review should confirm no real order execution exists.
-- [ ] Codebase review should confirm no real trade signals are created.
+- [x] Codebase review confirms live trading is not implemented.
+- [x] Codebase review confirms no real broker connection is implemented.
+- [x] Codebase review confirms no real order execution is implemented.
+- [x] Codebase review confirms no real trade signal execution is implemented.
 
-Example validation commands to document and run later:
+Representative validated commands:
 
 ```bash
 python -m pytest
@@ -122,7 +122,7 @@ python main.py --mode backtest --show-session-report
 python main.py --show-session-trend
 ```
 
-Order Flow CSV and replay commands should be added after the final sample CSV path is confirmed.
+Order Flow CSV and replay commands are documented and validated with local sample CSV data.
 
 ## 6. Safety Checklist
 
@@ -135,7 +135,7 @@ Order Flow CSV and replay commands should be added after the final sample CSV pa
 - [x] News filter exists.
 - [x] Spread filter exists.
 - [x] Volatility filter exists.
-- [ ] Manual pause / emergency stop should be a future safety item before live consideration.
+- [x] Manual pause / emergency-stop safety policy documentation is complete; runtime controls remain future work.
 - [x] Human approval is required for strategy changes.
 - [ ] Backtest validation is required before expanded paper-trading confidence.
 - [ ] Paper trading validation is required before live consideration.
@@ -144,13 +144,11 @@ Safety rule: capital protection must remain more important than profit, speed, a
 
 ## 7. Recommended Next Cleanup Steps
 
-1. README / Usage Guide cleanup.
-2. Project Health Audit.
-3. End-to-End Demo Validation.
-4. Backtest Validation Checklist.
-5. Real Sierra Chart CSV Test Guide.
-6. Reports / `.gitignore` safety review.
-7. MVP code freeze note.
+1. Review losing-trade traces and conditional-cooldown robustness.
+2. Validate more independent historical periods.
+3. Run regime-separated and out-of-sample validation.
+4. Define and review research drawdown acceptance criteria.
+5. Complete the MVP code-freeze final review.
 
 These steps should stay focused on documentation, validation, and safety. They should not add live trading, real broker connections, external APIs, real order execution, or automatic strategy changes.
 
@@ -160,7 +158,7 @@ This project is already a strong research and practice-trading MVP. It can analy
 
 What is already done: the core research, backtest, paper-trading, safety, Order Flow, SMC, CRT, reporting, coaching, approval, proposal, implementation-plan, and readiness pieces are in place.
 
-What is still missing: the project still needs final README cleanup, a project health audit, end-to-end demo validation, deeper historical backtest validation, a real Sierra Chart CSV test guide, and a reports / `.gitignore` safety review.
+What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, research drawdown acceptance criteria, losing-trade and conditional-cooldown robustness review, and the MVP code-freeze final review.
 
 Why we are not going live yet: live trading is much riskier than research or paper trading. This project does not connect to a broker, does not place real orders, does not use live Sierra Chart or CME data, and does not create real trade signals. That is intentional.
 

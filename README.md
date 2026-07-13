@@ -58,12 +58,12 @@ Completed or mostly complete areas:
 
 Still needed before any future live-trading discussion:
 
-- Refresh the project health audit with current test and validation results
-- Final end-to-end CLI validation rerun and result update
-- Deeper historical backtest validation
-- Real Sierra Chart exported CSV validation
-- Reports / `.gitignore` safety review
-- MVP code freeze note
+- Validate more independent historical periods
+- Run out-of-sample and regime-separated validation
+- Define and review research drawdown acceptance criteria
+- Review losing-trade traces
+- Review conditional-cooldown robustness
+- Complete the MVP code-freeze final review
 
 See [docs/mvp_completion_checklist.md](docs/mvp_completion_checklist.md) for the detailed MVP checklist.
 
@@ -200,12 +200,11 @@ No new major features should be added during cleanup. Live trading, broker conne
 
 ## Next Recommended Cleanup Steps
 
-1. Refresh the Project Health Audit
-2. Run the final End-to-End CLI Validation
-3. Complete the Backtest Validation Checklist
-4. Validate real Sierra Chart exported CSV data
-5. Review reports and `.gitignore` safety
-6. Review the MVP code freeze note
+1. Review losing-trade traces and conditional-cooldown robustness
+2. Validate more independent historical periods
+3. Run regime-separated and out-of-sample validation
+4. Define and review research drawdown acceptance criteria
+5. Complete the MVP code-freeze final review
 
 ## Beginner Summary
 

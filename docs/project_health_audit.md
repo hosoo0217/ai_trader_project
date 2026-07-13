@@ -233,7 +233,7 @@ Freeze note checklist:
 - [x] Backtest validation checklist is complete.
 - [x] Real Sierra Chart CSV test guide is complete.
 - [x] Reports / `.gitignore` safety review is complete.
-- [ ] README and MVP checklist are current.
+- [x] README and MVP checklist are current.
 
 ## 14. Beginner Summary
 
