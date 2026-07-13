@@ -106,7 +106,7 @@ Before any future live-trading discussion, the following must be checked:
 - [x] Session report and export workflows run.
 - [x] Session trend command runs.
 - [x] Approval, proposal, and implementation readiness workflows run.
-- [ ] Generated reports should be reviewed for correctness and accidental sensitive data.
+- [x] Selected generated report snapshots were reviewed for correctness and accidental sensitive data before untracking; every future generated report still requires review before commit or sharing.
 - [x] Codebase review confirms live trading is not implemented.
 - [x] Codebase review confirms no real broker connection is implemented.
 - [x] Codebase review confirms no real order execution is implemented.
