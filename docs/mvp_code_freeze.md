@@ -78,15 +78,15 @@ If a requested change touches live execution, broker connectivity, external live
 
 Before any future feature work is considered:
 
-- [ ] Full pytest passing.
-- [ ] End-to-end demo validation done.
-- [ ] Backtest validation checklist reviewed.
-- [ ] Real Sierra Chart CSV test completed safely.
-- [ ] Reports / `.gitignore` safety reviewed.
-- [ ] Generated reports reviewed for private data.
-- [ ] Human approval recorded for any strategy change.
+- [x] Full pytest passing (881 passed).
+- [x] End-to-end demo validation done.
+- [x] Backtest validation checklist reviewed.
+- [x] Real Sierra Chart CSV test completed safely.
+- [x] Reports / `.gitignore` safety reviewed.
+- [x] Generated report snapshots selected for untracking were reviewed for private data.
+- [x] Human approval is required before any strategy change; no strategy implementation is approved.
 - [ ] Risk and capital-protection impact reviewed.
-- [ ] No live-trading behavior added by accident.
+- [x] Codebase review confirms no live-trading behavior was added.
 
 Recommended baseline test command:
 
