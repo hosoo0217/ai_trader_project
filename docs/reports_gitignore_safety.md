@@ -157,7 +157,7 @@ The project ignores generated report outputs by extension inside `reports/`:
 
 This allows the folder to exist locally while preventing common generated outputs from being accidentally committed.
 
-Important git note: `.gitignore` does not untrack files that are already tracked by git. If generated `reports/` files are already tracked, they must be reviewed separately before deciding whether to keep them as intentional examples or remove them from git tracking with a separate, explicit cleanup step.
+Decision completed on 2026-07-13: the reviewed runtime-generated JSON and TXT report snapshots were removed from Git tracking with `git rm --cached` while remaining available locally. They are not canonical examples or test fixtures. The existing `reports/*.json`, `reports/*.txt`, and `reports/*.csv` rules prevent these generated snapshots from being added again accidentally.
 
 Check currently tracked report files with:
 

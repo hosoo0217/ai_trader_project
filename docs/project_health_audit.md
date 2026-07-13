@@ -53,7 +53,7 @@ Safety status:
 - [x] Implementation readiness workflow exists.
 - [x] Capital protection is central to the project.
 - [x] Backtest and paper trading are required before live consideration.
-- [ ] Manual pause / emergency stop should remain a future safety item before live consideration.
+- [x] Manual pause / emergency-stop safety policy documentation is complete.
 
 Safety rule: cleanup work must not introduce live trading, broker credentials, external APIs, real execution, or automatic strategy changes.
 
@@ -67,7 +67,7 @@ Safety rule: cleanup work must not introduce live trading, broker credentials, e
 - [x] Session trend output has been manually smoke-tested.
 - [x] Approval, proposal, and readiness workflows have been manually smoke-tested.
 - [ ] Future changes must keep the full pytest suite passing.
-- [ ] Final end-to-end CLI validation should be rerun and recorded against the current codebase.
+- [x] Final end-to-end CLI validation passed and is recorded against the current codebase.
 
 Recommended baseline test command:
 
@@ -89,10 +89,10 @@ Important documentation currently exists:
 
 Documentation status:
 
-- [x] End-to-end demo validation checklist exists; final rerun and result update remain pending.
-- [x] Backtest validation checklist exists; deeper historical validation remains pending.
-- [x] Real Sierra Chart CSV test guide exists; real exported CSV validation remains pending.
-- [x] Reports / `.gitignore` safety review exists; tracked report files still require an explicit keep-or-untrack decision.
+- [x] End-to-end demo validation checklist and final recorded CLI result are complete.
+- [x] Backtest checklist and current deeper historical baseline are complete; broader robustness research remains.
+- [x] Real Sierra Chart CSV test guide and exported historical CSV validation are complete.
+- [x] Reports / `.gitignore` safety review is complete; generated snapshots were removed from Git tracking.
 - [x] MVP code freeze note exists; final freeze criteria are not yet complete.
 
 ## 6. Generated Files / Reports Safety
@@ -116,8 +116,8 @@ Safety status and requirements:
 
 - [x] New `reports/*.json`, `reports/*.txt`, and `reports/*.csv` files are ignored.
 - [x] `logs/`, `private_data/`, `secrets/`, `.env`, virtual environments, and Python caches are ignored.
-- [x] The currently tracked report files were scanned for common credential, token, account-number, email, and local-user-path patterns; none were found at this checkpoint.
-- [ ] Existing tracked report files require an explicit decision to remain intentional examples or be removed from Git tracking.
+- [x] The report snapshots selected for untracking were scanned for common credential, token, account-number, email, and local-user-path patterns; none were found at this checkpoint.
+- [x] Reviewed runtime-generated report snapshots were removed from Git tracking and remain ignored locally.
 - [ ] Continue reviewing generated reports before committing or sharing them.
 - [ ] Never commit API keys, broker credentials, account numbers, secrets, or private trading data.
 
@@ -125,28 +125,28 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 
 ## 7. Known Gaps
 
-- [ ] Deeper real historical backtest validation is still needed.
-- [ ] Real Sierra Chart exported CSV validation is still needed.
-- [ ] Final end-to-end CLI validation must be rerun and recorded against the current codebase.
-- [ ] Existing tracked report files need an explicit keep-or-untrack decision.
-- [ ] Emergency stop / manual pause remains a future safety item before live consideration.
+- [ ] More independent historical periods are still needed.
+- [ ] Out-of-sample and regime-separated validation are still needed.
+- [ ] Drawdown thresholds must be configured and reviewed in research before progression.
+- [ ] Losing-trade traces and conditional-cooldown robustness still need review.
+- [ ] MVP code-freeze criteria still require final review.
 - [ ] Live trading is not allowed.
 - [ ] Live broker connection is not allowed.
 - [ ] Real-money trading is not allowed.
 
 ## 8. Recommended Next Cleanup Steps
 
-1. Run and record the final End-to-End CLI Validation.
-2. Complete the Backtest Validation Checklist with deeper historical evidence.
-3. Validate real Sierra Chart exported CSV data.
-4. Decide whether existing tracked report files remain intentional examples or are removed from Git tracking.
+1. Review losing-trade traces and conditional-cooldown robustness in diagnostic-only mode.
+2. Validate more independent historical periods.
+3. Run regime-separated and out-of-sample validation.
+4. Define and review drawdown acceptance criteria in research only.
 5. Review the MVP Code Freeze criteria.
 
 These steps should remain documentation, validation, and safety focused. They should not add new trading features.
 
 ## 9. End-to-End Demo Validation Checklist
 
-The checklist exists in `docs/end_to_end_demo_validation.md`; final rerun and current-result recording remain pending.
+The checklist and final PASSED result are recorded in `docs/end_to_end_demo_validation.md`.
 
 Suggested items:
 
@@ -170,7 +170,7 @@ Suggested items:
 
 ## 10. Backtest Validation Checklist
 
-The checklist exists in `docs/backtest_validation_checklist.md`; deeper historical evidence remains pending.
+The checklist and current deeper historical baseline are complete; independent-period and robustness evidence remain pending.
 
 Suggested items:
 
@@ -187,7 +187,7 @@ Suggested items:
 
 ## 11. Real Sierra Chart CSV Test Guide
 
-The guide exists in `docs/real_sierra_chart_csv_test_guide.md`; validation with real exported CSV data remains pending.
+The guide exists and validation with local real Sierra exported historical CSV data is complete.
 
 Suggested items:
 
@@ -206,7 +206,7 @@ Suggested items:
 
 ## 12. Reports / .gitignore Safety Review
 
-The review exists in `docs/reports_gitignore_safety.md`; existing tracked report files still need an explicit keep-or-untrack decision.
+The review is complete; runtime-generated report snapshots were removed from Git tracking and remain ignored locally.
 
 Suggested items:
 
@@ -228,11 +228,11 @@ Suggested freeze statement:
 
 Freeze note checklist:
 
-- [ ] Full pytest passes.
-- [ ] End-to-end demo validation is complete.
-- [ ] Backtest validation checklist is complete.
-- [ ] Real Sierra Chart CSV test guide is complete.
-- [ ] Reports / `.gitignore` safety review is complete.
+- [x] Full pytest passes.
+- [x] End-to-end demo validation is complete.
+- [x] Backtest validation checklist is complete.
+- [x] Real Sierra Chart CSV test guide is complete.
+- [x] Reports / `.gitignore` safety review is complete.
 - [ ] README and MVP checklist are current.
 
 ## 14. Beginner Summary
