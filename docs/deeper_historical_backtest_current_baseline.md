@@ -142,6 +142,6 @@ Remaining research includes:
 - more independent historical periods
 - true regime-separated datasets
 - configured and reviewed drawdown thresholds
-- losing-trade trace review
+- new non-overlapping matching OHLC and ACSIL full-footprint exports for independent-period validation
 - out-of-sample validation
 - robustness validation before any paper-trading preparation

@@ -123,10 +123,7 @@ Remaining research includes:
 - more independent historical periods
 - true bullish, bearish, range, and volatility regime separation
 - configured and reviewed drawdown thresholds
-- losing-trade trace review
 - out-of-sample validation
-- conditional cooldown robustness validation
-- tracked generated-report keep-or-untrack decision
 - MVP code-freeze review
 
 Paper-trading preparation must not begin until the required historical, risk, robustness, and human-review evidence is complete.
