@@ -117,6 +117,8 @@ Live trading and broker connections are later separate phases, not part of this 
 
 - [Backtest quality drawdown unit contract](backtest_quality_drawdown_unit_contract.md)
 
+- [Research drawdown acceptance criteria](research_drawdown_acceptance_criteria.md)
+
 - [Backtest quality loss cluster diagnostic plan](backtest_quality_loss_cluster_diagnostic_plan.md)
 
 - [Backtest quality loss cluster diagnostic report](backtest_quality_loss_cluster_diagnostic_report.md)

@@ -86,7 +86,8 @@ Before any future feature work is considered:
 - [x] Generated report snapshots selected for untracking were reviewed for private data.
 - [x] Human approval is required before any strategy change; no strategy implementation is approved.
 - [x] Capital-protection policy impact reviewed; all nine documentation-only policy decisions are complete.
-- [ ] Research risk acceptance criteria and drawdown thresholds still require definition and review.
+- [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
+- [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
 - [x] Codebase review confirms no live-trading behavior was added.
 
 Recommended baseline test command:
