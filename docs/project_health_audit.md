@@ -130,7 +130,7 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
 - [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
 - [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
-- [ ] MVP code-freeze criteria still require final review.
+- [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [ ] Live trading is not allowed.
 - [ ] Live broker connection is not allowed.
 - [ ] Real-money trading is not allowed.
@@ -140,7 +140,7 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 1. Validate more independent historical periods.
 2. Run regime-separated and out-of-sample validation.
 3. Review profile-specific numerical drawdown thresholds after independent non-overlapping validation evidence is available.
-4. Review the MVP Code Freeze criteria.
+4. Keep the reviewed code freeze active until the remaining validation blockers are resolved.
 
 These steps should remain documentation, validation, and safety focused. They should not add new trading features.
 

@@ -53,6 +53,7 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Order Flow Confirmation Implementation Readiness Plan](orderflow_confirmation_implementation_readiness_plan.md): Defines the documentation-only approval, test, rollback, and safety checklist before any future Order Flow confirmation implementation.
 - [Reports / .gitignore Safety Review](reports_gitignore_safety.md): Explains generated report safety, secrets safety, and ignore rules.
 - [MVP Code Freeze Note](mvp_code_freeze.md): Explains that the project is moving from feature-building into cleanup, testing, and validation mode.
+- [MVP Code-Freeze Final Review](mvp_code_freeze_final_review.md): Records the completed final review, active freeze status, remaining validation blockers, and unchanged deployment restrictions.
 
 ## 4. Validation Order
 

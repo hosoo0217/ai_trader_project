@@ -75,7 +75,7 @@ Safety status:
 
 - [ ] More independent historical periods are still needed.
 - [ ] Out-of-sample and regime-separated validation are still needed.
-- [ ] MVP code-freeze criteria still require final review.
+- [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
 - [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
 - [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
@@ -148,7 +148,7 @@ Safety rule: capital protection must remain more important than profit, speed, a
 1. Validate more independent historical periods.
 2. Run regime-separated and out-of-sample validation.
 3. Review profile-specific numerical drawdown thresholds after independent non-overlapping validation evidence is available.
-4. Complete the MVP code-freeze final review.
+4. Keep the reviewed code freeze active until the remaining validation blockers are resolved.
 
 These steps should stay focused on documentation, validation, and safety. They should not add live trading, real broker connections, external APIs, real order execution, or automatic strategy changes.
 
@@ -158,7 +158,7 @@ This project is already a strong research and practice-trading MVP. It can analy
 
 What is already done: the core research, backtest, paper-trading, safety, Order Flow, SMC, CRT, reporting, coaching, approval, proposal, implementation-plan, and readiness pieces are in place.
 
-What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, profile-specific numerical drawdown-threshold review after independent evidence is available, and the MVP code-freeze final review.
+What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, and profile-specific numerical drawdown-threshold review after independent evidence is available. The MVP code-freeze final review is complete, and the freeze remains active while these blockers are open.
 
 Why we are not going live yet: live trading is much riskier than research or paper trading. This project does not connect to a broker, does not place real orders, does not use live Sierra Chart or CME data, and does not create real trade signals. That is intentional.
 
