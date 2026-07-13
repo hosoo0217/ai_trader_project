@@ -207,15 +207,11 @@ Suggested items:
 
 The review is complete; runtime-generated report snapshots were removed from Git tracking and remain ignored locally.
 
-Suggested items:
+Completed decision and ongoing requirement:
 
-- [ ] Decide whether `reports/` should be ignored completely.
-- [ ] Decide whether sample reports should be committed.
-- [ ] Remove any sensitive generated data.
-- [ ] Confirm `.env` remains ignored.
-- [ ] Confirm credentials and account numbers are not present.
-- [ ] Confirm generated JSON files do not expose private data.
-- [ ] Confirm generated TXT files do not expose private data.
+- [x] Generated JSON, TXT, and CSV outputs under `reports/` are ignored by extension.
+- [x] Reviewed runtime-generated JSON and TXT snapshots were removed from Git tracking and remain local.
+- [x] The selected snapshots were scanned for common sensitive-data patterns; none were found at this checkpoint.
 
 ## 13. MVP Code Freeze Note
 
