@@ -85,7 +85,8 @@ Before any future feature work is considered:
 - [x] Reports / `.gitignore` safety reviewed.
 - [x] Generated report snapshots selected for untracking were reviewed for private data.
 - [x] Human approval is required before any strategy change; no strategy implementation is approved.
-- [ ] Risk and capital-protection impact reviewed.
+- [x] Capital-protection policy impact reviewed; all nine documentation-only policy decisions are complete.
+- [ ] Research risk acceptance criteria and drawdown thresholds still require definition and review.
 - [x] Codebase review confirms no live-trading behavior was added.
 
 Recommended baseline test command:
