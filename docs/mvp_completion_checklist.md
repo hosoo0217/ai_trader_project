@@ -77,7 +77,7 @@ Safety status:
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [ ] MVP code-freeze criteria still require final review.
 - [ ] Research drawdown acceptance criteria still need definition and review.
-- [ ] Losing-trade traces and conditional-cooldown robustness still need review.
+- [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
 
 ## 4. Not Started / Not Allowed Yet
 
@@ -144,11 +144,10 @@ Safety rule: capital protection must remain more important than profit, speed, a
 
 ## 7. Recommended Next Cleanup Steps
 
-1. Review losing-trade traces and conditional-cooldown robustness.
-2. Validate more independent historical periods.
-3. Run regime-separated and out-of-sample validation.
-4. Define and review research drawdown acceptance criteria.
-5. Complete the MVP code-freeze final review.
+1. Validate more independent historical periods.
+2. Run regime-separated and out-of-sample validation.
+3. Define and review research drawdown acceptance criteria.
+4. Complete the MVP code-freeze final review.
 
 These steps should stay focused on documentation, validation, and safety. They should not add live trading, real broker connections, external APIs, real order execution, or automatic strategy changes.
 
@@ -158,7 +157,7 @@ This project is already a strong research and practice-trading MVP. It can analy
 
 What is already done: the core research, backtest, paper-trading, safety, Order Flow, SMC, CRT, reporting, coaching, approval, proposal, implementation-plan, and readiness pieces are in place.
 
-What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, research drawdown acceptance criteria, losing-trade and conditional-cooldown robustness review, and the MVP code-freeze final review.
+What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, research drawdown acceptance criteria, and the MVP code-freeze final review.
 
 Why we are not going live yet: live trading is much riskier than research or paper trading. This project does not connect to a broker, does not place real orders, does not use live Sierra Chart or CME data, and does not create real trade signals. That is intentional.
 

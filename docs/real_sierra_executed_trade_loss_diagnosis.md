@@ -85,6 +85,25 @@ The executed trades shared a clear pattern:
 
 The important pattern is that SELL trades could execute without directional Order Flow confirmation.
 
+### Trade-by-Trade Review Completed
+
+All `8` executed trades were reviewed individually from the generated JSON trade-trace report.
+
+Observed trade-level pattern:
+
+- Executed iterations were `23`, `24`, `25`, `26`, `27`, `29`, `30`, and `31`.
+- All `8` trades were `SELL` entries.
+- All `8` trades closed as `LOSS` with simulated PnL of `-10.0` each.
+- Multi-timeframe status was `SELL_BIAS` on all `8` trades.
+- Order Flow status was `NEUTRAL` on all `8` trades.
+- Risk status was `RISK_ALLOWED` on all `8` trades.
+- Context-alignment enforcement was disabled on all `8` trades.
+- SMC status was `NEUTRAL` on `5` of the `8` trades.
+- CRT showed `BEARISH_EXPANSION` on `5` trades, `HIGH_MANIPULATION` on `2` trades, and conflicting `BULLISH_EXPANSION` on `1` trade.
+- The losses formed a nearby iteration cluster rather than eight widely separated independent failures.
+
+The review indicates repeated SELL entries were allowed while confirmation was incomplete or conflicting. This is diagnostic evidence only and does not approve a cooldown rule, Order Flow enforcement, or any strategy or risk change.
+
 ## 6. Loss Pattern
 
 The loss pattern was consistent:
@@ -134,7 +153,7 @@ This diagnosis suggests:
 - The current entry logic can execute losing SELL trades when Order Flow is neutral.
 - Multi-timeframe, SMC, and CRT bearish context can be enough to permit SELL execution.
 - Neutral Order Flow may not be strong enough confirmation for this sample.
-- The losing trades should be inspected individually before changing strategy rules.
+- All 8 losing trades were inspected individually; the review does not justify changing strategy rules.
 - A future rule proposal could consider requiring directional Order Flow confirmation before execution.
 
 That possible rule must not be implemented directly from this document.

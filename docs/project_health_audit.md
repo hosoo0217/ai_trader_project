@@ -128,7 +128,7 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 - [ ] More independent historical periods are still needed.
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [ ] Drawdown thresholds must be configured and reviewed in research before progression.
-- [ ] Losing-trade traces and conditional-cooldown robustness still need review.
+- [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
 - [ ] MVP code-freeze criteria still require final review.
 - [ ] Live trading is not allowed.
 - [ ] Live broker connection is not allowed.
@@ -136,11 +136,10 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 
 ## 8. Recommended Next Cleanup Steps
 
-1. Review losing-trade traces and conditional-cooldown robustness in diagnostic-only mode.
-2. Validate more independent historical periods.
-3. Run regime-separated and out-of-sample validation.
-4. Define and review drawdown acceptance criteria in research only.
-5. Review the MVP Code Freeze criteria.
+1. Validate more independent historical periods.
+2. Run regime-separated and out-of-sample validation.
+3. Define and review drawdown acceptance criteria in research only.
+4. Review the MVP Code Freeze criteria.
 
 These steps should remain documentation, validation, and safety focused. They should not add new trading features.
 

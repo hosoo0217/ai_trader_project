@@ -61,8 +61,6 @@ Still needed before any future live-trading discussion:
 - Validate more independent historical periods
 - Run out-of-sample and regime-separated validation
 - Define and review research drawdown acceptance criteria
-- Review losing-trade traces
-- Review conditional-cooldown robustness
 - Complete the MVP code-freeze final review
 
 See [docs/mvp_completion_checklist.md](docs/mvp_completion_checklist.md) for the detailed MVP checklist.
@@ -200,11 +198,10 @@ No new major features should be added during cleanup. Live trading, broker conne
 
 ## Next Recommended Cleanup Steps
 
-1. Review losing-trade traces and conditional-cooldown robustness
-2. Validate more independent historical periods
-3. Run regime-separated and out-of-sample validation
-4. Define and review research drawdown acceptance criteria
-5. Complete the MVP code-freeze final review
+1. Validate more independent historical periods
+2. Run regime-separated and out-of-sample validation
+3. Define and review research drawdown acceptance criteria
+4. Complete the MVP code-freeze final review
 
 ## Beginner Summary
 
