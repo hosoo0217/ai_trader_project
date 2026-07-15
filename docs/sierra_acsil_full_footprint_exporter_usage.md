@@ -18,13 +18,17 @@ The source file is:
 sierra_acsil/ai_trader_full_footprint_export.cpp
 ```
 
-The exporter writes to:
+The exporter writes to the fixed, truncating output path:
 
 ```text
 C:\Users\hosoo\Desktop\ai_trader_project\private_data\sierra_chart\gc_full_footprint_acsil_export.csv
 ```
 
 The output path is under `private_data` and must not be committed.
+
+Before another export starts, preserve the fixed output outside the repository under a unique filename containing the instrument, timeframe, and declared date range; never overwrite an existing preserved file.
+
+Record the exact header, first and last timestamps, unique-bar count, total data-row count, file size, and SHA-256 hash, then verify that the preserved copy has the same hash.
 
 The AI Trader Order Flow importer now supports this ACSIL CSV format directly.
 
@@ -47,7 +51,7 @@ Analysis > Build Custom Studies DLL
 5. Select `ai_trader_full_footprint_export.cpp`.
 6. Build the custom study DLL.
 
-If the local Sierra Chart ACSIL version has slightly different member names for Volume-at-Price fields, adjust the comments marked in the C++ file before rebuilding.
+If the local Sierra Chart ACSIL version has different Volume-at-Price member names, stop and record the incompatibility. Code freeze is active, and this guide does not authorize C++ source changes.
 
 Expected ACSIL members:
 
@@ -92,7 +96,9 @@ To export:
 2. Set `Export Now` to `Yes`.
 3. Apply the settings.
 4. Check Sierra Chart's message log for the export completion message.
-5. After export, set `Export Now` back to `No` if you do not want repeated rewrites.
+5. Immediately set `Export Now` back to `No` to prevent repeated rewrites.
+6. Complete the preservation and SHA-256 verification steps in Section 2 before another export.
+7. Do not export another timeframe until the preserved copy is verified.
 
 The exporter writes a local CSV file only. It does not place trades or call external services.
 
@@ -117,7 +123,7 @@ Expected row fields:
 - `Delta`: `AskVolume - BidVolume`.
 - `NumTrades`: trade count when available, otherwise `0`.
 
-One bar should produce multiple rows when multiple price levels exist.
+One bar must produce multiple rows when multiple price levels exist.
 
 That repeated `DateTime` / `BarIndex` pattern is what makes this full footprint data instead of OHLC summary data.
 
@@ -135,30 +141,36 @@ The export is valid only if:
 - one timestamp appears on multiple rows,
 - one `BarIndex` appears on multiple rows,
 - row count is greater than candle count.
+- `DateTime` is parseable and `BarIndex` and `Price` are numeric.
+- `BidVolume`, `AskVolume`, `TotalVolume`, and `NumTrades` are numeric and non-negative.
+- `Delta` equals `AskVolume - BidVolume` on every row.
 
-If each candle has only one row, the file is still summary data and should not be used as full footprint data.
+If each candle has only one row, the file is still summary data and must not be used as full footprint data.
 
-When imported successfully, data quality should show:
+When imported successfully, data quality must show:
 
 - candle count equal to the number of unique loaded bars,
 - total levels equal to the number of price-level rows,
 - source format `ACSIL_FULL_FOOTPRINT`.
 
+A successful export or importer result does not establish an evidence classification. Any candidate for independent validation must satisfy `docs/independent_historical_dataset_intake.md`, including non-overlap, complete 1m/5m/10m Market OHLC/full-footprint pairs, metadata, gaps, matching, traceability, overwrite protection, and safety requirements.
+
 ## 8. Safety Confirmation
 
 - No live trading.
+- No Sierra live integration; loaded chart data may be read only for local offline export.
 - No broker connection.
 - No order placement.
 - No real execution.
 - No MT5 login.
 - No CME live execution.
 - No external API calls.
-- No strategy logic changed.
+- Code freeze remains active; no Python, strategy, risk, Order Flow, or exporter source changes are authorized.
 - No Order Flow rules changed.
 - No Order Flow confirmation rule implemented.
 - No `private_data` committed.
 
-This exporter only reads loaded Sierra Chart Volume-at-Price data and writes a local CSV file.
+This exporter must only read loaded Sierra Chart Volume-at-Price data and write a local CSV file.
 
 ## 9. Beginner Summary
 
@@ -166,4 +178,4 @@ The usual Sierra exports gave only one row per candle, which is not enough for r
 
 This ACSIL study exports every price level inside every loaded chart bar. That means one candle can create many rows: one row for each price level, with bid volume, ask volume, total volume, delta, and trade count.
 
-The output file is private research data. It should stay in `private_data` and should not be committed.
+The fixed output is private research data and must remain under `private_data`; preserved candidate copies must stay outside the repository, and neither may be committed.

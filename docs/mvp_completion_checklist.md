@@ -6,20 +6,20 @@ It is documentation only. It does not add trading features, change strategy logi
 
 ## 1. Current MVP Status
 
-The Research / Backtest / Paper Trading MVP is close to completion.
+Research and backtest capabilities are mature, but independent historical validation remains blocked, code freeze remains active, and paper trading is not approved.
 
 Current status:
 
 - [x] Research workflow exists.
 - [x] Backtest workflow exists.
-- [x] Paper-trading simulation workflow exists.
+- [x] Paper-trading simulation capability exists, but its use is not approved in the current phase.
 - [x] Local CSV-based Order Flow workflow exists.
 - [x] Reporting and review workflows exist.
 - [x] Human approval and implementation-readiness workflows exist.
 - [x] Final README / usage cleanup is complete and current.
 - [x] Final end-to-end CLI validation is complete and recorded.
-- [x] The current deeper historical baseline is complete; broader robustness validation remains.
-- [x] Real Sierra Chart exported CSV validation is complete.
+- [x] The canonical baseline is complete, but its 1m/5m/10m representations share the same calendar window and are not independent historical evidence.
+- [x] Real Sierra Chart CSV importer and offline validation are complete, but they do not establish independent-period acceptance.
 
 Safety status:
 
@@ -27,17 +27,17 @@ Safety status:
 - Broker connection is NOT implemented.
 - Real order execution is NOT implemented.
 - Real trade signals are NOT implemented.
-- The project is still research / backtest / paper-trading only.
+- The current phase is limited to research, backtest, documentation, dataset intake, and offline diagnostics; paper trading is not approved.
 
 ## 2. Completed Areas
 
-- [x] Core decision flow: research and paper-trading flow can combine market context, safety checks, risk checks, decision output, and simulated paper broker behavior.
+- [x] Core decision flow capability: offline research components can combine market context, safety checks, risk checks, decision output, and simulated broker behavior; paper-trading use is not approved.
 - [x] Market analyzer: market analysis modules exist for forming research context.
 - [x] Multi-timeframe context: multi-timeframe analysis support exists for research and decision context.
 - [x] Decision engine: decision logic exists and is covered by tests.
 - [x] Capital protection: capital protection logic exists and is integrated into safety checks.
 - [x] Risk engine: risk validation exists and is tested.
-- [x] Paper broker: simulated broker behavior exists for paper trading only.
+- [x] Paper broker capability: offline simulated broker behavior exists for testing; paper-trading use is not approved.
 - [x] Safety gate: session, news, volatility, spread, and capital protection checks can block unsafe simulated trades.
 - [x] SMC modules: market structure, BOS/CHOCH, liquidity sweep, and SMC context modules exist.
 - [x] CRT modules: CRT engine and documentation exist.
@@ -50,7 +50,7 @@ Safety status:
 - [x] Order Flow context: Order Flow context combiner exists and is tested.
 - [x] Order Flow replay: local CSV replay exists and is tested.
 - [x] Order Flow replay report: replay report generation exists and is tested.
-- [x] Order Flow AI coach review: educational replay coach review exists.
+- [x] Order Flow AI coach review: educational replay coach review exists; this does not establish machine-learning training or autonomous learning.
 - [x] Session filter: session protection exists and is tested.
 - [x] News filter: news protection exists and is tested.
 - [x] Spread filter: spread protection exists and is tested.
@@ -59,7 +59,7 @@ Safety status:
 - [x] Session report export: local report export exists.
 - [x] Session history: session history storage and summary exist.
 - [x] Session trend: session trend analysis exists.
-- [x] Session trend AI coach: educational trend coach review exists.
+- [x] Session trend AI coach: educational trend coach review exists; this does not establish machine-learning training or autonomous learning.
 - [x] Strategy improvement suggestions: research suggestions exist but do not change strategy rules automatically.
 - [x] Human approval workflow: approval requests and decisions exist for future human-reviewed work.
 - [x] Approval decision log: local approval decision logging exists.
@@ -73,7 +73,7 @@ Safety status:
 
 ## 3. Partially Complete Areas
 
-- [ ] More independent historical periods are still needed.
+- [ ] No genuinely independent, non-overlapping historical period has been accepted under `docs/independent_historical_dataset_intake.md`; independent validation remains blocked.
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
@@ -82,8 +82,9 @@ Safety status:
 
 ## 4. Not Started / Not Allowed Yet
 
-These areas are not part of the current MVP and should not be added during cleanup:
+These areas are not authorized in the current phase and must not be added while the code freeze remains active:
 
+- [ ] Paper-trading preparation or simulation use.
 - [ ] Live broker connection.
 - [ ] Live trade execution.
 - [ ] Sierra Chart live connection.
@@ -92,11 +93,11 @@ These areas are not part of the current MVP and should not be added during clean
 - [ ] Automatic strategy rule changes.
 - [ ] Real-money trading.
 
-Clear boundary: none of these should be started until the research, backtest, paper-trading, reporting, safety, and human-review workflows have been validated and reviewed separately.
+Clear boundary: none of these are authorized in the current phase; validated workflows or human review alone do not lift the code freeze or authorize paper, broker, external-API, or live progression, which require separate documented approvals after all prerequisites pass.
 
 ## 5. Testing Checklist
 
-Before any future live-trading discussion, the following must be checked:
+For current offline validation and documentation review, the following evidence must be checked; completion does not authorize paper or live progression:
 
 - [x] Full pytest suite passes (881 passed).
 - [x] `main.py` demo command runs.
@@ -107,6 +108,7 @@ Before any future live-trading discussion, the following must be checked:
 - [x] Session trend command runs.
 - [x] Approval, proposal, and implementation readiness workflows run.
 - [x] Selected generated report snapshots were reviewed for correctness and accidental sensitive data before untracking; every future generated report still requires review before commit or sharing.
+- [ ] Full independent-period acceptance is completed under `docs/independent_historical_dataset_intake.md`; until then independent validation remains blocked.
 - [x] Codebase review confirms live trading is not implemented.
 - [x] Codebase review confirms no real broker connection is implemented.
 - [x] Codebase review confirms no real order execution is implemented.
@@ -137,29 +139,29 @@ Order Flow CSV and replay commands are documented and validated with local sampl
 - [x] Spread filter exists.
 - [x] Volatility filter exists.
 - [x] Manual pause / emergency-stop safety policy documentation is complete; runtime controls remain future work.
-- [x] Human approval is required for strategy changes.
-- [ ] Backtest validation is required before expanded paper-trading confidence.
-- [ ] Paper trading validation is required before live consideration.
+- [x] Human approval is required for any future strategy change, but approval alone does not lift the active code freeze or authorize implementation.
+- [ ] Full independent-period acceptance under `docs/independent_historical_dataset_intake.md` is required before any paper-trading consideration; limited diagnostic intake is insufficient.
+- [ ] Paper trading is not approved in the current phase, and live consideration remains outside this checklist's authorized scope.
 
 Safety rule: capital protection must remain more important than profit, speed, automation, or feature expansion.
 
 ## 7. Recommended Next Cleanup Steps
 
-1. Validate more independent historical periods.
+1. Intake and validate a genuinely independent, non-overlapping historical period under `docs/independent_historical_dataset_intake.md`.
 2. Run regime-separated and out-of-sample validation.
 3. Review profile-specific numerical drawdown thresholds after independent non-overlapping validation evidence is available.
 4. Keep the reviewed code freeze active until the remaining validation blockers are resolved.
 
-These steps should stay focused on documentation, validation, and safety. They should not add live trading, real broker connections, external APIs, real order execution, or automatic strategy changes.
+These steps must remain limited to documentation, dataset intake, offline validation, and safety review; they must not add or authorize paper-trading use, live trading, broker connections, external APIs, real execution, numerical threshold changes, or strategy, risk, Python, Order Flow, or exporter source changes while the code freeze remains active.
 
 ## 8. Beginner Summary
 
-This project is already a strong research and practice-trading MVP. It can analyze market context, run backtests, simulate paper trades, inspect Order Flow CSV data, replay Order Flow data, create session reports, review session trends, and generate human-reviewed improvement plans.
+This project is a strong offline research and backtest MVP. It can analyze market context, run backtests, exercise simulated broker components for testing, inspect and replay local Order Flow CSV data, create reports, review trends, and generate human-reviewed plans; these capabilities do not approve paper-trading use.
 
-What is already done: the core research, backtest, paper-trading, safety, Order Flow, SMC, CRT, reporting, coaching, approval, proposal, implementation-plan, and readiness pieces are in place.
+What is already done: core offline research, backtest, safety, Order Flow, SMC, CRT, reporting, educational coaching, and human-review planning capabilities are in place; paper-trading use and machine-learning training are not established or approved.
 
-What is still missing: the project still needs more independent historical periods, out-of-sample and regime-separated validation, and profile-specific numerical drawdown-threshold review after independent evidence is available. The MVP code-freeze final review is complete, and the freeze remains active while these blockers are open.
+What is still missing: no genuinely independent, non-overlapping historical period has been accepted; full independent-period acceptance, out-of-sample and regime-separated validation, and any later profile-specific numerical drawdown-threshold review remain pending. The MVP code-freeze final review is complete, and the freeze remains active while these blockers are open.
 
-Why we are not going live yet: live trading is much riskier than research or paper trading. This project does not connect to a broker, does not place real orders, does not use live Sierra Chart or CME data, and does not create real trade signals. That is intentional.
+Why paper and live progression are not approved: independent validation remains blocked and the code freeze remains active. The project does not connect to a broker, place real orders, use Sierra or CME live integration, or create real execution signals; that boundary is intentional.
 
-Why testing and cleanup are next: before any future live-trading design is even considered, the existing MVP must be easy to run, easy to understand, fully tested, validated with realistic data, and reviewed for safety. The next phase is cleanup and proof, not live execution.
+Why testing and cleanup remain next: the current authorized work is documentation, independent-dataset intake, offline validation, reproducible testing, and safety review. This checklist does not schedule or approve paper-trading, broker, external-API, or live-trading design.

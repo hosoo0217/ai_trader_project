@@ -47,6 +47,9 @@ One iteration is not enough to judge performance, win rate, drawdown, profit fac
 
 Also, the current real Sierra export is `BAR_SUMMARY` data. `BAR_SUMMARY` creates one synthetic close-price level per bar, so it is weaker than full footprint price-level data.
 
+Current local inventory contains no genuinely independent, non-overlapping historical period. The canonical baseline and its 1m, 5m, and 10m representations cover the same calendar window and must not be treated as independent validation evidence.
+Independent historical validation remains blocked, and code freeze remains active.
+
 The `-10.00` PnL from one smoke test does not prove the strategy is good or bad.
 
 For deeper research-only validation, the CLI can run more rolling backtest iterations with:
@@ -114,6 +117,7 @@ The goal is not to force good results. The goal is to understand whether the sys
 ### Stage 2: Multi-Session BAR_SUMMARY Backtest
 
 - Use multiple sessions from Sierra Chart `BAR_SUMMARY` exports.
+- Treat any BAR_SUMMARY subset, re-export, resample, or alternate-timeframe representation of the canonical baseline window as non-independent diagnostic evidence only; it cannot close the independent historical validation blocker.
 - Run bullish, bearish, and range/choppy scenarios.
 - Use `--backtest-max-iterations` to run more rolling research-only iterations when enough candles exist.
 - Use `--backtest-market-csv` when the Sierra export should provide the OHLC market candles.
@@ -126,13 +130,14 @@ The goal is not to force good results. The goal is to understand whether the sys
 ### Stage 3: Full Price-Level Footprint CSV Backtest
 
 - Export true price-level footprint CSV data when available.
+- Before assigning any evidence classification, follow `docs/independent_historical_dataset_intake.md` for non-overlap, complete Market OHLC/full-footprint pairs, exact schema, metadata, matching, gap, overwrite-protection, traceability, and safety requirements.
 - Confirm each candle has real bid/ask volume across price levels.
 - Compare output against `BAR_SUMMARY` behavior.
 - Prefer full footprint data for serious Order Flow validation.
 
 ### Stage 4: Paper Trading Simulation Preparation
 
-- Prepare paper-trading simulation only after backtest evidence improves.
+- Paper-trading simulation preparation is not approved in the current phase; improved backtest evidence alone is insufficient to authorize it.
 - Do not connect a broker.
 - Do not use MT5 login.
 - Do not enable real execution.
@@ -146,7 +151,7 @@ Track these metrics for every deeper validation run:
 - Win rate.
 - Total PnL.
 - Profit factor.
-- Max drawdown.
+- Max drawdown as a descriptive metric only; no numerical drawdown threshold is approved.
 - Average win.
 - Average loss.
 - Blocked trades.
@@ -174,17 +179,18 @@ All validation should remain local, offline, and research/backtest only.
 
 ## 8. Exit Criteria Before Paper Trading
 
-Paper trading should not start until:
+Paper trading is not approved in the current phase. Future consideration must remain blocked unless every item below is satisfied and a separate documented approval explicitly lifts the applicable freeze:
 
 - Backtest has enough iterations.
 - Backtest quality grade is no longer `INSUFFICIENT_DATA`.
+- Full independent-period acceptance is completed under `docs/independent_historical_dataset_intake.md`; limited diagnostic intake is insufficient for paper progression.
 - Risk behavior is reviewed.
 - Capital protection behavior is reviewed.
 - Safety gate behavior is reviewed.
 - Data quality results are documented.
 - Performance results are documented.
 - Weaknesses and failure cases are documented.
-- Human review approves moving to paper-trading preparation.
+- Human review records whether every prerequisite is satisfied; human review alone does not authorize paper-trading preparation.
 
 Passing a single smoke test is not enough.
 
@@ -194,6 +200,6 @@ The system can now read real Sierra Chart data, but it still needs many more tes
 
 So far, the project has proven that real `BAR_SUMMARY` CSV data can enter the system and run through demo and backtest smoke tests without crashing.
 
-The next job is deeper backtesting: more sessions, more scenarios, more iterations, better reports, and careful review of risk behavior.
+The next job is deeper offline validation: more sessions, scenarios, iterations, reports, and risk review, plus intake of a genuinely independent non-overlapping dataset under `docs/independent_historical_dataset_intake.md`.
 
 Live trading is not part of this phase.

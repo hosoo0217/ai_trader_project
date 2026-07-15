@@ -1,6 +1,6 @@
 # Sierra ACSIL Full Footprint Export Requirements
 
-This document defines the requirements for a future Sierra Chart ACSIL full footprint exporter for `ai_trader_project`.
+This document defines the requirements for the current data-only Sierra Chart ACSIL full footprint exporter for `ai_trader_project`.
 
 It is documentation only. It does not implement Python strategy logic, change Order Flow rules, implement the Order Flow confirmation rule, connect a broker, place orders, or enable live trading.
 
@@ -43,18 +43,18 @@ The current manual exports summarize each candle into one row.
 
 Full footprint data requires multiple rows per candle:
 
-- one chart bar should have multiple rows,
-- each row should represent one price level inside the bar,
-- each row should include Bid Volume,
-- each row should include Ask Volume,
-- each row should include Total Volume,
-- each row should include Delta.
+- one chart bar must have multiple rows,
+- each row must represent one price level inside the bar,
+- each row must include Bid Volume,
+- each row must include Ask Volume,
+- each row must include Total Volume,
+- each row must include Delta.
 
 Without this structure, Order Flow can load a safe early context, but it cannot evaluate true price-level footprint behavior.
 
 ## 4. ACSIL Direction
 
-The future exporter should use a Sierra Chart ACSIL custom study.
+The current data-only exporter is implemented as a Sierra Chart ACSIL custom study.
 
 Official Sierra Chart ACSIL direction:
 
@@ -63,7 +63,7 @@ Official Sierra Chart ACSIL direction:
 - `GetSizeAtBarIndex`
 - `GetVAPElementAtIndex`
 
-The custom study should read Volume At Price data from loaded chart bars and write a local CSV file.
+The custom study must read Volume At Price data from loaded chart bars and write a local CSV file.
 
 ## 5. Required CSV Output Format
 
@@ -88,10 +88,10 @@ Required columns:
 
 ## 6. Required Export Behavior
 
-The future ACSIL exporter should:
+The current data-only ACSIL exporter must:
 
 - export loaded chart bars only,
-- write to `private_data/sierra_chart/gc_full_footprint_acsil_export.csv`,
+- write to the fixed, truncating output path `private_data/sierra_chart/gc_full_footprint_acsil_export.csv`, which must be preserved under a unique filename before another export starts,
 - write one row per bar per price level,
 - include a header row,
 - preserve repeated `DateTime` values when a bar has multiple price levels,
@@ -102,6 +102,8 @@ The future ACSIL exporter should:
 The output file must stay under `private_data`.
 
 Do not commit `private_data` files.
+
+Before another export starts, record the exact header, first and last timestamps, unique-bar count, total data-row count, file size, and SHA-256 hash, then verify that the preserved copy has the same hash.
 
 ## 7. Validation Requirements
 
@@ -115,10 +117,15 @@ The exported file is valid only if:
 - `Delta` column exists,
 - `BarIndex` repeats across multiple price levels,
 - row count is greater than candle count.
+- `DateTime` is parseable and `BarIndex` and `Price` are numeric.
+- `BidVolume`, `AskVolume`, `TotalVolume`, and `NumTrades` are numeric and non-negative.
+- `Delta` equals `AskVolume - BidVolume` on every row.
 
-If each candle has only one row, the file is still summary data and should not be treated as full footprint data.
+If each candle has only one row, the file is still summary data and must not be treated as full footprint data.
 
-For a valid ACSIL full footprint import, Order Flow data quality should pass, candle count should equal the number of unique bars, and total levels should equal the number of price-level rows.
+For a valid ACSIL full footprint import, Order Flow data quality must pass, candle count must equal the number of unique bars, and total levels must equal the number of price-level rows.
+
+A passing importer or Order Flow data-quality result does not establish an evidence classification. Any candidate for independent validation must satisfy `docs/independent_historical_dataset_intake.md`, including non-overlap, complete timeframe-matched Market OHLC/full-footprint pairs, metadata, gaps, matching, traceability, and overwrite protection.
 
 ## 8. Safety Requirements
 
@@ -129,7 +136,7 @@ Safety requirements:
 - No live trading.
 - No broker connection.
 - No MT5 login.
-- No Sierra live connection beyond reading loaded chart data.
+- No Sierra live integration; loaded chart data may be read only for local offline export.
 - No CME live execution.
 - No real orders.
 - No external APIs.
@@ -137,23 +144,23 @@ Safety requirements:
 - No trading logic.
 - No order placement.
 
-The exporter should only read loaded chart data and write a local CSV file.
+The exporter must only read loaded chart data and write a local CSV file.
 
-## 9. Next Implementation Step
+## 9. Current Implementation and Code Freeze
 
-The next implementation step, later, is to create an ACSIL C++ custom study exporter file, likely:
+The current data-only ACSIL C++ custom study exporter is:
 
 ```text
 sierra_acsil/ai_trader_full_footprint_export.cpp
 ```
 
-That future implementation should follow this document and remain data-export only.
+The current implementation must remain data-export only. Code freeze is active, and this contract does not authorize changes to exporter source code.
 
-It should not change Python strategy logic.
+It must not change Python strategy logic.
 
-It should not change Order Flow rules.
+It must not change Order Flow rules.
 
-It should not implement the Order Flow confirmation rule.
+It must not implement the Order Flow confirmation rule.
 
 ## 10. Beginner Summary
 
@@ -161,6 +168,6 @@ The Sierra exports tested so far only gave one row per candle. That is not enoug
 
 A real footprint export needs many rows per candle: one row for each price level traded inside that candle.
 
-The future ACSIL exporter should read Sierra Chart Volume At Price data and save it to a private CSV with price, bid volume, ask volume, total volume, delta, and trade count.
+The current data-only ACSIL exporter must read Sierra Chart Volume At Price data and save it to a private CSV with price, bid volume, ask volume, total volume, delta, and trade count.
 
 This is only for better research data. It is not trading logic and must not place orders or connect to a broker.

@@ -13,13 +13,13 @@ It is documentation only. It does not add features, change strategy logic, chang
 ## 2. Current Status
 
 - Project is in FINAL CLEANUP MODE.
-- Research / backtest / paper-trading MVP is close to complete.
+- Research and backtest capabilities exist, but independent historical validation remains blocked and paper trading is not approved.
 - Live trading is not implemented.
 - Broker execution is not implemented.
 - Real order execution is not implemented.
-- The next phase is validation.
+- The next authorized work is documentation, independent-dataset intake, and offline diagnostic validation; code freeze remains active.
 
-The project should stay focused on cleanup, testing, documentation, and validation before any future feature work.
+The project must stay focused on cleanup, testing, documentation, dataset intake, and offline diagnostic validation; no feature work is authorized while code freeze remains active.
 
 ## 3. Completed Cleanup Documents
 
@@ -39,8 +39,9 @@ The project should stay focused on cleanup, testing, documentation, and validati
 - [Capital Protection News Policy](capital_protection_news_policy.md): Defines manual-only v1 news-event sourcing, UTC normalization, source/update/audit rules, impact-level blocking, event windows, invalid-time handling, and new-entry-only behavior.
 - [Capital Protection Manual Pause and Emergency Stop Policy](capital_protection_manual_pause_emergency_stop_policy.md): Defines control authority, priority, platform-wide default scope, persistence, audit trail requirements, and new-entry-only blocking behavior.
 - [End-to-End Demo Validation](end_to_end_demo_validation.md): Lists the manual CLI commands for safely validating existing demo/research flows.
-- [Backtest Validation Checklist](backtest_validation_checklist.md): Defines what must be checked before trusting backtest results for paper validation.
+- [Backtest Validation Checklist](backtest_validation_checklist.md): Defines offline backtest review checks; it does not approve paper progression.
 - [Real Sierra Chart CSV Test Guide](real_sierra_chart_csv_test_guide.md): Explains how to test real exported Sierra Chart CSV files without live connections.
+- [Independent Historical Dataset Intake Contract](independent_historical_dataset_intake.md): Defines non-overlap, complete 1m/5m/10m Market OHLC/full-footprint pairs, metadata, matching, overwrite protection, evidence classification, and safety requirements.
 - [ACSIL Matching Day2 Multi-Timeframe Validation Result](acsil_matching_day2_multitimeframe_validation_result.md): Records day2 matching OHLC plus ACSIL full footprint validation across 1m, 5m, and 10m.
 - [ACSIL Day3 1-Day 1m Validation Result](acsil_day3_1day_1m_validation_result.md): Records one-session (1-day chart load) day3 1m ACSIL validation after A/B semantics fixes, including neutral-blocking and trade-side label checks.
 - [ACSIL Day3 1-Day 10m Validation Result](acsil_day3_1day_10m_validation_result.md): Records one-session (1-day chart load) day3 matching OHLC plus ACSIL full footprint validation for 10m, including A/B diagnostic safety results.
@@ -64,28 +65,30 @@ Follow this safest order:
 3. Order Flow CSV sample validation.
 4. Real Sierra Chart exported CSV validation.
 5. Backtest validation.
-6. Paper trading preparation.
-7. Future broker integration planning only.
+6. Independent historical dataset intake under `docs/independent_historical_dataset_intake.md`.
+7. Full independent-period validation only after full acceptance; limited diagnostic intake does not close the blocker.
 
-Do not skip ahead to live trading. Each step should be reviewed before moving to the next.
+Do not skip ahead. Paper trading, broker integration, and live trading remain unauthorized; each step must pass before moving to the next, and any failed intake stops the sequence.
 
 ## 5. Not Allowed Yet
 
 These are not allowed in the current phase:
 
 - No live trading.
+- No paper-trading preparation or simulation.
 - No broker connection.
 - No MT5 login integration yet.
+- No external API integration or calls.
 - No Sierra Chart live connection.
 - No CME live data connection.
 - No real order execution.
-- No automatic strategy rule changes.
+- No strategy, risk, numerical drawdown-threshold, Python, Order Flow, or exporter source changes while code freeze is active.
 - No real-money trading.
 - No bypassing safety gates.
 
 ## 6. Human Approval Rule
 
-Future strategy changes require a full human-reviewed workflow:
+Future strategy changes remain unauthorized unless a separate documented decision first lifts the applicable code freeze and then completes this full human-reviewed workflow:
 
 - Proposal.
 - Review.
@@ -94,15 +97,15 @@ Future strategy changes require a full human-reviewed workflow:
 - Readiness check.
 - Human approval.
 
-A suggestion, proposal, or readiness result does not automatically change strategy rules. Human review stays in control.
+A suggestion, proposal, readiness result, or human approval alone does not change strategy rules, lift a freeze, or authorize paper, broker, or live progression; all recorded prerequisites and separate approvals must pass.
 
 ## 7. Beginner Summary
 
 The project is now being cleaned and validated before any real trading work.
 
-Think of this phase as proving the current system works safely. First run tests, then run demo validation, then check sample CSVs, then test real exported CSVs, then validate backtests, and only after that prepare paper trading.
+Think of this phase as offline evidence review: run tests, validate demos and CSVs, review backtests, then intake a genuinely independent non-overlapping dataset under the intake contract. Paper trading remains blocked and requires a separate documented approval after all prerequisites pass.
 
-Live trading and broker connections are later separate phases, not part of this cleanup stage.
+Live trading, broker connections, and external APIs remain unauthorized; this index does not schedule or approve those phases.
 
 - [Day4 SC delayed orderflow validation summary](day4_sc_delayed_orderflow_validation_summary.md)
 
