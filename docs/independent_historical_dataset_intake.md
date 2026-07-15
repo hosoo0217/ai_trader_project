@@ -51,9 +51,26 @@ Each Market OHLC file must be a Sierra Chart CSV export with a header and the fo
 The first `Open`, `High`, `Low`, and `Last` price group is authoritative when additional or duplicate study-generated OHLC columns are present. `Last` is the authoritative close value; a column named `Close` is not required.
 `Date` and `Time` must combine into parseable authoritative timestamps. Timestamps must be chronological and must contain no duplicate authoritative market timestamps.
 Validation evidence must record the first authoritative timestamp, last authoritative timestamp, and total market data-row count.
-All expected-interval gaps must be detected and reported. A gap may be accepted only when supported by a documented session break, weekend, exchange holiday, or chart-loading boundary.
+All expected-interval gaps must be detected and reported. A gap may be accepted only when supported by a documented session break, weekend, exchange holiday, chart-loading boundary, or a verified no-trade interval that satisfies every requirement below.
 Any unexplained gap blocks acceptance until it is resolved or the declared usable range is reduced and documented.
 OHLC values must be numeric and internally valid, and `Volume` must be numeric and non-negative. Files must use UTF-8 or ASCII encoding; headerless files are rejected.
+
+## Verified No-Trade Intervals
+An expected timestamp with no bar may be accepted as a verified no-trade interval only when all of the following evidence is recorded:
+- The exact missing interval boundaries and expected timestamps are listed.
+- The chart used `Gap Fill: None`, `Include Columns With No Data: No`, the documented timezone and session configuration, and the declared timeframe.
+- The authoritative Market OHLC export contains no row for every expected timestamp in the interval.
+- The matching ACSIL full-footprint export contains no `DateTime` for every expected timestamp in the interval.
+- For a missing 5m or 10m interval, every constituent expected 1m Market OHLC timestamp and every constituent expected 1m footprint timestamp are also absent.
+- For a missing 1m interval, the surrounding retained 1m bars remain chronological and matched, and the absence is reproduced after a documented Sierra Chart reload or authoritative historical-data re-download with no unresolved download or loading error.
+- The source-level verification method, review time, relevant Sierra Chart message-log result, and reviewer are recorded.
+- No empty, previous-close, zero-volume, synthetic, interpolated, resampled, corrected, or manually inserted bar is used to fill the interval.
+
+Sierra Chart documents that `Include Columns With No Data` creates bars for periods of no trading by setting OHLC to the previous close, while `Gap Fill: None` avoids filling price gaps and is required with Numbers Bars to prevent false price levels. This contract therefore preserves a source-verified absence instead of manufacturing a bar:
+- https://www.sierrachart.com/index.php?page=doc/ChartSettings.html#IncludeColumnsWithNoData
+- https://www.sierrachart.com/index.php?page=doc/ChartSettings.html#GapFill
+
+Absence from Market OHLC and footprint exports alone is not sufficient because both exports may share the same missing source records. Any interval that lacks the required source-level reproduction or has a download, loading, timezone, session, or configuration ambiguity remains unexplained and blocks acceptance.
 
 ## ACSIL Full-Footprint Requirements
 Each full-footprint file must be produced by the current data-only ACSIL exporter `sierra_acsil/ai_trader_full_footprint_export.cpp`.
@@ -103,7 +120,7 @@ A written metadata record must accompany every submitted timeframe pair and must
 - Declared usable first and last matched timestamp
 - Market row count, footprint data-row count, unique market-bar count, and unique footprint-bar count
 - Matched-bar count, missing-bar count, orphan-bar count, duplicate authoritative timestamp count, and detected-gap summary
-- Every accepted gap and its documented explanation
+- Every accepted gap, its documented explanation, and all required verification evidence for each accepted no-trade interval
 - Requested classification: full independent-period acceptance or limited diagnostic intake
 - Reviewer, review date, final classification, unresolved issues, and rejection reasons when applicable
 Missing, ambiguous, or internally inconsistent metadata blocks acceptance until corrected.
@@ -129,7 +146,7 @@ Validation must proceed in this order:
 1. Preserve every raw source and fixed exporter output before another export, and record filenames, sizes, and SHA-256 hashes.
 2. Verify all required metadata, instrument identity, contract, timeframe, timezone, session configuration, and declared usable range.
 3. Parse authoritative timestamps and test the complete declared usable range against the conservative non-overlap boundary.
-4. Validate Market OHLC schema, order, numeric integrity, timestamps, row counts, duplicates, and gaps.
+4. Validate Market OHLC schema, order, numeric integrity, timestamps, row counts, duplicates, and gaps; apply every source-level verification requirement before accepting a no-trade interval.
 5. Validate ACSIL full-footprint schema, price-level structure, numeric integrity, delta equation, timestamps, and counts.
 6. Match each timeframe pair, report missing, orphan, leading, trailing, and incomplete final bars, and verify raw-source traceability.
 7. Apply overwrite-protection and safety checks, then assign exactly one evidence classification and record the decision.
@@ -139,7 +156,7 @@ Any failed step stops the sequence; later checks must not override or conceal an
 Intake and validation must stop immediately when any of the following conditions is found:
 - Any authoritative timestamp overlaps the conservative baseline boundary; independent-period review stops and the dataset is classified as non-independent.
 - A required timeframe pair is incomplete, or required schema, metadata, hash, numeric integrity, or matching evidence is missing or invalid.
-- An unexplained gap, missing bar, orphan bar, incomplete final bar, timezone mismatch, session mismatch, contract mismatch, or timeframe mismatch remains unresolved.
+- An unexplained or unverified gap, missing bar, orphan bar, incomplete final bar, timezone mismatch, session mismatch, contract mismatch, or timeframe mismatch remains unresolved.
 - A preserved output would be overwritten, a filename collision occurs, or required overwrite-protection evidence cannot be verified.
 - Sensitive or private information, trading signals, strategy decisions, order instructions, or execution logic is present in the intake artifacts.
 - Raw-source traceability is lost, or timestamps or rows were silently corrected, deleted, or otherwise altered to obtain a pass.
