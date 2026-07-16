@@ -45,10 +45,10 @@ This is expected and correct.
 
 One iteration is not enough to judge performance, win rate, drawdown, profit factor, expectancy, or robustness.
 
-Also, the current real Sierra export is `BAR_SUMMARY` data. `BAR_SUMMARY` creates one synthetic close-price level per bar, so it is weaker than full footprint price-level data.
+Earlier real Sierra testing used `BAR_SUMMARY` data, which creates one synthetic close-price level per bar. Complete 1m, 5m, and 10m Market OHLC/full-footprint pairs are now preserved for the accepted independent candidate; `BAR_SUMMARY` remains diagnostic-only evidence.
 
-Current local inventory contains no genuinely independent, non-overlapping historical period. The canonical baseline and its 1m, 5m, and 10m representations cover the same calendar window and must not be treated as independent validation evidence.
-Independent historical validation remains blocked, and code freeze remains active.
+The canonical baseline and its 1m, 5m, and 10m representations still cover the same calendar window and must not be treated as independent evidence. A separate non-overlapping `GC-202608-COMEX` candidate received Full Independent-Period Acceptance on `2026-07-16`.
+The independent-dataset intake classification blocker is closed for the accepted candidate; independent-period performance, out-of-sample, regime-separated, and robustness validation remain pending, and code freeze remains active.
 
 The `-10.00` PnL from one smoke test does not prove the strategy is good or bad.
 
@@ -183,7 +183,7 @@ Paper trading is not approved in the current phase. Future consideration must re
 
 - Backtest has enough iterations.
 - Backtest quality grade is no longer `INSUFFICIENT_DATA`.
-- Full independent-period acceptance is completed under `docs/independent_historical_dataset_intake.md`; limited diagnostic intake is insufficient for paper progression.
+- Full Independent-Period Acceptance was completed for `GC-202608-COMEX` on `2026-07-16`; this prerequisite alone is insufficient for paper progression.
 - Risk behavior is reviewed.
 - Capital protection behavior is reviewed.
 - Safety gate behavior is reviewed.

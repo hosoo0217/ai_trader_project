@@ -13,13 +13,13 @@ It is documentation only. It does not add features, change strategy logic, chang
 ## 2. Current Status
 
 - Project is in FINAL CLEANUP MODE.
-- Research and backtest capabilities exist, but independent historical validation remains blocked and paper trading is not approved.
+- Research and backtest capabilities exist, and `GC-202608-COMEX` has Full Independent-Period Acceptance; independent-period performance validation remains pending and paper trading is not approved.
 - Live trading is not implemented.
 - Broker execution is not implemented.
 - Real order execution is not implemented.
-- The next authorized work is documentation, independent-dataset intake, and offline diagnostic validation; code freeze remains active.
+- The next authorized work is documentation, independent-period offline performance validation, reproducible testing, and safety review; code freeze remains active.
 
-The project must stay focused on cleanup, testing, documentation, dataset intake, and offline diagnostic validation; no feature work is authorized while code freeze remains active.
+The project must stay focused on cleanup, testing, documentation, independent-period offline validation, and safety review; no feature work is authorized while code freeze remains active.
 
 ## 3. Completed Cleanup Documents
 

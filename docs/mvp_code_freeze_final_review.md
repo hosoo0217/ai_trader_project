@@ -41,7 +41,7 @@ The following items remain incomplete:
 - more independent historical periods are required
 - out-of-sample validation is required
 - regime-separated validation is required
-- no genuinely independent, non-overlapping local historical period is currently available
+- one genuinely independent, non-overlapping historical period has been accepted, but independent-period performance evidence is not yet complete and additional independent periods are still required
 - profile-specific numerical drawdown thresholds remain unapproved
 - explicit human approval is still required before any numerical threshold configuration
 - paper-trading validation remains a later separate validation phase
@@ -54,7 +54,7 @@ These blockers must not be converted into completed status without new evidence.
 - Research acceptance criteria: **DEFINED AND REVIEWED**
 - Numerical drawdown threshold: **NOT APPROVED**
 - Universal cross-profile threshold: **NOT ALLOWED**
-- Independent validation evidence: **BLOCKED BY MISSING NON-OVERLAPPING DATA**
+- Independent validation evidence: **DATASET ACCEPTED; PERFORMANCE VALIDATION PENDING**
 - Current quality behavior: **FAIL CLOSED**
 
 The corrected 1m, 5m, and 10m Apex results are diagnostic evidence only. The strongest 5m result must not be used alone to select a threshold.

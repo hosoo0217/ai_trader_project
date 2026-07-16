@@ -245,7 +245,7 @@ Stop validation if:
 - The command appears to require credentials.
 - The command appears to place a real order.
 
-Understanding the CSV format does not authorize paper validation. Paper progression remains blocked without full independent-period acceptance under `docs/independent_historical_dataset_intake.md` and a separate documented approval.
+Understanding the CSV format or receiving Full Independent-Period Acceptance does not authorize paper validation. Paper progression remains blocked pending independent-period performance, out-of-sample, regime-separated, robustness, risk, and safety review plus a separate documented approval.
 
 ## 12. Beginner Summary
 

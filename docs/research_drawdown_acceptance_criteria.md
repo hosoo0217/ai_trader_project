@@ -77,7 +77,7 @@ Current matched 200-iteration Apex results are:
 
 These results come from the current local historical period and its subsets.
 
-They are useful diagnostic evidence but are not sufficient to approve a numerical threshold because no genuinely independent, non-overlapping local historical period is currently available.
+They remain useful diagnostic evidence but are not sufficient to approve a numerical threshold because the accepted independent period has not yet produced completed and reviewed performance, out-of-sample, regime-separated, and robustness evidence.
 
 The 5m result must not be used alone to tune a threshold around the best-performing timeframe.
 
@@ -85,7 +85,7 @@ The 5m result must not be used alone to tune a threshold around the best-perform
 
 - Numerical research drawdown threshold: **NOT APPROVED**
 - Universal cross-profile threshold: **NOT ALLOWED**
-- Independent validation evidence: **BLOCKED BY MISSING NON-OVERLAPPING DATA**
+- Independent validation evidence: **DATASET ACCEPTED; PERFORMANCE VALIDATION PENDING**
 - Existing quality behavior: **FAIL CLOSED**
 - Strategy or risk implementation approval: **NONE**
 - Paper or live deployment approval: **NONE**

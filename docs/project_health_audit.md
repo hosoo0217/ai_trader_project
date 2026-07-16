@@ -10,12 +10,12 @@ It does not add trading features, change strategy logic, change risk logic, chan
 
 Current health summary:
 
-- [x] Research and backtest capabilities are mature, but independent historical validation remains blocked, the code freeze remains active, and paper trading is not approved.
+- [x] Research and backtest capabilities are mature, and one candidate has Full Independent-Period Acceptance; independent-period performance validation remains pending, the code freeze remains active, and paper trading is not approved.
 - [x] The project structure is modular and readable.
 - [x] Safety rules are documented across README, docs, and CLI output docs.
 - [x] Test coverage is broad.
 - [x] Human approval and implementation readiness workflows exist.
-- [ ] Full independent-period acceptance and deeper offline validation remain incomplete; this audit does not authorize or schedule paper-trading or live-trading design.
+- [x] Full Independent-Period Acceptance was completed for `GC-202608-COMEX` on `2026-07-16`; deeper independent-period, out-of-sample, regime-separated, and robustness validation remain incomplete, and this audit does not authorize paper-trading or live-trading design.
 
 Safety status:
 
@@ -52,7 +52,7 @@ Safety status:
 - [x] Human approval workflow exists.
 - [x] Implementation readiness workflow exists.
 - [x] Capital protection is central to the project.
-- [x] Full independent-period acceptance remains incomplete; paper trading is not approved, and live consideration is outside this audit's authorized scope.
+- [x] The Full Independent-Period Acceptance prerequisite is complete for `GC-202608-COMEX`, but remaining validation and separate approval requirements mean paper trading is not approved and live consideration is outside this audit's authorized scope.
 - [x] Manual pause / emergency-stop safety policy documentation is complete.
 
 Safety rule: cleanup work must remain limited to documentation, dataset intake, offline validation, and safety review; it must not introduce or authorize paper-trading use, live trading, broker connections or credentials, external APIs, real execution, numerical threshold changes, or strategy, risk, Python, Order Flow, or exporter source changes while the code freeze remains active.
@@ -91,7 +91,7 @@ Important documentation currently exists:
 Documentation status:
 
 - [x] End-to-end demo validation checklist and final recorded CLI result are complete.
-- [x] Backtest checklist and canonical baseline review are complete, but the baseline's 1m/5m/10m representations share one calendar window and are not independent historical evidence; full independent-period acceptance remains blocked.
+- [x] Backtest checklist and canonical baseline review are complete; the baseline's 1m/5m/10m representations remain non-independent, while the separate `GC-202608-COMEX` candidate received Full Independent-Period Acceptance on `2026-07-16`.
 - [x] Real Sierra Chart CSV guide, importer testing, and offline diagnostics are complete, but they do not establish independent-period acceptance.
 - [x] Reports / `.gitignore` safety review is complete; generated snapshots were removed from Git tracking.
 - [x] MVP code-freeze final review is complete and recorded; the freeze remains active and unresolved validation blockers remain open.
@@ -126,7 +126,7 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 
 ## 7. Known Gaps
 
-- [ ] No genuinely independent, non-overlapping historical period has been accepted under `docs/independent_historical_dataset_intake.md`; independent validation remains blocked.
+- [x] `GC-202608-COMEX` received Full Independent-Period Acceptance on `2026-07-16` under `docs/independent_historical_dataset_intake.md`; independent-period performance validation remains pending.
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
 - [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
@@ -172,7 +172,7 @@ Suggested items:
 
 ## 10. Backtest Validation Checklist
 
-The checklist and canonical baseline review are complete, but the baseline's 1m/5m/10m representations share one calendar window and are not independent historical evidence; full independent-period acceptance and robustness evidence remain pending.
+The checklist and canonical baseline review are complete, and the baseline's 1m/5m/10m representations correctly remain non-independent. A separate candidate now has Full Independent-Period Acceptance, while independent-period performance and robustness evidence remain pending.
 
 Suggested items:
 
@@ -232,7 +232,7 @@ Freeze note checklist:
 - [x] Backtest validation checklist is complete.
 - [x] Real Sierra Chart CSV test guide is complete.
 - [x] Reports / `.gitignore` safety review is complete.
-- [ ] Full independent-period acceptance is completed under `docs/independent_historical_dataset_intake.md`; until then independent validation remains blocked.
+- [x] Full Independent-Period Acceptance was completed for `GC-202608-COMEX` on `2026-07-16` under `docs/independent_historical_dataset_intake.md`.
 - [x] README and MVP checklist are current.
 
 ## 14. Beginner Summary
@@ -243,6 +243,6 @@ Tests are passing based on the current known result of 881 passed tests. Any sep
 
 Docs are being cleaned so a beginner or future AI coding agent can understand what exists, what is missing, and what must not be changed during cleanup.
 
-This project is not approved for paper trading, live trading, broker integration, or real-money trading. Independent validation remains blocked, and the project does not implement real broker execution or real order placement.
+This project is not approved for paper trading, live trading, broker integration, or real-money trading. Dataset-intake acceptance is complete for one candidate, but independent-period performance, out-of-sample, regime-separated, and robustness validation remain pending; the project does not implement real broker execution or real order placement.
 
-The current authorized work is documentation, independent-dataset intake, offline validation, reproducible testing, and safety review while the existing code freeze remains active. This audit does not schedule or approve paper-trading, broker, external-API, or live-trading design.
+The current authorized work is documentation, independent-period offline validation, reproducible testing, and safety review while the existing code freeze remains active. This audit does not schedule or approve paper-trading, broker, external-API, or live-trading design.

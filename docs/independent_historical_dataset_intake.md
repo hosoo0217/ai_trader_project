@@ -11,8 +11,8 @@ This contract is documentation-only and does not approve strategy, risk, drawdow
 - Latest usable full-footprint timestamp: `2026-07-03 12:23:00`
 - Conservative non-overlap boundary: `2026-06-03 18:00:00` through `2026-07-03 12:26:00`, inclusive
 - Available timeframes: 1m, 5m, and 10m; these cover the same calendar window and are not independent historical periods
-- Local inventory audit result: no genuinely independent, non-overlapping historical dataset was found
-- Code freeze remains active, and independent historical validation remains blocked
+- Accepted independent-period candidate: `GC-202608-COMEX`, with declared usable session coverage from `2026-05-13 18:00:00` through the timeframe-specific final complete bars on `2026-06-02`
+- Full Independent-Period Acceptance was recorded on `2026-07-16`; the independent-dataset intake blocker is closed for this candidate, while code freeze and all paper/live progression restrictions remain active
 
 ## Conservative Non-Overlap Requirement
 A candidate dataset qualifies as a fully independent historical period only when its complete declared usable range has zero overlap with the conservative baseline boundary `2026-06-03 18:00:00` through `2026-07-03 12:26:00`, inclusive.
@@ -175,4 +175,4 @@ A stopped intake remains non-independent or rejected unless its applicable block
 Every completed review must record exactly one classification with the reviewed files and hashes, declared usable range, reasons, unresolved issues, reviewer, and review date.
 Full acceptance requires zero overlap, all three complete timeframe pairs, and every check to pass; limited intake requires zero overlap, only one or two complete pairs, and diagnostic-only use.
 Any overlap, subset, near-duplicate, re-export, resample, or alternate-timeframe baseline representation is non-independent; any incomplete, invalid, private, overwrite-unsafe, or untraceable intake is rejected.
-Until a new candidate completes this contract, no independent-period acceptance exists, the validation blocker remains unresolved, and no strategy, risk, threshold, paper, or live progression is authorized.
+One candidate completed this contract with Full Independent-Period Acceptance on `2026-07-16`, recorded in external review `intake_review_2026-07-16.md` with SHA-256 `5B8DCA92A95B221C83AEBEAC2AE90FBC7A73A17FFD1B45E000CE3098C2AC941A`; this evidence classification does not authorize strategy, risk, threshold, paper, broker, API, or live progression.
