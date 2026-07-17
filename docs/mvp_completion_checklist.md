@@ -75,6 +75,7 @@ Safety status:
 
 - [x] `GC-202608-COMEX` received Full Independent-Period Acceptance on `2026-07-16` under `docs/independent_historical_dataset_intake.md`; this closes the dataset-intake classification blocker for that candidate only.
 - [x] The frozen 5m independent-period `weak` / no-Order-Flow baseline was completed and reproduced exactly on `2026-07-17`; it failed with `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. This is valid negative performance evidence and does not invalidate dataset acceptance.
+- [x] A read-only temporal-overlap diagnostic confirmed that `44` of `68` realized outcomes exited after the next scheduled entry. Strict and inclusive non-overlap selections produced materially different descriptive counterfactual results; neither replaces the official reproducible failure, establishes strict chronological portfolio performance, or authorizes tuning. Paper progression remains blocked and code freeze remains active.
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.

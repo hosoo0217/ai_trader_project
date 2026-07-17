@@ -49,6 +49,7 @@ Earlier real Sierra testing used `BAR_SUMMARY` data, which creates one synthetic
 
 The canonical baseline and its 1m, 5m, and 10m representations still cover the same calendar window and must not be treated as independent evidence. A separate non-overlapping `GC-202608-COMEX` candidate received Full Independent-Period Acceptance on `2026-07-16`.
 The independent-dataset intake classification blocker is closed for the accepted candidate. Its first frozen 5m independent-period `weak` / no-Order-Flow baseline completed on `2026-07-17` and failed reproducibly with `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. Additional independent periods, out-of-sample, regime-separated, and robustness validation remain pending, and code freeze remains active.
+A subsequent read-only temporal-overlap diagnostic confirmed that the frozen runner schedules entry windows every `5` candles while simulated outcomes may extend across later scheduled entries; `44` of `68` realized outcomes exited after the next scheduled entry. The official reproducible failure remains recorded, but it must not be interpreted as an established strict chronological single-position portfolio result. Strict and inclusive non-overlap selections are descriptive counterfactuals only and do not authorize source, strategy, risk, or threshold changes.
 
 The `-10.00` PnL from one smoke test does not prove the strategy is good or bad.
 

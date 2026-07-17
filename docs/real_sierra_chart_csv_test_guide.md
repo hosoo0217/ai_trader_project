@@ -246,6 +246,7 @@ Stop validation if:
 - The command appears to place a real order.
 
 Understanding the CSV format or receiving Full Independent-Period Acceptance does not authorize paper validation. The first frozen 5m independent-period baseline failed reproducibly on `2026-07-17`; paper progression remains blocked pending additional independent-period, out-of-sample, regime-separated, robustness, risk, and safety review plus a separate documented approval, and code freeze remains active.
+A read-only temporal-overlap diagnostic also confirmed that the current frozen runner permits simulated outcome horizons to cross later scheduled entries. Its strict and inclusive non-overlap selections are descriptive counterfactuals only; they do not replace the official failure, establish a strict chronological portfolio result, or authorize source, strategy, risk, threshold, paper, broker, API, or live changes.
 
 ## 12. Beginner Summary
 

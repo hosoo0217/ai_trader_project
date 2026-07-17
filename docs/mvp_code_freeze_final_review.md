@@ -42,6 +42,7 @@ The following items remain incomplete:
 - out-of-sample validation is required
 - regime-separated validation is required
 - one genuinely independent, non-overlapping historical period has been accepted, and its first frozen 5m performance baseline failed reproducibly on `2026-07-17`; additional independent periods and validation evidence are still required
+- read-only temporal-overlap diagnostics confirmed that `44` of `68` realized outcomes extended beyond the next scheduled entry; strict and inclusive non-overlap selections materially changed descriptive counterfactual results, but neither replaces the official frozen failure or authorizes source, strategy, risk, or threshold changes
 - profile-specific numerical drawdown thresholds remain unapproved
 - explicit human approval is still required before any numerical threshold configuration
 - paper-trading validation remains a later separate validation phase

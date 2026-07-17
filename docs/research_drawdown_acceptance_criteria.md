@@ -86,6 +86,7 @@ Neither the earlier canonical 5m result nor the failed independent 5m baseline m
 - Numerical research drawdown threshold: **NOT APPROVED**
 - Universal cross-profile threshold: **NOT ALLOWED**
 - Independent validation evidence: **DATASET ACCEPTED; FIRST FROZEN 5M PERFORMANCE BASELINE FAILED REPRODUCIBLY**
+- Temporal-overlap qualification: **`44` OF `68` REALIZED OUTCOMES EXTENDED BEYOND THE NEXT SCHEDULED ENTRY; COUNTERFACTUAL NON-OVERLAP SELECTIONS DO NOT APPROVE A THRESHOLD OR REPLACE THE OFFICIAL FAILURE; CODE FREEZE REMAINS ACTIVE**
 - Existing quality behavior: **FAIL CLOSED**
 - Strategy or risk implementation approval: **NONE**
 - Paper or live deployment approval: **NONE**

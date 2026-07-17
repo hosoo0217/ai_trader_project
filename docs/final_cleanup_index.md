@@ -14,6 +14,7 @@ It is documentation only. It does not add features, change strategy logic, chang
 
 - Project is in FINAL CLEANUP MODE.
 - Research and backtest capabilities exist, and `GC-202608-COMEX` retains Full Independent-Period Acceptance; its first frozen 5m independent-period performance baseline failed reproducibly on `2026-07-17`, and paper trading is not approved.
+- A read-only temporal-overlap diagnostic confirmed overlapping outcome horizons in that frozen baseline: `44` of `68` realized outcomes exited after the next scheduled entry. The official failure remains recorded, dataset acceptance remains valid, counterfactual non-overlap selections do not replace the official result, paper trading remains blocked, and code freeze remains active.
 - Live trading is not implemented.
 - Broker execution is not implemented.
 - Real order execution is not implemented.
