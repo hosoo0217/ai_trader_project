@@ -77,15 +77,15 @@ Current matched 200-iteration Apex results are:
 
 These results come from the current local historical period and its subsets.
 
-They remain useful diagnostic evidence but are not sufficient to approve a numerical threshold because the accepted independent period has not yet produced completed and reviewed performance, out-of-sample, regime-separated, and robustness evidence.
+They remain useful diagnostic evidence but are not sufficient to approve a numerical threshold. The accepted independent period produced a completed and exactly reproduced 5m baseline on `2026-07-17`, but that baseline failed with `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown; out-of-sample, regime-separated, additional-period, and robustness evidence also remain incomplete.
 
-The 5m result must not be used alone to tune a threshold around the best-performing timeframe.
+Neither the earlier canonical 5m result nor the failed independent 5m baseline may be used alone to tune or approve a numerical threshold.
 
 ## Current decision
 
 - Numerical research drawdown threshold: **NOT APPROVED**
 - Universal cross-profile threshold: **NOT ALLOWED**
-- Independent validation evidence: **DATASET ACCEPTED; PERFORMANCE VALIDATION PENDING**
+- Independent validation evidence: **DATASET ACCEPTED; FIRST FROZEN 5M PERFORMANCE BASELINE FAILED REPRODUCIBLY**
 - Existing quality behavior: **FAIL CLOSED**
 - Strategy or risk implementation approval: **NONE**
 - Paper or live deployment approval: **NONE**

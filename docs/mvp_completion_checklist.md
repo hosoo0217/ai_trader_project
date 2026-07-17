@@ -6,7 +6,7 @@ It is documentation only. It does not add trading features, change strategy logi
 
 ## 1. Current MVP Status
 
-Research and backtest capabilities are mature, one candidate has Full Independent-Period Acceptance, code freeze remains active, and paper trading is not approved.
+Research and backtest capabilities are mature, one candidate has Full Independent-Period Acceptance, and its first frozen 5m independent-period performance baseline failed reproducibly; code freeze remains active and paper trading is not approved.
 
 Current status:
 
@@ -74,6 +74,7 @@ Safety status:
 ## 3. Partially Complete Areas
 
 - [x] `GC-202608-COMEX` received Full Independent-Period Acceptance on `2026-07-16` under `docs/independent_historical_dataset_intake.md`; this closes the dataset-intake classification blocker for that candidate only.
+- [x] The frozen 5m independent-period `weak` / no-Order-Flow baseline was completed and reproduced exactly on `2026-07-17`; it failed with `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. This is valid negative performance evidence and does not invalidate dataset acceptance.
 - [ ] Out-of-sample and regime-separated validation are still needed.
 - [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
@@ -140,7 +141,7 @@ Order Flow CSV and replay commands are documented and validated with local sampl
 - [x] Volatility filter exists.
 - [x] Manual pause / emergency-stop safety policy documentation is complete; runtime controls remain future work.
 - [x] Human approval is required for any future strategy change, but approval alone does not lift the active code freeze or authorize implementation.
-- [x] The Full Independent-Period Acceptance prerequisite was satisfied for `GC-202608-COMEX` on `2026-07-16`; remaining validation requirements and a separate documented approval still block paper-trading consideration.
+- [x] Full Independent-Period Acceptance remains valid for `GC-202608-COMEX`, but the frozen 5m independent-period baseline failed reproducibly on `2026-07-17`; additional independent-period, out-of-sample, regime-separated, robustness, risk, and safety review plus a separate documented approval still block paper-trading consideration.
 - [ ] Paper trading is not approved in the current phase, and live consideration remains outside this checklist's authorized scope.
 
 Safety rule: capital protection must remain more important than profit, speed, automation, or feature expansion.
@@ -160,8 +161,8 @@ This project is a strong offline research and backtest MVP. It can analyze marke
 
 What is already done: core offline research, backtest, safety, Order Flow, SMC, CRT, reporting, educational coaching, and human-review planning capabilities are in place; paper-trading use and machine-learning training are not established or approved.
 
-What is still missing: although one genuinely independent, non-overlapping historical period has been accepted, out-of-sample and regime-separated validation and any later profile-specific numerical drawdown-threshold review remain pending. The MVP code-freeze final review is complete, and the freeze remains active while these blockers are open.
+What is still missing: one independent period has been accepted, but its first frozen 5m performance baseline failed reproducibly. Additional independent periods, out-of-sample and regime-separated validation, robustness review, and any later profile-specific numerical drawdown-threshold review remain pending. The MVP code-freeze final review is complete, and the freeze remains active while these blockers are open.
 
-Why paper and live progression are not approved: independent dataset intake acceptance alone does not complete out-of-sample, regime-separated, robustness, risk-threshold, or readiness review, and the code freeze remains active. The project does not connect to a broker, place real orders, use Sierra or CME live integration, or create real execution signals; that boundary is intentional.
+Why paper and live progression are not approved: dataset acceptance remains valid, but the reproducible 5m performance failure and the incomplete out-of-sample, regime-separated, robustness, risk-threshold, and readiness reviews keep progression blocked while the code freeze remains active. The project does not connect to a broker, place real orders, use Sierra or CME live integration, or create real execution signals; that boundary is intentional.
 
 Why testing and cleanup remain next: the current authorized work is documentation, independent-dataset intake, offline validation, reproducible testing, and safety review. This checklist does not schedule or approve paper-trading, broker, external-API, or live-trading design.

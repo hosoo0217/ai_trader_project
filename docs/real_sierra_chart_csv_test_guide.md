@@ -245,7 +245,7 @@ Stop validation if:
 - The command appears to require credentials.
 - The command appears to place a real order.
 
-Understanding the CSV format or receiving Full Independent-Period Acceptance does not authorize paper validation. Paper progression remains blocked pending independent-period performance, out-of-sample, regime-separated, robustness, risk, and safety review plus a separate documented approval.
+Understanding the CSV format or receiving Full Independent-Period Acceptance does not authorize paper validation. The first frozen 5m independent-period baseline failed reproducibly on `2026-07-17`; paper progression remains blocked pending additional independent-period, out-of-sample, regime-separated, robustness, risk, and safety review plus a separate documented approval, and code freeze remains active.
 
 ## 12. Beginner Summary
 

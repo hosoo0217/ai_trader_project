@@ -13,6 +13,7 @@ This contract is documentation-only and does not approve strategy, risk, drawdow
 - Available timeframes: 1m, 5m, and 10m; these cover the same calendar window and are not independent historical periods
 - Accepted independent-period candidate: `GC-202608-COMEX`, with declared usable session coverage from `2026-05-13 18:00:00` through the timeframe-specific final complete bars on `2026-06-02`
 - Full Independent-Period Acceptance was recorded on `2026-07-16`; the independent-dataset intake blocker is closed for this candidate, while code freeze and all paper/live progression restrictions remain active
+- Independent 5m performance validation was completed on `2026-07-17` using the frozen `weak` / no-Order-Flow baseline: `636` iterations, `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown; the result failed reproducibly with an exact byte-for-byte reproduction. Dataset acceptance remains valid, paper progression remains blocked, and code freeze remains active. External review: `independent_performance_validation_review_2026-07-17.md`, SHA-256 `C9ABCBAE2803CB70D06018BB240D1982A808E64787EC899BDF0A3A87EEBAA062`.
 
 ## Conservative Non-Overlap Requirement
 A candidate dataset qualifies as a fully independent historical period only when its complete declared usable range has zero overlap with the conservative baseline boundary `2026-06-03 18:00:00` through `2026-07-03 12:26:00`, inclusive.
