@@ -41,6 +41,7 @@ The following items remain incomplete:
 - more independent historical periods are required
 - out-of-sample validation is required
 - regime-separated validation is required
+- the general outcome-blind OOS and regime-separated validation plan is now pre-registered in `docs/pre_registered_oos_regime_validation_plan.md`, but a candidate-specific locked addendum, new fully accepted non-overlapping data, and complete execution evidence are still required
 - one genuinely independent, non-overlapping historical period has been accepted, and its first frozen 5m performance baseline failed reproducibly on `2026-07-17`; additional independent periods and validation evidence are still required
 - read-only temporal-overlap diagnostics confirmed that `44` of `68` realized outcomes extended beyond the next scheduled entry; strict and inclusive non-overlap selections materially changed descriptive counterfactual results, but neither replaces the official frozen failure or authorizes source, strategy, risk, or threshold changes
 - profile-specific numerical drawdown thresholds remain unapproved

@@ -129,6 +129,7 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 - [x] `GC-202608-COMEX` retains Full Independent-Period Acceptance, and its first frozen 5m independent-period performance baseline completed on `2026-07-17` with a reproducible failed result: `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown.
 - [x] A read-only temporal-overlap diagnostic confirmed overlapping outcome horizons: `44` of `68` realized outcomes exited after the next scheduled entry. Counterfactual strict and inclusive non-overlap selections materially changed the descriptive metrics, but the official frozen failure remains recorded, dataset acceptance remains valid, paper progression remains blocked, and code freeze remains active.
 - [ ] Out-of-sample and regime-separated validation are still needed.
+- [x] The general outcome-blind OOS and regime-separated validation framework is completed in `docs/pre_registered_oos_regime_validation_plan.md`; OOS execution remains pending a candidate-specific locked addendum and new fully accepted non-overlapping data.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
 - [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
 - [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
