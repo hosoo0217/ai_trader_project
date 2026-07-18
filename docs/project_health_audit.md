@@ -128,10 +128,10 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 
 - [x] `GC-202608-COMEX` retains Full Independent-Period Acceptance, and its first frozen 5m independent-period performance baseline completed on `2026-07-17` with a reproducible failed result: `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown.
 - [x] A read-only temporal-overlap diagnostic confirmed overlapping outcome horizons: `44` of `68` realized outcomes exited after the next scheduled entry. Counterfactual strict and inclusive non-overlap selections materially changed the descriptive metrics, but the official frozen failure remains recorded, dataset acceptance remains valid, paper progression remains blocked, and code freeze remains active.
-- [ ] Out-of-sample and regime-separated validation are still needed.
-- [x] The general outcome-blind OOS and regime-separated validation framework is completed in `docs/pre_registered_oos_regime_validation_plan.md`; OOS execution remains pending a candidate-specific locked addendum and new fully accepted non-overlapping data.
+- [x] The candidate-specific locked July OOS and regime-separated validation sequence is complete for the fully accepted, non-overlapping `2026-07-05` through `2026-07-16` candidate.
+- [x] The completed OOS evidence records `410` iterations, `58` realized trades, `0` unresolved trades, `-2550.00` total PnL, `0.43333333333333335` profit factor, and `2800.00` maximum drawdown. Baseline and reproduction matched byte-for-byte, required safety evidence passed, all `18` observed regime groups remain insufficient for regime-level inference, and the locked final classification is `VALID_OOS_EVIDENCE — PERFORMANCE_FAILED`. The external final review is hash-locked at `843553F99E204B0CA315FF739BC81200AEE629BAB8286D060D8FB2F968E7D813`.
 - [x] Research drawdown acceptance criteria are defined and reviewed in `docs/research_drawdown_acceptance_criteria.md`.
-- [ ] Profile-specific numerical drawdown thresholds remain unapproved pending independent non-overlapping validation evidence and explicit human approval.
+- [ ] Profile-specific numerical drawdown thresholds remain unapproved; the completed failed OOS result does not authorize threshold selection, and further independent evidence plus explicit human approval remain required.
 - [x] Losing-trade traces and conditional-cooldown robustness were reviewed in diagnostic-only mode; no implementation was approved.
 - [x] MVP code-freeze final review is completed and recorded in `docs/mvp_code_freeze_final_review.md`; the freeze remains active and unresolved validation blockers remain open.
 - [ ] Paper-trading preparation or simulation use is not approved.
@@ -141,10 +141,10 @@ Important Git behavior: `.gitignore` protects new matching files but does not au
 
 ## 8. Recommended Next Cleanup Steps
 
-1. Intake and validate a genuinely independent, non-overlapping historical period under `docs/independent_historical_dataset_intake.md`.
-2. Run regime-separated and out-of-sample validation.
-3. Review profile-specific numerical drawdown thresholds after independent non-overlapping validation evidence is available.
-4. Keep the reviewed code freeze active until the remaining validation blockers are resolved.
+1. Preserve the completed July OOS evidence and its failed classification without favorable reruns, tuning, threshold selection, or strategy and risk changes.
+2. Intake another genuinely independent, non-overlapping historical period and lock a new outcome-blind pre-entry sequence before any additional performance execution.
+3. Review additional-period, robustness, risk, and profile-specific threshold evidence only after required minimums are met and explicit human approval is obtained.
+4. Keep the reviewed code freeze active and keep paper and live progression blocked until all remaining evidence and approval requirements are resolved.
 
 These steps must remain limited to documentation, dataset intake, offline validation, and safety review; they must not add or authorize paper-trading use, live trading, broker connections, external APIs, real execution, numerical threshold changes, or strategy, risk, Python, Order Flow, or exporter source changes while the code freeze remains active.
 

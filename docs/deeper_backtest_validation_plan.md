@@ -48,9 +48,11 @@ One iteration is not enough to judge performance, win rate, drawdown, profit fac
 Earlier real Sierra testing used `BAR_SUMMARY` data, which creates one synthetic close-price level per bar. Complete 1m, 5m, and 10m Market OHLC/full-footprint pairs are now preserved for the accepted independent candidate; `BAR_SUMMARY` remains diagnostic-only evidence.
 
 The canonical baseline and its 1m, 5m, and 10m representations still cover the same calendar window and must not be treated as independent evidence. A separate non-overlapping `GC-202608-COMEX` candidate received Full Independent-Period Acceptance on `2026-07-16`.
-The independent-dataset intake classification blocker is closed for the accepted candidate. Its first frozen 5m independent-period `weak` / no-Order-Flow baseline completed on `2026-07-17` and failed reproducibly with `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. Additional independent periods, out-of-sample, regime-separated, and robustness validation remain pending, and code freeze remains active.
+The independent-dataset intake classification blocker is closed for the accepted candidate. Its first frozen 5m independent-period `weak` / no-Order-Flow baseline completed on `2026-07-17` and failed reproducibly with `69` executed trades, `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. Additional independent periods and robustness validation remain pending; the separate locked July OOS and regime-separated sequence is complete, and code freeze remains active.
 A subsequent read-only temporal-overlap diagnostic confirmed that the frozen runner schedules entry windows every `5` candles while simulated outcomes may extend across later scheduled entries; `44` of `68` realized outcomes exited after the next scheduled entry. The official reproducible failure remains recorded, but it must not be interpreted as an established strict chronological single-position portfolio result. Strict and inclusive non-overlap selections are descriptive counterfactuals only and do not authorize source, strategy, risk, or threshold changes.
-A general outcome-blind OOS and regime-separated framework is now pre-registered in `docs/pre_registered_oos_regime_validation_plan.md`. This completes planning only: a candidate-specific locked addendum, a new fully accepted non-overlapping dataset, and the complete pre-registered evaluation sequence remain required before any OOS performance claim.
+A general outcome-blind OOS and regime-separated framework was pre-registered in `docs/pre_registered_oos_regime_validation_plan.md`. The candidate-specific locked addendum and complete evaluation sequence are now complete for the fully accepted, non-overlapping `2026-07-05` through `2026-07-16` candidate.
+
+That OOS evaluation completed `410` iterations with `58` executed and realized trades, `0` unresolved trades, `-2550.00` total PnL, `0.43333333333333335` profit factor, and `2800.00` maximum drawdown. Baseline and reproduction matched byte-for-byte, required safety evidence passed, all `18` observed regime groups were preserved as insufficient for regime-level inference, and the locked final classification is `VALID_OOS_EVIDENCE — PERFORMANCE_FAILED`. The external final review is hash-locked at `843553F99E204B0CA315FF739BC81200AEE629BAB8286D060D8FB2F968E7D813`; paper progression remains blocked and code freeze remains active.
 
 The `-10.00` PnL from one smoke test does not prove the strategy is good or bad.
 
@@ -185,7 +187,7 @@ Paper trading is not approved in the current phase. Future consideration must re
 
 - Backtest has enough iterations.
 - Backtest quality grade is no longer `INSUFFICIENT_DATA`.
-- Full Independent-Period Acceptance remains valid for `GC-202608-COMEX`, but its first frozen 5m independent-period baseline failed reproducibly on `2026-07-17`; this negative performance evidence and the remaining validation requirements keep paper progression blocked.
+- Full Independent-Period Acceptance remains valid for `GC-202608-COMEX`, but its first frozen 5m independent-period baseline failed reproducibly on `2026-07-17`; the separate completed July OOS evaluation also failed its locked performance gates. Both negative evidence records remain preserved, and remaining additional-period, robustness, risk, threshold-approval, and separate human-approval requirements keep paper progression blocked.
 - Risk behavior is reviewed.
 - Capital protection behavior is reviewed.
 - Safety gate behavior is reviewed.

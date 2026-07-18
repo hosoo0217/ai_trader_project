@@ -56,12 +56,12 @@ Completed or mostly complete areas:
 - Implementation final review workflow
 - Implementation readiness checklist
 
-Still needed before any future live-trading discussion:
+Current validation status and remaining requirements before any future live-trading discussion:
 
-- Validate more independent historical periods
-- Run out-of-sample and regime-separated validation
-- Define and review research drawdown acceptance criteria
-- Complete the MVP code-freeze final review
+- Validate additional genuinely independent, non-overlapping historical periods under new outcome-blind pre-entry locks
+- The locked July OOS sequence is complete: `410` iterations, `58` realized trades, `0` unresolved trades, `-2550.00` total PnL, `0.43333333333333335` profit factor, and final classification `VALID_OOS_EVIDENCE — PERFORMANCE_FAILED`; final review hash `843553F99E204B0CA315FF739BC81200AEE629BAB8286D060D8FB2F968E7D813`
+- Research drawdown acceptance criteria are defined and reviewed, but no numerical threshold or readiness approval is granted
+- The MVP code-freeze final review is complete; code freeze remains active and paper/live progression remains blocked pending further evidence and separate human approval
 
 See [docs/mvp_completion_checklist.md](docs/mvp_completion_checklist.md) for the detailed MVP checklist.
 
@@ -198,10 +198,10 @@ No new major features should be added during cleanup. Live trading, broker conne
 
 ## Next Recommended Cleanup Steps
 
-1. Validate more independent historical periods
-2. Run regime-separated and out-of-sample validation
-3. Define and review research drawdown acceptance criteria
-4. Complete the MVP code-freeze final review
+1. Preserve the completed July OOS failure evidence without favorable reruns, tuning, threshold selection, or strategy and risk changes
+2. Validate additional genuinely independent, non-overlapping historical periods under newly locked outcome-blind sequences
+3. Review additional-period, robustness, risk, and profile-specific threshold evidence only after required minimums and explicit human approval
+4. Keep code freeze active and keep paper/live progression blocked until all remaining evidence and approval requirements are resolved
 
 ## Beginner Summary
 

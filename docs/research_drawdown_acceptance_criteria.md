@@ -77,15 +77,16 @@ Current matched 200-iteration Apex results are:
 
 These results come from the current local historical period and its subsets.
 
-They remain useful diagnostic evidence but are not sufficient to approve a numerical threshold. The accepted independent period produced a completed and exactly reproduced 5m baseline on `2026-07-17`, but that baseline failed with `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown; out-of-sample, regime-separated, additional-period, and robustness evidence also remain incomplete.
+They remain useful diagnostic evidence but are not sufficient to approve a numerical threshold. The accepted independent period produced a completed and exactly reproduced 5m baseline on `2026-07-17`, but that baseline failed with `-800.00` total PnL, `0.82` profit factor, and `4.60%` maximum drawdown. A separate locked July OOS evaluation completed `410` iterations with `58` realized trades, `0` unresolved trades, `-2550.00` total PnL, `0.43333333333333335` profit factor, and `2800.00` maximum drawdown; baseline and reproduction matched byte-for-byte, required safety evidence passed, and all `18` observed regime groups remain insufficient for regime-level inference. Its final classification is `VALID_OOS_EVIDENCE — PERFORMANCE_FAILED`, with final review hash `843553F99E204B0CA315FF739BC81200AEE629BAB8286D060D8FB2F968E7D813`; additional-period and robustness evidence remain incomplete.
 
-Neither the earlier canonical 5m result nor the failed independent 5m baseline may be used alone to tune or approve a numerical threshold.
+Neither the earlier canonical 5m result, the failed independent 5m baseline, nor the separate failed July OOS result may be used alone or together to tune or approve a numerical threshold.
 
 ## Current decision
 
 - Numerical research drawdown threshold: **NOT APPROVED**
 - Universal cross-profile threshold: **NOT ALLOWED**
 - Independent validation evidence: **DATASET ACCEPTED; FIRST FROZEN 5M PERFORMANCE BASELINE FAILED REPRODUCIBLY**
+- Locked July OOS evidence: **INTEGRITY AND MINIMUM SAMPLE PASSED; PERFORMANCE FAILED WITH `58` REALIZED TRADES, `-2550.00` TOTAL PNL, `0.43333333333333335` PROFIT FACTOR, AND `2800.00` MAXIMUM DRAWDOWN; NO NUMERICAL DRAWDOWN THRESHOLD OR READINESS APPROVAL**
 - Temporal-overlap qualification: **`44` OF `68` REALIZED OUTCOMES EXTENDED BEYOND THE NEXT SCHEDULED ENTRY; COUNTERFACTUAL NON-OVERLAP SELECTIONS DO NOT APPROVE A THRESHOLD OR REPLACE THE OFFICIAL FAILURE; CODE FREEZE REMAINS ACTIVE**
 - Existing quality behavior: **FAIL CLOSED**
 - Strategy or risk implementation approval: **NONE**
