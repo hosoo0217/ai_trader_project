@@ -295,9 +295,12 @@ exact source-index tie is resolved by greatest confirmation index, then the
 lexicographically smallest swing ID. Duplicate source-side identity remains
 invalid and is not repaired by the tie-breaker.
 
-If no eligible protected swing exists, return `UNKNOWN`. If otherwise valid
-inputs still contain indistinguishable contradictory protected identities after
-all locked tie-breakers, return `AMBIGUOUS` and promote no range.
+If no eligible protected swing exists, return `UNKNOWN`. Duplicate source-side
+protected identities or any contradictory protected identity are `INVALID` and
+promote no range. They are not repaired by a tie-breaker and cannot produce an
+`AMBIGUOUS` result. After invalid identities are rejected, the locked source,
+confirmation, and swing-ID tie-breakers always select at most one protected
+swing deterministically.
 
 The protected swing is selected from the pre-displacement snapshot. A swing
 confirmed on the displacement start index or later cannot be used retroactively.
@@ -682,12 +685,12 @@ an immutable tuple or `None`.
   is absent, a required construction interval is incomplete, or an initial
   `CHOCH` lacks prior range context. A dangling supplied foreign-key identity is
   not missing context; it is `INVALID` under Section 9.
-- `AMBIGUOUS`: simultaneous opposing valid events or contradictory candidates
-  remain after every locked deterministic tie-breaker.
+- `AMBIGUOUS`: exactly one valid bullish event and one valid bearish event occur
+  in the same confirmation-index and normalized-timestamp group.
 - `INVALID`: malformed type, identity, provenance, chronology, OHLC relation,
   tick, configuration, event type, direction, close-break relationship,
-  impossible transition, duplicate source, or internally malformed required
-  field is present.
+  impossible transition, duplicate source, duplicate or contradictory protected
+  identity, or internally malformed required field is present.
 
 An empty supplied tuple is complete context, not missing context. Empty swings
 or structure events can return `NONE`. Invalid rows are not discarded. The
@@ -773,7 +776,8 @@ exactly these numbered logical cases, with parameterization allowed:
 16. Same-index or later protected confirmation excluded without hindsight.
 17. Most-recent protected-swing selection and deterministic tie resolution.
 18. Missing protected swing returning `UNKNOWN`.
-19. Unresolved contradictory protected identities returning `AMBIGUOUS`.
+19. Public `analyze_dealing_ranges()` rejection of duplicate or contradictory
+    protected identities as `INVALID`, with no promoted range.
 20. Inclusive protected-source-through-confirmation bullish maximum and bearish
     minimum.
 21. Missing interval observation returning `UNKNOWN`; malformed present row
