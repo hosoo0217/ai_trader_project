@@ -23,7 +23,7 @@ from core.gc_chronological_backtest import GCChronologicalBar
 from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
 
 
-GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V1"
+GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V2"
 GC_DATASET_INSTRUMENT = "GC"
 GC_DATASET_TIMEFRAME = "5M"
 GC_DATASET_SOURCE_TIMEZONE = "Asia/Tokyo"
@@ -39,7 +39,7 @@ _CONTRACT_PATTERN = re.compile(r"^GC([GJMQVZ])(\d{2})-COMEX$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}$")
 _TIME_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{6}$")
 _NONNEGATIVE_INTEGER_PATTERN = re.compile(r"^(0|[1-9]\d*)$")
-_IDENTITY_KINDS = frozenset({"SOURCE", "SEGMENT", "DATASET"})
+_IDENTITY_KINDS = frozenset({"SOURCE", "COVERAGE", "SEGMENT", "DATASET"})
 _HEADER = (
     "Date",
     "Time",
@@ -103,6 +103,23 @@ class GCSierraChartExport:
 
 
 @dataclass(frozen=True)
+class GCSierraChartCoverageEvidence:
+    coverage_id: str
+    source_id: str
+    source_name: str
+    source_sha256: str
+    contract: str
+    role: GCSourceRole
+    capture_timestamp: datetime
+    chart_timezone: str
+    timeframe: str
+    coverage_start_timestamp: datetime
+    coverage_end_timestamp: datetime
+    acquisition_completed_timestamp: datetime
+    acquisition_evidence_sha256: str
+
+
+@dataclass(frozen=True)
 class GCCanonicalContractSegment:
     segment_id: str
     contract: str
@@ -119,6 +136,8 @@ class GCDatasetManifest:
     dataset_id: str
     version: str
     source_ids: tuple[str, ...]
+    coverage_ids: tuple[str, ...]
+    coverage_digest: str
     segment_ids: tuple[str, ...]
     calendar_version: str
     timezone_data_version: str
@@ -132,6 +151,7 @@ class GCDatasetManifest:
     oos_bar_count: int
     excluded_row_count: int
     missing_bar_count: int
+    attested_no_trade_interval_count: int
     raw_volume: int
     eligible_volume: int
     excluded_volume: int
@@ -175,6 +195,23 @@ class _NormalizedCalendar:
 
 
 @dataclass(frozen=True)
+class _NormalizedCoverage:
+    coverage_id: str
+    source_id: str
+    source_name: str
+    source_sha256: str
+    contract: str
+    role: GCSourceRole
+    capture_timestamp: datetime
+    chart_timezone: str
+    timeframe: str
+    start: datetime
+    end: datetime
+    acquisition_completed: datetime
+    acquisition_evidence_sha256: str
+
+
+@dataclass(frozen=True)
 class _InputRow:
     source: GCSierraChartExport
     row: GCSierraChartBarRow
@@ -211,6 +248,7 @@ class _UsableRow:
     trade_date: date
     partition: GCSegmentPartition
     selected_source_ids: tuple[str, ...]
+    selected_coverage_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -303,6 +341,8 @@ def parse_sierra_chart_gc_export(
             ask_volume = _parse_nonnegative_integer(fields_[12], "ask_volume")
             if volume != bid_volume + ask_volume:
                 raise ValueError("volume must equal bid_volume plus ask_volume")
+            if volume == 0 and trades == 0:
+                raise ValueError("synthetic no-data row")
             close_utc = local_start.replace(tzinfo=source_zone).astimezone(_UTC) + _FIVE_MINUTES
             if close_utc > normalized_capture:
                 raise ValueError("bar close exceeds immutable capture timestamp")
@@ -351,6 +391,7 @@ def make_gc_dataset_id(
     *,
     identity_kind: str,
     config: GCDatasetBuildConfig | None = None,
+    source_id: str | None = None,
     source_name: str | None = None,
     source_sha256: str | None = None,
     contract: str | None = None,
@@ -358,14 +399,20 @@ def make_gc_dataset_id(
     capture_timestamp: datetime | None = None,
     source_timezone: str | None = None,
     timeframe: str | None = None,
+    coverage_start_timestamp: datetime | None = None,
+    coverage_end_timestamp: datetime | None = None,
+    acquisition_completed_timestamp: datetime | None = None,
+    acquisition_evidence_sha256: str | None = None,
     first_trade_date: date | None = None,
     last_trade_date: date | None = None,
     source_ids: tuple[str, ...] = (),
+    coverage_ids: tuple[str, ...] = (),
     bar_digest: str | None = None,
     preceding_missing_bar_count: int | None = None,
     partition: GCSegmentPartition | None = None,
     segment_ids: tuple[str, ...] = (),
     calendar_digest: str | None = None,
+    coverage_digest: str | None = None,
     evidence_digest: str | None = None,
     roll_trade_dates: tuple[date, ...] = (),
 ) -> str:
@@ -376,14 +423,23 @@ def make_gc_dataset_id(
         common = {"version": GC_DATASET_BUILDER_VERSION, "identity_kind": kind}
         if kind == "SOURCE":
             _require_none(config, "config")
+            _require_none(source_id, "source_id")
+            _forbid_coverage_fields(
+                coverage_start_timestamp,
+                coverage_end_timestamp,
+                acquisition_completed_timestamp,
+                acquisition_evidence_sha256,
+            )
             _require_none(first_trade_date, "first_trade_date")
             _require_none(last_trade_date, "last_trade_date")
             _require_empty(source_ids, "source_ids")
+            _require_empty(coverage_ids, "coverage_ids")
             _require_none(bar_digest, "bar_digest")
             _require_none(preceding_missing_bar_count, "preceding_missing_bar_count")
             _require_none(partition, "partition")
             _require_empty(segment_ids, "segment_ids")
             _require_none(calendar_digest, "calendar_digest")
+            _require_none(coverage_digest, "coverage_digest")
             _require_none(evidence_digest, "evidence_digest")
             _require_empty(roll_trade_dates, "roll_trade_dates")
             payload = {
@@ -407,13 +463,114 @@ def make_gc_dataset_id(
                     name="timeframe",
                 ),
             }
+        elif kind == "COVERAGE":
+            _require_none(config, "config")
+            _require_none(first_trade_date, "first_trade_date")
+            _require_none(last_trade_date, "last_trade_date")
+            _require_empty(source_ids, "source_ids")
+            _require_empty(coverage_ids, "coverage_ids")
+            _require_none(bar_digest, "bar_digest")
+            _require_none(preceding_missing_bar_count, "preceding_missing_bar_count")
+            _require_none(partition, "partition")
+            _require_empty(segment_ids, "segment_ids")
+            _require_none(calendar_digest, "calendar_digest")
+            _require_none(coverage_digest, "coverage_digest")
+            _require_none(evidence_digest, "evidence_digest")
+            _require_empty(roll_trade_dates, "roll_trade_dates")
+            normalized_name = _normalize_source_name(_required(source_name, "source_name"))
+            normalized_source_hash = _require_hash(
+                _required(source_sha256, "source_sha256"), "source_sha256"
+            )
+            normalized_contract = _normalize_contract(_required(contract, "contract"))
+            normalized_role = _require_enum(
+                _required(role, "role"), GCSourceRole, "role"
+            )
+            normalized_capture = _normalize_aware_timestamp(
+                _required(capture_timestamp, "capture_timestamp"),
+                name="capture_timestamp",
+            )
+            normalized_timezone = _normalize_exact_text(
+                _required(source_timezone, "source_timezone"),
+                expected=GC_DATASET_SOURCE_TIMEZONE,
+                name="source_timezone",
+                uppercase=False,
+            )
+            normalized_timeframe = _normalize_exact_text(
+                _required(timeframe, "timeframe"),
+                expected=GC_DATASET_TIMEFRAME,
+                name="timeframe",
+            )
+            normalized_source_id = _require_hash(
+                _required(source_id, "source_id"), "source_id"
+            )
+            expected_source_id = make_gc_dataset_id(
+                identity_kind="SOURCE",
+                source_name=normalized_name,
+                source_sha256=normalized_source_hash,
+                contract=normalized_contract,
+                role=normalized_role,
+                capture_timestamp=normalized_capture,
+                source_timezone=normalized_timezone,
+                timeframe=normalized_timeframe,
+            )
+            if normalized_source_id != expected_source_id:
+                raise ValueError("source_id does not match canonical SOURCE identity")
+            start = _normalize_aware_timestamp(
+                _required(coverage_start_timestamp, "coverage_start_timestamp"),
+                name="coverage_start_timestamp",
+            )
+            end = _normalize_aware_timestamp(
+                _required(coverage_end_timestamp, "coverage_end_timestamp"),
+                name="coverage_end_timestamp",
+            )
+            completed = _normalize_aware_timestamp(
+                _required(
+                    acquisition_completed_timestamp,
+                    "acquisition_completed_timestamp",
+                ),
+                name="acquisition_completed_timestamp",
+            )
+            if start >= end:
+                raise ValueError("coverage range must be start-inclusive/end-exclusive")
+            if completed < end or completed > normalized_capture:
+                raise ValueError("acquisition completion must be between coverage end and capture")
+            payload = {
+                **common,
+                "source_id": normalized_source_id,
+                "source_name": normalized_name,
+                "source_sha256": normalized_source_hash,
+                "contract": normalized_contract,
+                "role": normalized_role.value,
+                "capture_timestamp": _timestamp_text(normalized_capture),
+                "source_timezone": normalized_timezone,
+                "timeframe": normalized_timeframe,
+                "coverage_start_timestamp": _timestamp_text(start),
+                "coverage_end_timestamp": _timestamp_text(end),
+                "acquisition_completed_timestamp": _timestamp_text(completed),
+                "acquisition_evidence_sha256": _require_hash(
+                    _required(
+                        acquisition_evidence_sha256,
+                        "acquisition_evidence_sha256",
+                    ),
+                    "acquisition_evidence_sha256",
+                ),
+            }
         elif kind == "SEGMENT":
             normalized_config = _normalize_config(_required(config, "config"))
+            _require_none(source_id, "source_id")
             _forbid_source_fields(
                 source_name, source_sha256, role, capture_timestamp, source_timezone, timeframe
             )
+            _forbid_coverage_fields(
+                coverage_start_timestamp,
+                coverage_end_timestamp,
+                acquisition_completed_timestamp,
+                acquisition_evidence_sha256,
+            )
+            _require_empty(coverage_ids, "coverage_ids")
             _require_empty(segment_ids, "segment_ids")
             _require_none(calendar_digest, "calendar_digest")
+            _require_none(coverage_digest, "coverage_digest")
             _require_none(evidence_digest, "evidence_digest")
             _require_empty(roll_trade_dates, "roll_trade_dates")
             first = _require_date(_required(first_trade_date, "first_trade_date"), "first_trade_date")
@@ -438,8 +595,15 @@ def make_gc_dataset_id(
             }
         else:
             normalized_config = _normalize_config(_required(config, "config"))
+            _require_none(source_id, "source_id")
             _forbid_source_fields(
                 source_name, source_sha256, role, capture_timestamp, source_timezone, timeframe
+            )
+            _forbid_coverage_fields(
+                coverage_start_timestamp,
+                coverage_end_timestamp,
+                acquisition_completed_timestamp,
+                acquisition_evidence_sha256,
             )
             _require_none(contract, "contract")
             _require_none(first_trade_date, "first_trade_date")
@@ -451,9 +615,15 @@ def make_gc_dataset_id(
                 **common,
                 "config": _config_payload(normalized_config),
                 "source_ids": _normalize_hash_tuple(source_ids, "source_ids", nonempty=True),
+                "coverage_ids": _normalize_hash_tuple(
+                    coverage_ids, "coverage_ids", nonempty=True
+                ),
                 "segment_ids": _normalize_hash_tuple(segment_ids, "segment_ids", nonempty=False),
                 "calendar_digest": _require_hash(
                     _required(calendar_digest, "calendar_digest"), "calendar_digest"
+                ),
+                "coverage_digest": _require_hash(
+                    _required(coverage_digest, "coverage_digest"), "coverage_digest"
                 ),
                 "evidence_digest": _require_hash(
                     _required(evidence_digest, "evidence_digest"), "evidence_digest"
@@ -474,6 +644,7 @@ def make_gc_dataset_id(
 def build_gc_futures_dataset(
     *,
     exports: tuple[GCSierraChartExport, ...] | None,
+    coverage_evidence: tuple[GCSierraChartCoverageEvidence, ...] | None,
     calendar_entries: tuple[KillZoneCalendarEntry, ...] | None,
     config: GCDatasetBuildConfig,
 ) -> GCDatasetBuildResult:
@@ -485,37 +656,55 @@ def build_gc_futures_dataset(
         return _result(GCDatasetBuildStatus.INVALID, "INVALID_CONFIG", str(exc))
     try:
         export_rows, normalized_exports, export_issues = _scan_exports(exports)
+        normalized_coverage, coverage_issues = _scan_coverage_evidence(
+            coverage_evidence
+        )
         calendars, calendar_issues = _scan_calendars(calendar_entries, normalized_config)
     except Exception as exc:  # pragma: no cover - containment boundary
         return _result(GCDatasetBuildStatus.INVALID, "MALFORMED_INPUT", str(exc))
 
-    issues = list(export_issues) + list(calendar_issues)
-    if exports is None or calendar_entries is None:
+    issues = list(export_issues) + list(coverage_issues) + list(calendar_issues)
+    if exports is None or coverage_evidence is None or calendar_entries is None:
         invalid = [issue for issue in issues if issue.status is GCDatasetBuildStatus.INVALID]
         if invalid:
             return _issues_result(invalid, segments=())
         return _result(
             GCDatasetBuildStatus.UNKNOWN,
             "MISSING_TOP_LEVEL_CONTEXT",
-            "exports and calendar_entries must both be supplied",
+            "exports, coverage_evidence, and calendar_entries must all be supplied",
         )
-    if type(exports) is not tuple or type(calendar_entries) is not tuple:
+    if (
+        type(exports) is not tuple
+        or type(coverage_evidence) is not tuple
+        or type(calendar_entries) is not tuple
+    ):
         return _result(
             GCDatasetBuildStatus.INVALID,
             "NON_TUPLE_TOP_LEVEL_INPUT",
-            "exports and calendar_entries must be exact tuples or None",
+            "exports, coverage_evidence, and calendar_entries must be exact tuples or None",
         )
-    if not exports and not calendar_entries:
+    if not exports and not coverage_evidence and not calendar_entries:
         return _result(GCDatasetBuildStatus.NONE, "NO_SOURCE_SCOPE", "no exports or calendar entries")
+    if not exports and coverage_evidence:
+        return _result(
+            GCDatasetBuildStatus.INVALID,
+            "UNREQUESTED_COVERAGE_EVIDENCE",
+            "coverage evidence was supplied without export scope",
+        )
     if not exports and calendar_entries:
         return _result(
             GCDatasetBuildStatus.INVALID,
             "UNREQUESTED_CALENDAR_ENTRY",
             "calendar evidence was supplied without export scope",
         )
-    if issues:
-        invalid = [issue for issue in issues if issue.status is GCDatasetBuildStatus.INVALID]
-        final_issues = invalid if invalid else issues
+    linked_coverage, reconciliation_issues = _reconcile_coverage(
+        exports=normalized_exports,
+        coverage=normalized_coverage,
+        rows=export_rows,
+    )
+    issues.extend(reconciliation_issues)
+    invalid = [issue for issue in issues if issue.status is GCDatasetBuildStatus.INVALID]
+    if invalid:
         cutoff = _earliest_issue_moment(issues)
         prior_rows = tuple(row for row in export_rows if cutoff is not None and row.close_utc < cutoff)
         prior_calendars = tuple(
@@ -525,21 +714,29 @@ def build_gc_futures_dataset(
             and item.opening is not None
             and item.opening < cutoff
         )
+        prior_coverage = tuple(
+            item
+            for item in linked_coverage
+            if cutoff is not None and item.end <= cutoff
+        )
         prior = _assemble(
             rows=prior_rows,
             exports=normalized_exports,
+            coverage=prior_coverage,
             calendars=prior_calendars,
             config=normalized_config,
             allow_manifest=False,
         )
-        return _issues_result(final_issues, segments=prior.segments)
+        return _issues_result(invalid, segments=prior.segments)
 
     assembly = _assemble(
         rows=export_rows,
         exports=normalized_exports,
+        coverage=linked_coverage,
         calendars=calendars,
         config=normalized_config,
         allow_manifest=True,
+        initial_issues=tuple(issues),
     )
     return GCDatasetBuildResult(
         status=assembly.status,
@@ -555,16 +752,28 @@ def _assemble(
     *,
     rows: tuple[_InputRow, ...],
     exports: tuple[GCSierraChartExport, ...],
+    coverage: tuple[_NormalizedCoverage, ...],
     calendars: tuple[_NormalizedCalendar, ...],
     config: GCDatasetBuildConfig,
     allow_manifest: bool,
+    initial_issues: tuple[_Issue, ...] = (),
 ) -> _Assembly:
     merged, merge_issues = _merge_rows(rows, exports)
     calendar_map = {entry.trade_date: entry for entry in calendars}
     usable: list[_UsableRow] = []
-    issues = list(merge_issues)
+    volume_usable: list[_UsableRow] = []
+    issues = list(initial_issues) + list(merge_issues)
     base_exclusions: dict[tuple[str, datetime], str] = {}
     source_rank = {source.source_id: index for index, source in enumerate(exports)}
+    coverage_rank = {
+        item.coverage_id: index for index, item in enumerate(coverage)
+    }
+    coverage_by_source: dict[str, tuple[_NormalizedCoverage, ...]] = {
+        source.source_id: tuple(
+            item for item in coverage if item.source_id == source.source_id
+        )
+        for source in exports
+    }
 
     for item in merged:
         trade_date = _trade_date_for_start(item.start_utc)
@@ -591,17 +800,8 @@ def _assemble(
         if offset.total_seconds() % _FIVE_MINUTES.total_seconds() != 0:
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OFF_FIVE_MINUTE_GRID", item.close_utc))
             continue
-        if trade_date < config.initial_trade_date:
-            base_exclusions[(item.contract, item.start_utc)] = "BEFORE_INITIAL_BOUNDARY"
-            continue
-        if trade_date > config.oos_end_trade_date:
-            base_exclusions[(item.contract, item.start_utc)] = "AFTER_OOS_BOUNDARY"
-            continue
-        partition = (
-            GCSegmentPartition.OOS_HOLDOUT
-            if trade_date >= config.oos_start_trade_date
-            else GCSegmentPartition.DEVELOPMENT
-        )
+        scoped_partition = _partition_for_trade_date(trade_date, config)
+        partition = scoped_partition or GCSegmentPartition.DEVELOPMENT
         required_role = (
             GCSourceRole.OOS_HOLDOUT
             if partition is GCSegmentPartition.OOS_HOLDOUT
@@ -621,25 +821,70 @@ def _assemble(
             reason = "SOURCE_ROLE_CONTRADICTS_DEVELOPMENT" if status is GCDatasetBuildStatus.INVALID else "OOS_SOURCE_COVERAGE_MISSING"
             issues.append(_Issue(status, reason, item.close_utc))
             continue
-        usable.append(
-            _UsableRow(
-                merged=item,
-                trade_date=trade_date,
-                partition=partition,
-                selected_source_ids=tuple(sorted(matching_ids, key=source_rank.__getitem__)),
-            )
+        matching_coverage_ids = tuple(
+            coverage_item.coverage_id
+            for source_id in matching_ids
+            for coverage_item in coverage_by_source.get(source_id, ())
+            if coverage_item.start <= item.start_utc
+            and item.close_utc <= coverage_item.end
         )
+        if not matching_coverage_ids:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.UNKNOWN,
+                    "COVERAGE_UNVERIFIED",
+                    item.close_utc,
+                )
+            )
+            continue
+        candidate = _UsableRow(
+            merged=item,
+            trade_date=trade_date,
+            partition=partition,
+            selected_source_ids=tuple(
+                sorted(matching_ids, key=source_rank.__getitem__)
+            ),
+            selected_coverage_ids=tuple(
+                sorted(set(matching_coverage_ids), key=coverage_rank.__getitem__)
+            ),
+        )
+        volume_usable.append(candidate)
+        if trade_date < config.initial_trade_date:
+            base_exclusions[(item.contract, item.start_utc)] = "BEFORE_INITIAL_BOUNDARY"
+            continue
+        if trade_date > config.oos_end_trade_date:
+            base_exclusions[(item.contract, item.start_utc)] = "AFTER_OOS_BOUNDARY"
+            continue
+        usable.append(candidate)
 
     if issues:
         cutoff = _earliest_issue_moment(issues)
         usable = [item for item in usable if cutoff is not None and item.merged.close_utc < cutoff]
+        volume_usable = [
+            item
+            for item in volume_usable
+            if cutoff is not None and item.merged.close_utc < cutoff
+        ]
 
     contracts = tuple(dict.fromkeys(source.contract for source in exports))
-    boundary_issue = _contract_coverage_issue(contracts, config, calendars)
-    if boundary_issue is not None:
-        issues.append(boundary_issue)
-
-    completed_volumes = _completed_session_volumes(usable, calendars, exports)
+    completed_volumes, completed_missing_counts = _completed_session_volumes(
+        volume_usable,
+        calendars,
+        exports,
+        coverage,
+        config,
+    )
+    initial_issue = _initial_contract_issue(
+        contracts=contracts,
+        calendars=calendars,
+        completed_volumes={
+            (contract, trade_date): volume
+            for contract, trade_date, volume in completed_volumes
+        },
+        config=config,
+    )
+    if initial_issue is not None:
+        issues.append(initial_issue)
     active_by_date, roll_dates, roll_issues = _roll_plan(
         contracts=contracts,
         calendars=calendars,
@@ -650,6 +895,37 @@ def _assemble(
         config=config,
     )
     issues.extend(roll_issues)
+    initial_position = next(
+        (
+            index
+            for index, entry in enumerate(calendars)
+            if entry.trade_date == config.initial_trade_date
+        ),
+        None,
+    )
+    accepted_volume_keys: set[tuple[str, date]] = set()
+    if initial_position is not None:
+        prior_entries = tuple(
+            entry
+            for entry in calendars[:initial_position]
+            if entry.session_status is not KillZoneSessionStatus.SESSION_CLOSED
+        )[-GC_ROLL_CONFIRMATION_SESSIONS:]
+        predecessor = _previous_contract(config.initial_contract)
+        accepted_volume_keys.update(
+            (contract, entry.trade_date)
+            for entry in prior_entries
+            for contract in (predecessor, config.initial_contract)
+        )
+    accepted_volume_keys.update(
+        (contract, trade_date)
+        for trade_date, active in active_by_date.items()
+        for contract in (active, _next_contract(active))
+    )
+    promoted_completed_volumes = tuple(
+        item
+        for item in completed_volumes
+        if (item[0], item[1]) in accepted_volume_keys
+    )
     cutoff = _earliest_issue_moment(issues)
     selected: list[_UsableRow] = []
     for item in usable:
@@ -661,7 +937,9 @@ def _assemble(
         else:
             base_exclusions[(item.merged.contract, item.merged.start_utc)] = "ROLL_EVIDENCE_ONLY"
 
-    segments = _make_segments(tuple(selected), config, source_rank)
+    segments = _make_segments(
+        tuple(selected), config, source_rank, calendar_map
+    )
     if issues or not allow_manifest:
         status = _highest_status(issues) if issues else GCDatasetBuildStatus.VALID
         reasons = tuple(issue.reason for issue in _ordered_issues(issues))
@@ -686,16 +964,29 @@ def _assemble(
     if sum(count for _, count in exclusion_counts) != excluded_row_count:
         raise _ValidationError("manifest exclusion conservation failed")
     source_ids = tuple(source.source_id for source in exports)
+    coverage_ids = tuple(item.coverage_id for item in coverage)
     segment_ids = tuple(segment.segment_id for segment in segments)
     calendar_digest = _digest_calendar(calendars)
+    coverage_digest = _digest_coverage(coverage)
     raw_moments = tuple(item.close_utc for item in merged)
     usable_moments = tuple(item.merged.close_utc for item in selected)
-    missing_count = sum(segment.preceding_missing_bar_count for segment in segments)
+    completed_missing_map = {
+        (contract, trade_date): count
+        for contract, trade_date, count in completed_missing_counts
+    }
+    missing_count = sum(
+        completed_missing_map.get((active, trade_date), 0)
+        for trade_date, active in active_by_date.items()
+        if config.initial_trade_date <= trade_date <= config.oos_end_trade_date
+    )
+    attested_no_trade_count = missing_count
     dev_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.DEVELOPMENT)
     oos_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.OOS_HOLDOUT)
     evidence = {
         "version": GC_DATASET_BUILDER_VERSION,
         "source_ids": source_ids,
+        "coverage_ids": coverage_ids,
+        "coverage_digest": coverage_digest,
         "segment_ids": segment_ids,
         "calendar_version": calendars[0].calendar_version if calendars else "",
         "timezone_data_version": config.timezone_data_version,
@@ -709,12 +1000,13 @@ def _assemble(
         "oos_bar_count": oos_count,
         "excluded_row_count": excluded_row_count,
         "missing_bar_count": missing_count,
+        "attested_no_trade_interval_count": attested_no_trade_count,
         "raw_volume": raw_volume,
         "eligible_volume": eligible_volume,
         "excluded_volume": raw_volume - eligible_volume,
         "completed_session_volumes": tuple(
             (contract, trade_date.isoformat(), volume)
-            for contract, trade_date, volume in completed_volumes
+            for contract, trade_date, volume in promoted_completed_volumes
         ),
         "exclusion_counts": exclusion_counts,
         "roll_trade_dates": tuple(item.isoformat() for item in roll_dates),
@@ -724,8 +1016,10 @@ def _assemble(
         identity_kind="DATASET",
         config=config,
         source_ids=source_ids,
+        coverage_ids=coverage_ids,
         segment_ids=segment_ids,
         calendar_digest=calendar_digest,
+        coverage_digest=coverage_digest,
         evidence_digest=evidence_digest,
         roll_trade_dates=roll_dates,
     )
@@ -733,6 +1027,8 @@ def _assemble(
         dataset_id=dataset_id,
         version=GC_DATASET_BUILDER_VERSION,
         source_ids=source_ids,
+        coverage_ids=coverage_ids,
+        coverage_digest=coverage_digest,
         segment_ids=segment_ids,
         calendar_version=calendars[0].calendar_version if calendars else "",
         timezone_data_version=config.timezone_data_version,
@@ -746,10 +1042,11 @@ def _assemble(
         oos_bar_count=oos_count,
         excluded_row_count=excluded_row_count,
         missing_bar_count=missing_count,
+        attested_no_trade_interval_count=attested_no_trade_count,
         raw_volume=raw_volume,
         eligible_volume=eligible_volume,
         excluded_volume=raw_volume - eligible_volume,
-        completed_session_volumes=completed_volumes,
+        completed_session_volumes=promoted_completed_volumes,
         exclusion_counts=exclusion_counts,
         roll_trade_dates=roll_dates,
     )
@@ -837,6 +1134,17 @@ def _validate_export(item: object) -> tuple[GCSierraChartExport, tuple[_InputRow
             normalized = _validate_row(row, source_zone, capture)
         except (TypeError, ValueError) as exc:
             raise _ValidationError("MALFORMED_EXPORT_ROW", row_moment) from exc
+        if (
+            normalized.row.volume == 0
+            and normalized.row.number_of_trades == 0
+            and normalized.row.bid_volume == 0
+            and normalized.row.ask_volume == 0
+            and normalized.open_tick
+            == normalized.high_tick
+            == normalized.low_tick
+            == normalized.close_tick
+        ):
+            raise _ValidationError("SYNTHETIC_NO_DATA_ROW", normalized.close_utc)
         if prior_number is not None and normalized.row.source_row_number <= prior_number:
             raise _ValidationError("SOURCE_ROW_NUMBER_OUT_OF_ORDER", normalized.close_utc)
         if prior_start is not None and normalized.start_utc <= prior_start:
@@ -914,6 +1222,8 @@ def _validate_row(row: object, source_zone: ZoneInfo, capture: datetime) -> _Val
     ask = _require_nonnegative_int(row.ask_volume, "ask_volume")
     if volume != bid + ask:
         raise ValueError("volume conservation")
+    if volume == 0 and trades == 0:
+        raise ValueError("synthetic no-data row")
     start_utc = local_start.replace(tzinfo=source_zone).astimezone(_UTC)
     close_utc = start_utc + _FIVE_MINUTES
     if close_utc > capture:
@@ -922,6 +1232,192 @@ def _validate_row(row: object, source_zone: ZoneInfo, capture: datetime) -> _Val
         row_number, local_start, prices[0], prices[1], prices[2], prices[3], volume, trades, bid, ask
     )
     return _ValidatedRow(normalized_row, start_utc, close_utc, *ticks)
+
+
+def _scan_coverage_evidence(
+    entries: tuple[GCSierraChartCoverageEvidence, ...] | None,
+) -> tuple[tuple[_NormalizedCoverage, ...], tuple[_Issue, ...]]:
+    if entries is None:
+        return (), ()
+    if type(entries) is not tuple:
+        return (), (_Issue(GCDatasetBuildStatus.INVALID, "COVERAGE_NOT_TUPLE", None),)
+    normalized: list[_NormalizedCoverage] = []
+    issues: list[_Issue] = []
+    keys: list[tuple[datetime, datetime, tuple[int, int], str, str]] = []
+    ids: set[str] = set()
+    for item in entries:
+        moment = _coverage_first_moment(item)
+        try:
+            if not isinstance(item, GCSierraChartCoverageEvidence):
+                raise _ValidationError("MALFORMED_COVERAGE_TYPE", moment)
+            source_id = _require_hash(item.source_id, "coverage.source_id")
+            source_name = _normalize_source_name(item.source_name)
+            source_sha256 = _require_hash(
+                item.source_sha256, "coverage.source_sha256"
+            )
+            contract = _normalize_contract(item.contract)
+            role = _require_enum(item.role, GCSourceRole, "coverage.role")
+            capture = _normalize_aware_timestamp(
+                item.capture_timestamp, name="coverage.capture_timestamp"
+            )
+            chart_timezone = _normalize_exact_text(
+                item.chart_timezone,
+                expected=GC_DATASET_SOURCE_TIMEZONE,
+                name="coverage.chart_timezone",
+                uppercase=False,
+            )
+            timeframe = _normalize_exact_text(
+                item.timeframe,
+                expected=GC_DATASET_TIMEFRAME,
+                name="coverage.timeframe",
+            )
+            start = _normalize_aware_timestamp(
+                item.coverage_start_timestamp,
+                name="coverage_start_timestamp",
+            )
+            end = _normalize_aware_timestamp(
+                item.coverage_end_timestamp,
+                name="coverage_end_timestamp",
+            )
+            completed = _normalize_aware_timestamp(
+                item.acquisition_completed_timestamp,
+                name="acquisition_completed_timestamp",
+            )
+            evidence_hash = _require_hash(
+                item.acquisition_evidence_sha256,
+                "acquisition_evidence_sha256",
+            )
+            expected_id = make_gc_dataset_id(
+                identity_kind="COVERAGE",
+                source_id=source_id,
+                source_name=source_name,
+                source_sha256=source_sha256,
+                contract=contract,
+                role=role,
+                capture_timestamp=capture,
+                source_timezone=chart_timezone,
+                timeframe=timeframe,
+                coverage_start_timestamp=start,
+                coverage_end_timestamp=end,
+                acquisition_completed_timestamp=completed,
+                acquisition_evidence_sha256=evidence_hash,
+            )
+            coverage_id = _require_hash(item.coverage_id, "coverage_id")
+            if coverage_id != expected_id:
+                raise _ValidationError("COVERAGE_ID_MISMATCH", start)
+            if coverage_id in ids:
+                raise _ValidationError("DUPLICATE_COVERAGE_ID", start)
+            ids.add(coverage_id)
+            normalized_item = _NormalizedCoverage(
+                coverage_id,
+                source_id,
+                source_name,
+                source_sha256,
+                contract,
+                role,
+                capture,
+                chart_timezone,
+                timeframe,
+                start,
+                end,
+                completed,
+                evidence_hash,
+            )
+            normalized.append(normalized_item)
+            keys.append((start, end, _contract_key(contract), role.value, coverage_id))
+        except _ValidationError as exc:
+            issues.append(
+                _Issue(GCDatasetBuildStatus.INVALID, exc.reason, exc.moment or moment)
+            )
+        except (TypeError, ValueError):
+            issues.append(
+                _Issue(GCDatasetBuildStatus.INVALID, "MALFORMED_COVERAGE_EVIDENCE", moment)
+            )
+    if len(keys) > 1 and any(right <= left for left, right in zip(keys, keys[1:])):
+        issues.append(
+            _Issue(GCDatasetBuildStatus.INVALID, "COVERAGE_TUPLE_OUT_OF_ORDER", None)
+        )
+    by_source: dict[str, list[_NormalizedCoverage]] = {}
+    for item in normalized:
+        by_source.setdefault(item.source_id, []).append(item)
+    for members in by_source.values():
+        ordered = sorted(members, key=lambda item: (item.start, item.end, item.coverage_id))
+        for left, right in zip(ordered, ordered[1:]):
+            if right.start < left.end:
+                issues.append(
+                    _Issue(
+                        GCDatasetBuildStatus.INVALID,
+                        "OVERLAPPING_COVERAGE_EVIDENCE",
+                        right.start,
+                    )
+                )
+    return tuple(normalized), tuple(issues)
+
+
+def _reconcile_coverage(
+    *,
+    exports: tuple[GCSierraChartExport, ...],
+    coverage: tuple[_NormalizedCoverage, ...],
+    rows: tuple[_InputRow, ...],
+) -> tuple[tuple[_NormalizedCoverage, ...], tuple[_Issue, ...]]:
+    source_map = {item.source_id: item for item in exports}
+    by_source: dict[str, list[_NormalizedCoverage]] = {}
+    linked: list[_NormalizedCoverage] = []
+    issues: list[_Issue] = []
+    for item in coverage:
+        source = source_map.get(item.source_id)
+        if source is None:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "COVERAGE_SOURCE_MISSING",
+                    item.start,
+                )
+            )
+            continue
+        if (
+            item.source_name != source.source_name
+            or item.source_sha256 != source.source_sha256
+            or item.contract != source.contract
+            or item.role is not source.role
+            or item.capture_timestamp != source.capture_timestamp
+            or item.chart_timezone != source.chart_timezone
+            or item.timeframe != source.timeframe
+        ):
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "COVERAGE_SOURCE_MISMATCH",
+                    item.start,
+                )
+            )
+            continue
+        by_source.setdefault(item.source_id, []).append(item)
+        linked.append(item)
+    for source in exports:
+        members = by_source.get(source.source_id, [])
+        if not members:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.UNKNOWN,
+                    "COVERAGE_UNVERIFIED",
+                    _export_first_moment(source),
+                )
+            )
+    for item in rows:
+        members = by_source.get(item.source.source_id, [])
+        if members and not any(
+            member.start <= item.start_utc and item.close_utc <= member.end
+            for member in members
+        ):
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "COVERAGE_MISMATCH",
+                    item.close_utc,
+                )
+            )
+    return tuple(linked), tuple(issues)
 
 
 def _scan_calendars(
@@ -1026,32 +1522,138 @@ def _completed_session_volumes(
     rows: list[_UsableRow],
     calendars: tuple[_NormalizedCalendar, ...],
     exports: tuple[GCSierraChartExport, ...],
-) -> tuple[tuple[str, date, int], ...]:
-    source_capture = {source.source_id: source.capture_timestamp for source in exports}
+    coverage: tuple[_NormalizedCoverage, ...],
+    config: GCDatasetBuildConfig,
+) -> tuple[tuple[tuple[str, date, int], ...], tuple[tuple[str, date, int], ...]]:
+    source_by_id = {source.source_id: source for source in exports}
+    coverage_by_contract_role: dict[
+        tuple[str, GCSourceRole], list[_NormalizedCoverage]
+    ] = {}
+    for item in coverage:
+        coverage_by_contract_role.setdefault((item.contract, item.role), []).append(item)
     grouped: dict[tuple[str, date], list[_UsableRow]] = {}
     for item in rows:
         grouped.setdefault((item.merged.contract, item.trade_date), []).append(item)
-    calendar_map = {entry.trade_date: entry for entry in calendars}
     output: list[tuple[str, date, int]] = []
-    for (contract, trade_date), members in grouped.items():
-        entry = calendar_map[trade_date]
-        if entry.opening is None or entry.closing is None:
-            continue
-        expected: list[datetime] = []
-        cursor = entry.opening
-        while cursor + _FIVE_MINUTES <= entry.closing:
-            expected.append(cursor)
-            cursor += _FIVE_MINUTES
-        starts = sorted(member.merged.start_utc for member in members)
-        captures = [
-            source_capture[source_id]
-            for member in members
-            for source_id in member.selected_source_ids
-        ]
-        if starts == expected and captures and max(captures) >= entry.closing:
-            output.append((contract, trade_date, sum(member.merged.volume for member in members)))
+    missing_output: list[tuple[str, date, int]] = []
+    contracts = tuple(dict.fromkeys(source.contract for source in exports))
+    for contract in contracts:
+        for entry in calendars:
+            trade_date = entry.trade_date
+            if entry.opening is None or entry.closing is None:
+                continue
+            partition = _partition_for_trade_date(trade_date, config)
+            if partition is None:
+                required_role = GCSourceRole.DEVELOPMENT
+            else:
+                required_role = (
+                    GCSourceRole.DEVELOPMENT
+                    if partition is GCSegmentPartition.DEVELOPMENT
+                    else GCSourceRole.OOS_HOLDOUT
+                )
+            accepted = tuple(
+                item
+                for item in coverage_by_contract_role.get(
+                    (contract, required_role), ()
+                )
+                if item.capture_timestamp > entry.closing
+                and item.acquisition_completed >= entry.closing
+            )
+            if not accepted:
+                continue
+            expected: list[datetime] = []
+            cursor = entry.opening
+            while cursor + _FIVE_MINUTES <= entry.closing:
+                expected.append(cursor)
+                cursor += _FIVE_MINUTES
+            if not all(
+                any(
+                    item.start <= slot
+                    and slot + _FIVE_MINUTES <= item.end
+                    for item in accepted
+                )
+                for slot in expected
+            ):
+                continue
+            members = grouped.get((contract, trade_date), [])
+            observed_by_start = {
+                member.merged.start_utc: member
+                for member in members
+                if any(
+                    source_by_id[source_id].role is required_role
+                    for source_id in member.selected_source_ids
+                )
+            }
+            if any(start not in expected for start in observed_by_start):
+                continue
+            missing = sum(1 for slot in expected if slot not in observed_by_start)
+            output.append(
+                (
+                    contract,
+                    trade_date,
+                    sum(
+                        item.merged.volume
+                        for item in observed_by_start.values()
+                    ),
+                )
+            )
+            missing_output.append((contract, trade_date, missing))
     output.sort(key=lambda item: (_contract_key(item[0]), item[1]))
-    return tuple(output)
+    missing_output.sort(key=lambda item: (_contract_key(item[0]), item[1]))
+    return tuple(output), tuple(missing_output)
+
+
+def _initial_contract_issue(
+    *,
+    contracts: tuple[str, ...],
+    calendars: tuple[_NormalizedCalendar, ...],
+    completed_volumes: dict[tuple[str, date], int],
+    config: GCDatasetBuildConfig,
+) -> _Issue | None:
+    moment = _calendar_open_for(config.initial_trade_date, calendars)
+    predecessor = _previous_contract(config.initial_contract)
+    if config.initial_contract not in contracts or predecessor not in contracts:
+        return _Issue(
+            GCDatasetBuildStatus.UNKNOWN,
+            "INITIAL_PREDECESSOR_COVERAGE_MISSING",
+            moment,
+        )
+    eligible = tuple(
+        entry
+        for entry in calendars
+        if entry.session_status is not KillZoneSessionStatus.SESSION_CLOSED
+    )
+    positions = [
+        index
+        for index, entry in enumerate(eligible)
+        if entry.trade_date == config.initial_trade_date
+    ]
+    if len(positions) != 1 or positions[0] < GC_ROLL_CONFIRMATION_SESSIONS:
+        return _Issue(
+            GCDatasetBuildStatus.UNKNOWN,
+            "INITIAL_CONFIRMATION_CALENDAR_MISSING",
+            moment,
+        )
+    position = positions[0]
+    confirmation = eligible[position - GC_ROLL_CONFIRMATION_SESSIONS : position]
+    for entry in confirmation:
+        previous_volume = completed_volumes.get((predecessor, entry.trade_date))
+        current_volume = completed_volumes.get(
+            (config.initial_contract, entry.trade_date)
+        )
+        if previous_volume is None or current_volume is None:
+            return _Issue(
+                GCDatasetBuildStatus.UNKNOWN,
+                "INITIAL_CONFIRMATION_VOLUME_MISSING",
+                entry.closing,
+            )
+        if current_volume <= previous_volume:
+            return _Issue(
+                GCDatasetBuildStatus.INVALID,
+                "INITIAL_CONTRACT_DOMINANCE_CONTRADICTION",
+                entry.closing,
+            )
+    return None
 
 
 def _roll_plan(
@@ -1065,7 +1667,6 @@ def _roll_plan(
         opening = _calendar_open_for(config.initial_trade_date, calendars)
         return {}, (), (_Issue(GCDatasetBuildStatus.UNKNOWN, "INITIAL_CONTRACT_COVERAGE_MISSING", opening),)
     active = config.initial_contract
-    ordered_contracts = tuple(sorted(contracts, key=_contract_key))
     eligible = tuple(
         entry
         for entry in calendars
@@ -1074,27 +1675,29 @@ def _roll_plan(
     )
     active_by_date: dict[date, str] = {}
     scheduled: dict[date, str] = {}
-    counters: dict[str, int] = {}
+    dominance_count = 0
     roll_dates: list[date] = []
     issues: list[_Issue] = []
     for position, entry in enumerate(eligible):
         if entry.trade_date in scheduled:
             active = scheduled[entry.trade_date]
-            counters = {}
+            dominance_count = 0
             roll_dates.append(entry.trade_date)
         active_by_date[entry.trade_date] = active
-        later = tuple(
-            contract
-            for contract in ordered_contracts
-            if _contract_key(contract) > _contract_key(active)
-        )
-        if not later:
+        adjacent = _next_contract(active)
+        if adjacent not in contracts:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.UNKNOWN,
+                    "ADJACENT_CONTRACT_COVERAGE_MISSING",
+                    entry.closing,
+                )
+            )
+            dominance_count = 0
             continue
         current_volume = completed_volumes.get((active, entry.trade_date))
-        missing = current_volume is None or any(
-            (contract, entry.trade_date) not in completed_volumes for contract in later
-        )
-        if missing:
+        adjacent_volume = completed_volumes.get((adjacent, entry.trade_date))
+        if current_volume is None or adjacent_volume is None:
             issues.append(
                 _Issue(
                     GCDatasetBuildStatus.UNKNOWN,
@@ -1102,21 +1705,10 @@ def _roll_plan(
                     entry.closing,
                 )
             )
+            dominance_count = 0
             continue
-        qualifiers: list[str] = []
-        for contract in later:
-            volume = completed_volumes[(contract, entry.trade_date)]
-            counters[contract] = counters.get(contract, 0) + 1 if volume > current_volume else 0
-            if counters[contract] >= GC_ROLL_CONFIRMATION_SESSIONS:
-                qualifiers.append(contract)
-        if qualifiers:
-            selected = min(
-                qualifiers,
-                key=lambda contract: (
-                    -completed_volumes[(contract, entry.trade_date)],
-                    _contract_key(contract),
-                ),
-            )
+        dominance_count = dominance_count + 1 if adjacent_volume > current_volume else 0
+        if dominance_count >= GC_ROLL_CONFIRMATION_SESSIONS:
             if position + 1 >= len(eligible):
                 issues.append(
                     _Issue(
@@ -1126,7 +1718,7 @@ def _roll_plan(
                     )
                 )
             else:
-                scheduled[eligible[position + 1].trade_date] = selected
+                scheduled[eligible[position + 1].trade_date] = adjacent
     return active_by_date, tuple(roll_dates), tuple(issues)
 
 
@@ -1134,6 +1726,7 @@ def _make_segments(
     rows: tuple[_UsableRow, ...],
     config: GCDatasetBuildConfig,
     source_rank: dict[str, int],
+    calendar_map: dict[date, _NormalizedCalendar],
 ) -> tuple[GCCanonicalContractSegment, ...]:
     ordered = sorted(rows, key=lambda item: (item.merged.close_utc, _contract_key(item.merged.contract)))
     groups: list[tuple[list[_UsableRow], int]] = []
@@ -1143,20 +1736,34 @@ def _make_segments(
     for item in ordered:
         split = False
         preceding_missing = 0
-        if prior is not None:
+        if prior is None:
+            entry = calendar_map.get(item.trade_date)
+            if entry is not None and entry.opening is not None:
+                preceding_missing = _missing_slot_count(
+                    entry.opening, item.merged.start_utc
+                )
+                current_preceding_missing = preceding_missing
+        else:
             same_context = (
                 item.merged.contract == prior.merged.contract
                 and item.partition is prior.partition
                 and item.trade_date == prior.trade_date
+                and item.selected_coverage_ids == prior.selected_coverage_ids
             )
             delta = item.merged.start_utc - prior.merged.start_utc
             if not same_context or delta != _FIVE_MINUTES:
                 split = True
                 if same_context and delta > _FIVE_MINUTES:
-                    seconds = int(delta.total_seconds())
-                    if seconds % int(_FIVE_MINUTES.total_seconds()) != 0:
-                        raise _ValidationError("nonintegral missing-bar gap")
-                    preceding_missing = seconds // int(_FIVE_MINUTES.total_seconds()) - 1
+                    preceding_missing = _missing_slot_count(
+                        prior.merged.start_utc + _FIVE_MINUTES,
+                        item.merged.start_utc,
+                    )
+                elif item.trade_date != prior.trade_date:
+                    entry = calendar_map.get(item.trade_date)
+                    if entry is not None and entry.opening is not None:
+                        preceding_missing = _missing_slot_count(
+                            entry.opening, item.merged.start_utc
+                        )
         if split and current:
             groups.append((current, current_preceding_missing))
             current = []
@@ -1216,27 +1823,13 @@ def _make_segments(
     return tuple(output)
 
 
-def _contract_coverage_issue(
-    contracts: tuple[str, ...],
-    config: GCDatasetBuildConfig,
-    calendars: tuple[_NormalizedCalendar, ...],
-) -> _Issue | None:
-    if config.initial_contract not in contracts:
-        return _Issue(
-            GCDatasetBuildStatus.UNKNOWN,
-            "INITIAL_CONTRACT_COVERAGE_MISSING",
-            _calendar_open_for(config.initial_trade_date, calendars),
-        )
-    ordered = tuple(sorted(contracts, key=_contract_key))
-    start = ordered.index(config.initial_contract)
-    for left, right in zip(ordered[start:], ordered[start + 1 :]):
-        if _next_contract(left) != right:
-            return _Issue(
-                GCDatasetBuildStatus.UNKNOWN,
-                "INTERMEDIATE_CONTRACT_COVERAGE_MISSING",
-                _calendar_open_for(config.initial_trade_date, calendars),
-            )
-    return None
+def _missing_slot_count(start: datetime, end: datetime) -> int:
+    delta = end - start
+    seconds = int(delta.total_seconds())
+    width = int(_FIVE_MINUTES.total_seconds())
+    if seconds < 0 or seconds % width:
+        raise _ValidationError("nonintegral missing-bar gap")
+    return seconds // width
 
 
 def _normalize_config(value: object) -> GCDatasetBuildConfig:
@@ -1338,6 +1931,16 @@ def _trade_date_for_start(start_utc: datetime) -> date:
     return local.date()
 
 
+def _partition_for_trade_date(
+    trade_date: date, config: GCDatasetBuildConfig
+) -> GCSegmentPartition | None:
+    if trade_date < config.initial_trade_date or trade_date > config.oos_end_trade_date:
+        return None
+    if trade_date >= config.oos_start_trade_date:
+        return GCSegmentPartition.OOS_HOLDOUT
+    return GCSegmentPartition.DEVELOPMENT
+
+
 def _normalize_contract(value: object) -> str:
     if not isinstance(value, str):
         raise TypeError("contract must be str")
@@ -1367,6 +1970,21 @@ def _next_contract(contract: str) -> str:
         year = (year + 1) % 100
     else:
         position += 1
+    return f"GC{GC_DELIVERY_MONTH_CODES[position]}{year:02d}-COMEX"
+
+
+def _previous_contract(contract: str) -> str:
+    match = _CONTRACT_PATTERN.fullmatch(_normalize_contract(contract))
+    if match is None:  # pragma: no cover
+        raise ValueError("invalid contract")
+    code = match.group(1)
+    year = int(match.group(2))
+    position = GC_DELIVERY_MONTH_CODES.index(code)
+    if position == 0:
+        position = len(GC_DELIVERY_MONTH_CODES) - 1
+        year = (year - 1) % 100
+    else:
+        position -= 1
     return f"GC{GC_DELIVERY_MONTH_CODES[position]}{year:02d}-COMEX"
 
 
@@ -1564,6 +2182,11 @@ def _forbid_source_fields(*values: object) -> None:
         raise ValueError("source-local field is forbidden")
 
 
+def _forbid_coverage_fields(*values: object) -> None:
+    if any(value is not None for value in values):
+        raise ValueError("coverage-local field is forbidden")
+
+
 def _normalize_hash_tuple(value: object, name: str, *, nonempty: bool) -> tuple[str, ...]:
     if type(value) is not tuple:
         raise TypeError(f"{name} must be tuple")
@@ -1617,6 +2240,30 @@ def _digest_calendar(entries: tuple[_NormalizedCalendar, ...]) -> str:
     )
 
 
+def _digest_coverage(entries: tuple[_NormalizedCoverage, ...]) -> str:
+    return _hash_payload(
+        tuple(
+            {
+                "source_id": item.source_id,
+                "source_name": item.source_name,
+                "source_sha256": item.source_sha256,
+                "contract": item.contract,
+                "role": item.role.value,
+                "capture_timestamp": _timestamp_text(item.capture_timestamp),
+                "chart_timezone": item.chart_timezone,
+                "timeframe": item.timeframe,
+                "coverage_start_timestamp": _timestamp_text(item.start),
+                "coverage_end_timestamp": _timestamp_text(item.end),
+                "acquisition_completed_timestamp": _timestamp_text(
+                    item.acquisition_completed
+                ),
+                "acquisition_evidence_sha256": item.acquisition_evidence_sha256,
+            }
+            for item in entries
+        )
+    )
+
+
 def _hash_payload(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -1654,6 +2301,24 @@ def _export_first_moment(item: object) -> datetime | None:
         return _row_effective_moment(item.rows[0], zone)
     except (TypeError, ValueError):
         return None
+
+
+def _coverage_first_moment(item: object) -> datetime | None:
+    try:
+        if not isinstance(item, GCSierraChartCoverageEvidence):
+            return None
+        return _normalize_aware_timestamp(
+            item.coverage_start_timestamp,
+            name="coverage_start_timestamp",
+        )
+    except (TypeError, ValueError):
+        try:
+            return _normalize_aware_timestamp(
+                item.capture_timestamp,
+                name="capture_timestamp",
+            )
+        except (TypeError, ValueError):
+            return None
 
 
 def _calendar_open_for(
@@ -1730,6 +2395,7 @@ __all__ = [
     "GCSegmentPartition",
     "GCSierraChartBarRow",
     "GCSierraChartExport",
+    "GCSierraChartCoverageEvidence",
     "GCCanonicalContractSegment",
     "GCDatasetManifest",
     "GCDatasetBuildConfig",

@@ -8,6 +8,7 @@ from enum import Enum
 import hashlib
 import importlib.metadata
 import inspect
+import json
 from pathlib import Path
 from typing import get_type_hints
 
@@ -31,6 +32,7 @@ from analysis.gc_dataset_builder import (
     GCDatasetManifest,
     GCSegmentPartition,
     GCSierraChartBarRow,
+    GCSierraChartCoverageEvidence,
     GCSierraChartExport,
     GCSourceRole,
     build_gc_futures_dataset,
@@ -144,6 +146,7 @@ def _export(
     capture_timestamp: datetime | None = None,
 ) -> GCSierraChartExport:
     contract_price = {
+        "GCZ25-COMEX": Decimal("3900.0"),
         "GCG26-COMEX": Decimal("4000.0"),
         "GCJ26-COMEX": Decimal("4100.0"),
         "GCM26-COMEX": Decimal("4200.0"),
@@ -170,6 +173,204 @@ def _export(
     )
 
 
+def _prior_eligible_dates(trade_date: date) -> tuple[date, date, date]:
+    output: list[date] = []
+    cursor = trade_date - timedelta(days=1)
+    while len(output) < 3:
+        if cursor.weekday() < 5:
+            output.append(cursor)
+        cursor -= timedelta(days=1)
+    return tuple(reversed(output))  # type: ignore[return-value]
+
+
+def _coverage(
+    export: GCSierraChartExport,
+    calendars: tuple[KillZoneCalendarEntry, ...],
+) -> GCSierraChartCoverageEvidence:
+    starts = tuple(
+        row.bar_start_timestamp.replace(tzinfo=TOKYO).astimezone(UTC)
+        for row in export.rows
+    )
+    trade_dates = {
+        (start.astimezone(NY).date() + timedelta(days=1))
+        if start.astimezone(NY).time() >= time(18)
+        else start.astimezone(NY).date()
+        for start in starts
+    }
+    relevant = tuple(
+        item
+        for item in calendars
+        if item.trade_date in trade_dates
+        and item.session_open_timestamp is not None
+        and item.session_close_timestamp is not None
+    )
+    if not relevant:
+        raise ValueError("coverage requires at least one matching open calendar")
+    start = min(item.session_open_timestamp for item in relevant if item.session_open_timestamp)
+    end = max(item.session_close_timestamp for item in relevant if item.session_close_timestamp)
+    evidence_hash = hashlib.sha256(
+        f"{export.source_id}:{start.isoformat()}:{end.isoformat()}".encode()
+    ).hexdigest()
+    coverage_id = make_gc_dataset_id(
+        identity_kind="COVERAGE",
+        source_id=export.source_id,
+        source_name=export.source_name,
+        source_sha256=export.source_sha256,
+        contract=export.contract,
+        role=export.role,
+        capture_timestamp=export.capture_timestamp,
+        source_timezone=export.chart_timezone,
+        timeframe=export.timeframe,
+        coverage_start_timestamp=start,
+        coverage_end_timestamp=end,
+        acquisition_completed_timestamp=end,
+        acquisition_evidence_sha256=evidence_hash,
+    )
+    return GCSierraChartCoverageEvidence(
+        coverage_id,
+        export.source_id,
+        export.source_name,
+        export.source_sha256,
+        export.contract,
+        export.role,
+        export.capture_timestamp,
+        export.chart_timezone,
+        export.timeframe,
+        start,
+        end,
+        end,
+        evidence_hash,
+    )
+
+
+def _coverage_per_session(
+    export: GCSierraChartExport,
+    calendars: tuple[KillZoneCalendarEntry, ...],
+) -> tuple[GCSierraChartCoverageEvidence, ...]:
+    output: list[GCSierraChartCoverageEvidence] = []
+    starts = {
+        row.bar_start_timestamp.replace(tzinfo=TOKYO).astimezone(UTC)
+        for row in export.rows
+    }
+    for calendar in calendars:
+        opening = calendar.session_open_timestamp
+        closing = calendar.session_close_timestamp
+        if opening is None or closing is None or closing > export.capture_timestamp:
+            continue
+        if not any(opening <= start < closing for start in starts):
+            continue
+        evidence_hash = hashlib.sha256(
+            f"{export.source_id}:{opening.isoformat()}:{closing.isoformat()}".encode()
+        ).hexdigest()
+        coverage_id = make_gc_dataset_id(
+            identity_kind="COVERAGE",
+            source_id=export.source_id,
+            source_name=export.source_name,
+            source_sha256=export.source_sha256,
+            contract=export.contract,
+            role=export.role,
+            capture_timestamp=export.capture_timestamp,
+            source_timezone=export.chart_timezone,
+            timeframe=export.timeframe,
+            coverage_start_timestamp=opening,
+            coverage_end_timestamp=closing,
+            acquisition_completed_timestamp=closing,
+            acquisition_evidence_sha256=evidence_hash,
+        )
+        output.append(
+            GCSierraChartCoverageEvidence(
+                coverage_id,
+                export.source_id,
+                export.source_name,
+                export.source_sha256,
+                export.contract,
+                export.role,
+                export.capture_timestamp,
+                export.chart_timezone,
+                export.timeframe,
+                opening,
+                closing,
+                closing,
+                evidence_hash,
+            )
+        )
+    return tuple(output)
+
+
+def _reidentify_coverage(
+    item: GCSierraChartCoverageEvidence,
+    **changes: object,
+) -> GCSierraChartCoverageEvidence:
+    values: dict[str, object] = {
+        "source_id": item.source_id,
+        "source_name": item.source_name,
+        "source_sha256": item.source_sha256,
+        "contract": item.contract,
+        "role": item.role,
+        "capture_timestamp": item.capture_timestamp,
+        "chart_timezone": item.chart_timezone,
+        "timeframe": item.timeframe,
+        "coverage_start_timestamp": item.coverage_start_timestamp,
+        "coverage_end_timestamp": item.coverage_end_timestamp,
+        "acquisition_completed_timestamp": item.acquisition_completed_timestamp,
+        "acquisition_evidence_sha256": item.acquisition_evidence_sha256,
+    }
+    values.update(changes)
+    coverage_id = make_gc_dataset_id(
+        identity_kind="COVERAGE",
+        source_id=values["source_id"],
+        source_name=values["source_name"],
+        source_sha256=values["source_sha256"],
+        contract=values["contract"],
+        role=values["role"],
+        capture_timestamp=values["capture_timestamp"],
+        source_timezone=values["chart_timezone"],
+        timeframe=values["timeframe"],
+        coverage_start_timestamp=values["coverage_start_timestamp"],
+        coverage_end_timestamp=values["coverage_end_timestamp"],
+        acquisition_completed_timestamp=values["acquisition_completed_timestamp"],
+        acquisition_evidence_sha256=values["acquisition_evidence_sha256"],
+    )
+    return GCSierraChartCoverageEvidence(
+        coverage_id=coverage_id,
+        **values,  # type: ignore[arg-type]
+    )
+
+
+def _sorted_exports(
+    exports: tuple[GCSierraChartExport, ...],
+) -> tuple[GCSierraChartExport, ...]:
+    def key(item: GCSierraChartExport) -> tuple[object, ...]:
+        try:
+            contract_key: tuple[int, int] = dataset._contract_key(item.contract)
+        except (TypeError, ValueError):
+            contract_key = (9999, 9999)
+        role = item.role.value if isinstance(item.role, GCSourceRole) else "~"
+        source_hash = item.source_sha256 if isinstance(item.source_sha256, str) else "~"
+        return contract_key, role, source_hash
+
+    return tuple(
+        sorted(exports, key=key)
+    )
+
+
+def _sorted_coverage(
+    coverage: tuple[GCSierraChartCoverageEvidence, ...],
+) -> tuple[GCSierraChartCoverageEvidence, ...]:
+    return tuple(
+        sorted(
+            coverage,
+            key=lambda item: (
+                item.coverage_start_timestamp.astimezone(UTC),
+                item.coverage_end_timestamp.astimezone(UTC),
+                dataset._contract_key(item.contract),
+                item.role.value,
+                item.coverage_id,
+            ),
+        )
+    )
+
+
 def _config(**changes: object) -> GCDatasetBuildConfig:
     values: dict[str, object] = {
         "instrument": "gc",
@@ -191,14 +392,133 @@ def _config(**changes: object) -> GCDatasetBuildConfig:
 def _build(
     *,
     exports: tuple[GCSierraChartExport, ...] | None = None,
+    coverage: tuple[GCSierraChartCoverageEvidence, ...] | None = None,
     calendars: tuple[KillZoneCalendarEntry, ...] | None = None,
     config: GCDatasetBuildConfig | None = None,
+    auto_dependencies: bool = True,
 ) -> GCDatasetBuildResult:
+    selected_config = _config() if config is None else config
+    selected_calendars = (_calendar(D1),) if calendars is None else calendars
+    selected_exports = (_export(),) if exports is None else exports
+    if auto_dependencies and selected_exports and selected_calendars:
+        prior_dates = _prior_eligible_dates(selected_config.initial_trade_date)
+        prior_calendars = tuple(_calendar(day) for day in prior_dates)
+        calendar_map = {item.trade_date: item for item in prior_calendars + selected_calendars}
+        selected_calendars = tuple(calendar_map[key] for key in sorted(calendar_map))
+        if any(item.contract == selected_config.initial_contract for item in selected_exports):
+            predecessor = dataset._previous_contract(selected_config.initial_contract)
+            proof_current = _export(
+                selected_config.initial_contract,
+                tuple((day, 20) for day in prior_dates),
+                source_name="initial_current_proof.txt",
+            )
+            proof_predecessor = _export(
+                predecessor,
+                tuple((day, 10) for day in prior_dates),
+                source_name="initial_predecessor_proof.txt",
+            )
+            additions = [proof_current, proof_predecessor]
+            adjacent = dataset._next_contract(selected_config.initial_contract)
+            if not any(item.contract == adjacent for item in selected_exports):
+                active_dates = tuple(
+                    item.trade_date
+                    for item in selected_calendars
+                    if item.session_status is not KillZoneSessionStatus.SESSION_CLOSED
+                    and selected_config.initial_trade_date
+                    <= item.trade_date
+                    <= selected_config.oos_end_trade_date
+                )
+                if active_dates:
+                    active_closes = tuple(
+                        item.session_close_timestamp
+                        for item in selected_calendars
+                        if item.trade_date in active_dates
+                        and item.session_close_timestamp is not None
+                    )
+                    if active_closes:
+                        additions.append(
+                            _export(
+                                adjacent,
+                                tuple((day, 5) for day in active_dates),
+                                source_name="adjacent_roll_evidence.txt",
+                                capture_timestamp=max(active_closes)
+                                + timedelta(minutes=1),
+                            )
+                        )
+            selected_exports = _sorted_exports(selected_exports + tuple(additions))
+    if coverage is None:
+        generated: list[GCSierraChartCoverageEvidence] = []
+        for item in selected_exports:
+            try:
+                generated.extend(_coverage_per_session(item, selected_calendars))
+            except (TypeError, ValueError):
+                continue
+        selected_coverage = _sorted_coverage(tuple(generated))
+    else:
+        selected_coverage = coverage
     return build_gc_futures_dataset(
-        exports=(_export(),) if exports is None else exports,
-        calendar_entries=(_calendar(D1),) if calendars is None else calendars,
-        config=_config() if config is None else config,
+        exports=selected_exports,
+        coverage_evidence=selected_coverage,
+        calendar_entries=selected_calendars,
+        config=selected_config,
     )
+
+
+def _manual_scope(
+    *,
+    current_prior_volumes: tuple[int, int, int] = (20, 20, 20),
+    predecessor_prior_volumes: tuple[int, int, int] = (10, 10, 10),
+    current_dates: tuple[date, ...] = (D1,),
+    current_volumes: tuple[int, ...] = (10,),
+    adjacent_volumes: tuple[int, ...] = (5,),
+    include_predecessor: bool = True,
+    include_adjacent: bool = True,
+    config: GCDatasetBuildConfig | None = None,
+) -> tuple[
+    tuple[GCSierraChartExport, ...],
+    tuple[GCSierraChartCoverageEvidence, ...],
+    tuple[KillZoneCalendarEntry, ...],
+    GCDatasetBuildConfig,
+]:
+    selected_config = _config() if config is None else config
+    prior_dates = _prior_eligible_dates(selected_config.initial_trade_date)
+    calendars = tuple(
+        _calendar(day) for day in prior_dates + current_dates
+    )
+    current_sessions = tuple(
+        zip(prior_dates, current_prior_volumes, strict=True)
+    ) + tuple(zip(current_dates, current_volumes, strict=True))
+    current = _export(
+        selected_config.initial_contract,
+        current_sessions,
+        source_name="manual_current.txt",
+    )
+    exports: list[GCSierraChartExport] = [current]
+    if include_predecessor:
+        exports.append(
+            _export(
+                dataset._previous_contract(selected_config.initial_contract),
+                tuple(zip(prior_dates, predecessor_prior_volumes, strict=True)),
+                source_name="manual_predecessor.txt",
+            )
+        )
+    if include_adjacent:
+        exports.append(
+            _export(
+                dataset._next_contract(selected_config.initial_contract),
+                tuple(zip(current_dates, adjacent_volumes, strict=True)),
+                source_name="manual_adjacent.txt",
+            )
+        )
+    ordered_exports = _sorted_exports(tuple(exports))
+    coverage = _sorted_coverage(
+        tuple(
+            evidence
+            for export in ordered_exports
+            for evidence in _coverage_per_session(export, calendars)
+        )
+    )
+    return ordered_exports, coverage, calendars, selected_config
 
 
 def _segment_id(**changes: object) -> str:
@@ -222,8 +542,10 @@ def _dataset_id(**changes: object) -> str:
         "identity_kind": "DATASET",
         "config": _config(),
         "source_ids": (HASH_A,),
+        "coverage_ids": (HASH_B,),
         "segment_ids": (HASH_B,),
         "calendar_digest": HASH_C,
+        "coverage_digest": "e" * 64,
         "evidence_digest": "d" * 64,
         "roll_trade_dates": (),
     }
@@ -231,12 +553,39 @@ def _dataset_id(**changes: object) -> str:
     return make_gc_dataset_id(**values)  # type: ignore[arg-type]
 
 
+def _coverage_id(**changes: object) -> str:
+    export = _export()
+    opening, closing = _bounds(D1)
+    values: dict[str, object] = {
+        "identity_kind": "COVERAGE",
+        "source_id": export.source_id,
+        "source_name": export.source_name,
+        "source_sha256": export.source_sha256,
+        "contract": export.contract,
+        "role": export.role,
+        "capture_timestamp": export.capture_timestamp,
+        "source_timezone": export.chart_timezone,
+        "timeframe": export.timeframe,
+        "coverage_start_timestamp": opening,
+        "coverage_end_timestamp": closing,
+        "acquisition_completed_timestamp": closing,
+        "acquisition_evidence_sha256": HASH_A,
+    }
+    values.update(changes)
+    return make_gc_dataset_id(**values)  # type: ignore[arg-type]
+
+
 # Case 1
-@pytest.mark.parametrize("missing", ["exports", "calendar_entries"])
+@pytest.mark.parametrize(
+    "missing", ["exports", "coverage_evidence", "calendar_entries"]
+)
 def test_case_01_missing_context_is_unknown(missing: str) -> None:
+    export = _export()
+    calendar = _calendar(D1)
     kwargs: dict[str, object] = {
-        "exports": (_export(),),
-        "calendar_entries": (_calendar(D1),),
+        "exports": (export,),
+        "coverage_evidence": (_coverage(export, (calendar,)),),
+        "calendar_entries": (calendar,),
         "config": _config(),
     }
     kwargs[missing] = None
@@ -248,15 +597,40 @@ def test_case_01_missing_context_is_unknown(missing: str) -> None:
 def test_case_01_malformed_counterpart_overrides_missing_unknown() -> None:
     malformed = replace(_export(), source_sha256="bad")
     result = build_gc_futures_dataset(
-        exports=(malformed,), calendar_entries=None, config=_config()
+        exports=(malformed,),
+        coverage_evidence=(),
+        calendar_entries=None,
+        config=_config(),
     )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert result.segments == () and result.manifest is None
+
+
+@pytest.mark.parametrize("missing", ["exports", "calendar_entries"])
+def test_case_01_malformed_coverage_overrides_missing_unknown(
+    missing: str,
+) -> None:
+    export = _export()
+    calendar = _calendar(D1)
+    malformed = replace(
+        _coverage(export, (calendar,)),
+        acquisition_evidence_sha256="not-a-sha256",
+    )
+    kwargs: dict[str, object] = {
+        "exports": (export,),
+        "coverage_evidence": (malformed,),
+        "calendar_entries": (calendar,),
+        "config": _config(),
+    }
+    kwargs[missing] = None
+    result = build_gc_futures_dataset(**kwargs)  # type: ignore[arg-type]
     assert result.status is GCDatasetBuildStatus.INVALID
     assert result.segments == () and result.manifest is None
 
 
 # Case 2
 def test_case_02_valid_empty_scope_is_none() -> None:
-    result = _build(exports=(), calendars=())
+    result = _build(exports=(), coverage=(), calendars=())
     assert result.status is GCDatasetBuildStatus.NONE
     assert result.dataset_id is None
     assert result.segments == () and result.manifest is None
@@ -283,7 +657,7 @@ def test_case_04_runtime_timezone_binding(monkeypatch: pytest.MonkeyPatch) -> No
 
 # Case 5
 def test_case_05_exact_constants() -> None:
-    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V1"
+    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V2"
     assert GC_DATASET_INSTRUMENT == "GC"
     assert GC_DATASET_TIMEFRAME == "5M"
     assert GC_DATASET_SOURCE_TIMEZONE == "Asia/Tokyo"
@@ -291,6 +665,18 @@ def test_case_05_exact_constants() -> None:
     assert GC_DATASET_TICK_SIZE == Decimal("0.1")
     assert GC_ROLL_CONFIRMATION_SESSIONS == 3
     assert GC_DELIVERY_MONTH_CODES == ("G", "J", "M", "Q", "V", "Z")
+
+
+def test_case_05_synthetic_zero_trade_zero_volume_row_is_rejected() -> None:
+    lines = _raw(((D1, 10),)).decode().splitlines()
+    parts = [part.strip() for part in lines[1].split(",")]
+    parts[6] = "0"
+    parts[7] = "0"
+    parts[11] = "0"
+    parts[12] = "0"
+    lines[1] = ", ".join(parts)
+    with pytest.raises((TypeError, ValueError)):
+        _export(raw_bytes=("\n".join(lines) + "\n").encode())
 
 
 # Case 6
@@ -303,6 +689,17 @@ def test_case_06_exact_header(header: str) -> None:
     body[0] = header
     with pytest.raises((TypeError, ValueError)):
         _export(raw_bytes=("\n".join(body) + "\n").encode())
+
+
+def test_case_06_absent_interval_never_emits_inferred_bar() -> None:
+    lines = _raw(((D1, 10),)).decode().splitlines()
+    export = _export(raw_bytes=("\n".join(lines[:2]) + "\n").encode())
+    result = _build(exports=(export,))
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert sum(len(segment.bars) for segment in result.segments) == 1
+    assert result.manifest is not None
+    assert result.manifest.missing_bar_count == 1
+    assert result.manifest.attested_no_trade_interval_count == 1
 
 
 # Case 7
@@ -319,11 +716,40 @@ def test_case_07_row_field_count_and_blank_rejection(mutation: str) -> None:
         _export(raw_bytes=("\n".join(lines) + "\n").encode())
 
 
+def test_case_07_coverage_contract_is_frozen_and_utc_normalized() -> None:
+    export = _export()
+    evidence = _coverage(export, (_calendar(D1),))
+    equivalent = _reidentify_coverage(
+        evidence,
+        coverage_start_timestamp=evidence.coverage_start_timestamp.astimezone(TOKYO),
+        coverage_end_timestamp=evidence.coverage_end_timestamp.astimezone(TOKYO),
+        acquisition_completed_timestamp=evidence.acquisition_completed_timestamp.astimezone(TOKYO),
+    )
+    assert equivalent.coverage_id == evidence.coverage_id
+    assert GCSierraChartCoverageEvidence.__dataclass_params__.frozen is True
+    with pytest.raises(FrozenInstanceError):
+        evidence.contract = "GCJ26-COMEX"  # type: ignore[misc]
+
+
 # Case 8
 def test_case_08_raw_timestamp_is_naive_bar_start() -> None:
     export = _export()
     assert export.rows[0].bar_start_timestamp.tzinfo is None
     assert export.rows[0].bar_start_timestamp.hour == 8
+
+
+def test_case_08_coverage_source_identity_must_reconcile() -> None:
+    export = _export()
+    evidence = _coverage(export, (_calendar(D1),))
+    malformed = replace(evidence, source_id=HASH_A)
+    result = _build(
+        exports=(export,),
+        coverage=(malformed,),
+        calendars=(_calendar(D1),),
+        auto_dependencies=False,
+    )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert result.manifest is None
 
 
 # Case 9
@@ -334,12 +760,37 @@ def test_case_09_tokyo_start_converts_to_utc_close() -> None:
     assert result.segments[0].bars[0].timestamp == opening + timedelta(minutes=5)
 
 
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"coverage_end_timestamp": _bounds(D1)[0]},
+        {"acquisition_completed_timestamp": _bounds(D1)[0]},
+        {"acquisition_completed_timestamp": _bounds(D1)[1] + timedelta(minutes=2)},
+    ],
+)
+def test_case_09_coverage_range_and_completion_ordering(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(**changes)
+
+
 # Case 10
 def test_case_10_capture_boundary() -> None:
     opening, _ = _bounds(D1)
     assert _export(capture_timestamp=opening + timedelta(minutes=10))
     with pytest.raises((TypeError, ValueError)):
         _export(capture_timestamp=opening + timedelta(minutes=9, seconds=59))
+
+
+@pytest.mark.parametrize(
+    "evidence_hash", [None, True, "screenshot.png", "10 rows", "1.2s"]
+)
+def test_case_10_only_sha256_proves_acquisition(
+    evidence_hash: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(acquisition_evidence_sha256=evidence_hash)
 
 
 # Case 11
@@ -355,6 +806,38 @@ def test_case_11_decimal_tick_and_ohlc_geometry() -> None:
         _export(raw_bytes=("\n".join(lines) + "\n").encode())
 
 
+def test_case_11_coverage_order_and_overlap_are_fail_closed() -> None:
+    export = _export(capture_timestamp=_bounds(D1)[1] + timedelta(minutes=5))
+    base = _coverage(export, (_calendar(D1),))
+    opening, closing = _bounds(D1)
+    first = _reidentify_coverage(
+        base,
+        coverage_end_timestamp=opening + timedelta(minutes=5),
+        acquisition_completed_timestamp=opening + timedelta(minutes=5),
+    )
+    second = _reidentify_coverage(
+        base,
+        coverage_start_timestamp=opening + timedelta(minutes=5),
+        coverage_end_timestamp=closing,
+        acquisition_completed_timestamp=closing,
+    )
+    out_of_order = _build(
+        exports=(export,), coverage=(second, first), calendars=(_calendar(D1),),
+        auto_dependencies=False,
+    )
+    assert out_of_order.status is GCDatasetBuildStatus.INVALID
+    overlapping = _reidentify_coverage(
+        base,
+        coverage_start_timestamp=opening + timedelta(minutes=4),
+        acquisition_completed_timestamp=closing,
+    )
+    overlap = _build(
+        exports=(export,), coverage=_sorted_coverage((base, overlapping)),
+        calendars=(_calendar(D1),), auto_dependencies=False,
+    )
+    assert overlap.status is GCDatasetBuildStatus.INVALID
+
+
 # Case 12
 @pytest.mark.parametrize("value", ["True", "nan", "inf", "1,000.0"])
 def test_case_12_malformed_decimal_does_not_leak(value: str) -> None:
@@ -364,6 +847,23 @@ def test_case_12_malformed_decimal_does_not_leak(value: str) -> None:
     lines[1] = ", ".join(fields)
     with pytest.raises((TypeError, ValueError)):
         _export(raw_bytes=("\n".join(lines) + "\n").encode())
+
+
+def test_case_12_export_row_outside_coverage_is_invalid() -> None:
+    export = _export(capture_timestamp=_bounds(D1)[1] + timedelta(minutes=1))
+    evidence = _coverage(export, (_calendar(D1),))
+    opening, _ = _bounds(D1)
+    first_slot_only = _reidentify_coverage(
+        evidence,
+        coverage_end_timestamp=opening + timedelta(minutes=5),
+        acquisition_completed_timestamp=opening + timedelta(minutes=5),
+    )
+    result = _build(
+        exports=(export,), coverage=(first_slot_only,),
+        calendars=(_calendar(D1),), auto_dependencies=False,
+    )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert result.manifest is None
 
 
 # Case 13
@@ -403,6 +903,13 @@ def test_case_15_no_silent_row_sort() -> None:
     lines[1], lines[2] = lines[2], lines[1]
     with pytest.raises((TypeError, ValueError)):
         _export(raw_bytes=("\n".join(lines) + "\n").encode())
+
+
+def test_case_15_unattested_required_session_volume_is_unknown() -> None:
+    result = _build(coverage=())
+    assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "COVERAGE_UNVERIFIED" in result.blocking_reasons
+    assert result.manifest is None
 
 
 # Case 16
@@ -478,6 +985,24 @@ def test_case_22_closed_or_maintenance_positive_volume_is_invalid() -> None:
         _export(raw_bytes=("\n".join(lines) + "\n").encode(), capture_timestamp=closing + timedelta(days=1))
 
 
+def test_case_22_initial_contract_requires_exact_three_session_proof() -> None:
+    exports, coverage, calendars, config = _manual_scope()
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    prior_dates = _prior_eligible_dates(config.initial_trade_date)
+    assert all(
+        (config.initial_contract, day, 20)
+        in result.manifest.completed_session_volumes
+        for day in prior_dates
+    )
+
+
 # Case 23
 def test_case_23_missing_calendar_unknown_malformed_calendar_invalid() -> None:
     missing = _build(calendars=())
@@ -485,6 +1010,21 @@ def test_case_23_missing_calendar_unknown_malformed_calendar_invalid() -> None:
     malformed = replace(_calendar(D1), session_close_timestamp=None)
     invalid = _build(calendars=(malformed,))
     assert invalid.status is GCDatasetBuildStatus.INVALID
+
+
+def test_case_23_missing_exact_predecessor_blocks_initial_acceptance() -> None:
+    exports, coverage, calendars, config = _manual_scope(
+        include_predecessor=False
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "INITIAL_PREDECESSOR_COVERAGE_MISSING" in result.blocking_reasons
+    assert result.manifest is None
 
 
 # Case 24
@@ -495,14 +1035,33 @@ def test_case_24_trade_date_assignment_uses_new_york_session() -> None:
     assert result.segments[0].first_trade_date == D1
 
 
+def test_case_24_later_start_is_not_auto_accepted_without_predecessor_proof() -> None:
+    config = _config(initial_contract="GCJ26-COMEX")
+    exports, coverage, calendars, config = _manual_scope(
+        config=config,
+        include_predecessor=False,
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "INITIAL_PREDECESSOR_COVERAGE_MISSING" in result.blocking_reasons
+
+
 # Case 25
-def test_case_25_partial_session_is_not_completed_volume_evidence() -> None:
+def test_case_25_attested_sparse_session_is_completed_without_synthetic_bar() -> None:
     raw = _raw(((D1, 10),)).decode().splitlines()
     export = _export(raw_bytes=("\n".join(raw[:2]) + "\n").encode())
     result = _build(exports=(export,))
     assert result.status is GCDatasetBuildStatus.VALID
     assert result.manifest is not None
-    assert result.manifest.completed_session_volumes == ()
+    assert ("GCG26-COMEX", D1, 5) in result.manifest.completed_session_volumes
+    assert len(result.segments[0].bars) == 1
+    assert result.manifest.missing_bar_count == 1
+    assert result.manifest.attested_no_trade_interval_count == 1
 
 
 # Case 26
@@ -531,13 +1090,27 @@ def test_case_27_missing_bar_splits_and_is_counted() -> None:
 
 
 # Case 28
-def test_case_28_missing_intermediate_contract_is_unknown() -> None:
+def test_case_28_farther_contract_does_not_block_exact_adjacent_comparison() -> None:
     exports = (
         _export("GCG26-COMEX"),
         _export("GCM26-COMEX", source_name="m.txt"),
     )
     result = _build(exports=exports)
+    assert result.status is GCDatasetBuildStatus.VALID
+
+
+def test_case_28_missing_adjacent_completed_coverage_is_unknown() -> None:
+    exports, coverage, calendars, config = _manual_scope(
+        include_adjacent=False
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
     assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "ADJACENT_CONTRACT_COVERAGE_MISSING" in result.blocking_reasons
 
 
 # Case 29
@@ -555,7 +1128,12 @@ def _roll_inputs(
     current = current_volumes or tuple(10 for _ in dates)
     g = _export("GCG26-COMEX", tuple(zip(dates, current, strict=True)), source_name="g.txt")
     j = _export("GCJ26-COMEX", tuple(zip(dates, later_volumes, strict=True)), source_name="j.txt")
-    return (g, j), tuple(_calendar(day) for day in dates)
+    m = _export(
+        "GCM26-COMEX",
+        tuple((day, 1) for day in dates),
+        source_name="m_after_roll.txt",
+    )
+    return (g, j, m), tuple(_calendar(day) for day in dates)
 
 
 # Case 30
@@ -614,6 +1192,47 @@ def test_case_34_multiple_candidates_use_volume_then_nearer_delivery() -> None:
     assert rolled and rolled[0].contract == "GCJ26-COMEX"
 
 
+def test_case_34_farther_volume_cannot_skip_exact_adjacent_delivery() -> None:
+    dates = (D1, D2, D3, D4)
+    exports, _, calendars, config = _manual_scope(
+        current_dates=dates,
+        current_volumes=(10, 10, 10, 10),
+        adjacent_volumes=(20, 20, 20, 20),
+    )
+    farther = _export(
+        "GCM26-COMEX",
+        tuple((day, 1000) for day in dates),
+        source_name="farther.txt",
+    )
+    all_exports = _sorted_exports(exports + (farther,))
+    coverage = _sorted_coverage(
+        tuple(
+            item
+            for export in all_exports
+            for item in _coverage_per_session(export, calendars)
+        )
+    )
+    result = build_gc_futures_dataset(
+        exports=all_exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    assert result.manifest.roll_trade_dates == (D4,)
+    assert any(
+        segment.contract == "GCJ26-COMEX"
+        and segment.first_trade_date == D4
+        for segment in result.segments
+    )
+    assert not any(
+        segment.contract == "GCM26-COMEX"
+        and segment.first_trade_date == D4
+        for segment in result.segments
+    )
+
+
 # Case 35
 def test_case_35_effective_session_volume_cannot_change_scheduled_roll() -> None:
     exports, calendars = _roll_inputs((20, 20, 20, 0), current_volumes=(10, 10, 10, 100))
@@ -630,7 +1249,9 @@ def test_case_36_skipped_contract_remains_in_manifest_lineage() -> None:
     m = _export("GCM26-COMEX", tuple((d, 30) for d in dates), source_name="m.txt")
     result = _build(exports=(g, j, m), calendars=tuple(_calendar(d) for d in dates))
     assert result.manifest is not None
-    assert set(result.manifest.source_ids) == {g.source_id, j.source_id, m.source_id}
+    assert {g.source_id, j.source_id, m.source_id}.issubset(
+        set(result.manifest.source_ids)
+    )
 
 
 # Case 37
@@ -679,11 +1300,65 @@ def test_case_40_oos_partition_is_disjoint() -> None:
     assert result.status is GCDatasetBuildStatus.INVALID
 
 
+def test_case_40_v2_manifest_binds_coverage_and_conserves_sparse_evidence() -> None:
+    lines = _raw(((D1, 10),)).decode().splitlines()
+    export = _export(raw_bytes=("\n".join(lines[:2]) + "\n").encode())
+    result = _build(exports=(export,))
+    manifest = result.manifest
+    assert manifest is not None
+    assert manifest.version == "GC-DATASET-BUILDER-V2"
+    assert manifest.coverage_ids
+    assert len(manifest.coverage_digest) == 64
+    assert manifest.attested_no_trade_interval_count <= manifest.missing_bar_count
+    assert manifest.parsed_row_count == (
+        manifest.eligible_row_count + manifest.excluded_row_count
+    )
+    assert manifest.raw_volume == manifest.eligible_volume + manifest.excluded_volume
+    assert all(
+        reason not in {"COVERAGE_UNVERIFIED", "COVERAGE_MISMATCH"}
+        for reason, _ in manifest.exclusion_counts
+    )
+
+
 # Case 41
 def test_case_41_incomplete_final_capture_is_rejected_by_parser() -> None:
     opening, _ = _bounds(D1)
     with pytest.raises((TypeError, ValueError)):
         _export(capture_timestamp=opening + timedelta(minutes=5))
+
+
+def test_case_41_source_identity_is_v2_separated() -> None:
+    export = _export()
+    v2 = make_gc_dataset_id(
+        identity_kind="SOURCE",
+        source_name=export.source_name,
+        source_sha256=export.source_sha256,
+        contract=export.contract,
+        role=export.role,
+        capture_timestamp=export.capture_timestamp,
+        source_timezone=export.chart_timezone,
+        timeframe=export.timeframe,
+    )
+    v1_payload = {
+        "version": "GC-DATASET-BUILDER-V1",
+        "identity_kind": "SOURCE",
+        "source_name": export.source_name,
+        "source_sha256": export.source_sha256,
+        "contract": export.contract,
+        "role": export.role.value,
+        "capture_timestamp": export.capture_timestamp.astimezone(UTC).isoformat(
+            timespec="microseconds"
+        ),
+        "source_timezone": export.chart_timezone,
+        "timeframe": export.timeframe,
+    }
+    v1 = hashlib.sha256(
+        json.dumps(
+            v1_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode()
+    ).hexdigest()
+    assert v2 == export.source_id
+    assert v2 != v1
 
 
 # Case 42
@@ -696,6 +1371,66 @@ def test_case_42_manifest_conservation_and_evidence_digest() -> None:
     assert manifest.raw_volume == manifest.eligible_volume + manifest.excluded_volume
     assert sum(count for _, count in manifest.exclusion_counts) == manifest.excluded_row_count
     assert _dataset_id(evidence_digest="e" * 64) != _dataset_id()
+
+
+@pytest.mark.parametrize(
+    "required_field",
+    [
+        "source_id", "source_name", "source_sha256", "contract", "role",
+        "capture_timestamp", "source_timezone", "timeframe",
+        "coverage_start_timestamp", "coverage_end_timestamp",
+        "acquisition_completed_timestamp", "acquisition_evidence_sha256",
+    ],
+)
+def test_case_42_coverage_identity_requires_every_field(
+    required_field: str,
+) -> None:
+    replacement: object = None
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(**{required_field: replacement})
+
+
+@pytest.mark.parametrize(
+    ("forbidden_field", "forbidden_value"),
+    [
+        ("config", _config()),
+        ("first_trade_date", D1),
+        ("last_trade_date", D1),
+        ("source_ids", (HASH_A,)),
+        ("coverage_ids", (HASH_A,)),
+        ("bar_digest", HASH_A),
+        ("preceding_missing_bar_count", 0),
+        ("partition", GCSegmentPartition.DEVELOPMENT),
+        ("segment_ids", (HASH_A,)),
+        ("calendar_digest", HASH_A),
+        ("coverage_digest", HASH_A),
+        ("evidence_digest", HASH_A),
+        ("roll_trade_dates", (D1,)),
+    ],
+)
+def test_case_42_coverage_identity_forbids_other_kind_fields(
+    forbidden_field: str,
+    forbidden_value: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(**{forbidden_field: forbidden_value})
+
+
+def test_case_42_coverage_identity_recomputes_source_and_binds_payload() -> None:
+    baseline = _coverage_id()
+    opening, closing = _bounds(D1)
+    assert _coverage_id(
+        coverage_start_timestamp=opening.astimezone(TOKYO),
+        coverage_end_timestamp=closing.astimezone(TOKYO),
+        acquisition_completed_timestamp=closing.astimezone(TOKYO),
+    ) == baseline
+    assert _coverage_id(
+        acquisition_evidence_sha256=HASH_C
+    ) != baseline
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(source_id=HASH_C)
+    with pytest.raises((TypeError, ValueError)):
+        _coverage_id(coverage_start_timestamp=closing)
 
 
 # Case 43
@@ -758,15 +1493,22 @@ def test_case_43_source_identity_requires_every_field(required_field: str) -> No
 @pytest.mark.parametrize(
     ("forbidden_field", "forbidden_value"),
     [
+        ("source_id", HASH_A),
         ("config", _config()),
+        ("coverage_start_timestamp", datetime(2026, 1, 1, tzinfo=UTC)),
+        ("coverage_end_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_completed_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_evidence_sha256", HASH_A),
         ("first_trade_date", D1),
         ("last_trade_date", D1),
         ("source_ids", (HASH_A,)),
+        ("coverage_ids", (HASH_A,)),
         ("bar_digest", HASH_A),
         ("preceding_missing_bar_count", 0),
         ("partition", GCSegmentPartition.DEVELOPMENT),
         ("segment_ids", (HASH_A,)),
         ("calendar_digest", HASH_A),
+        ("coverage_digest", HASH_A),
         ("evidence_digest", HASH_A),
         ("roll_trade_dates", (D1,)),
     ],
@@ -822,14 +1564,21 @@ def test_case_44_segment_identity_requires_every_field(required_field: str) -> N
 @pytest.mark.parametrize(
     ("forbidden_field", "forbidden_value"),
     [
+        ("source_id", HASH_A),
         ("source_name", "source.txt"),
         ("source_sha256", HASH_C),
         ("role", GCSourceRole.DEVELOPMENT),
         ("capture_timestamp", datetime(2026, 1, 1, tzinfo=UTC)),
         ("source_timezone", "Asia/Tokyo"),
         ("timeframe", "5M"),
+        ("coverage_start_timestamp", datetime(2026, 1, 1, tzinfo=UTC)),
+        ("coverage_end_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_completed_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_evidence_sha256", HASH_A),
+        ("coverage_ids", (HASH_A,)),
         ("segment_ids", (HASH_C,)),
         ("calendar_digest", HASH_C),
+        ("coverage_digest", HASH_C),
         ("evidence_digest", HASH_C),
         ("roll_trade_dates", (D2,)),
     ],
@@ -874,7 +1623,9 @@ def test_case_45_dataset_identity_schema_and_sensitivity() -> None:
     [
         ("config", None),
         ("source_ids", ()),
+        ("coverage_ids", ()),
         ("calendar_digest", None),
+        ("coverage_digest", None),
         ("evidence_digest", None),
     ],
 )
@@ -889,6 +1640,7 @@ def test_case_45_dataset_identity_requires_every_field(
 @pytest.mark.parametrize(
     ("forbidden_field", "forbidden_value"),
     [
+        ("source_id", HASH_A),
         ("source_name", "source.txt"),
         ("source_sha256", HASH_C),
         ("contract", "GCG26-COMEX"),
@@ -896,6 +1648,10 @@ def test_case_45_dataset_identity_requires_every_field(
         ("capture_timestamp", datetime(2026, 1, 1, tzinfo=UTC)),
         ("source_timezone", "Asia/Tokyo"),
         ("timeframe", "5M"),
+        ("coverage_start_timestamp", datetime(2026, 1, 1, tzinfo=UTC)),
+        ("coverage_end_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_completed_timestamp", datetime(2026, 1, 2, tzinfo=UTC)),
+        ("acquisition_evidence_sha256", HASH_A),
         ("first_trade_date", D1),
         ("last_trade_date", D1),
         ("bar_digest", HASH_C),
@@ -916,8 +1672,10 @@ def test_case_45_dataset_identity_forbids_other_kind_fields(
     [
         {"config": _config(oos_end_trade_date=date(2026, 3, 31))},
         {"source_ids": (HASH_C,)},
+        {"coverage_ids": (HASH_C,)},
         {"segment_ids": (HASH_C,)},
         {"calendar_digest": "e" * 64},
+        {"coverage_digest": "f" * 64},
         {"evidence_digest": "f" * 64},
         {"roll_trade_dates": (D2,)},
     ],
@@ -935,7 +1693,7 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
         "GC_DATASET_SOURCE_TIMEZONE", "GC_DATASET_EXCHANGE_TIMEZONE", "GC_DATASET_TICK_SIZE",
         "GC_ROLL_CONFIRMATION_SESSIONS", "GC_DELIVERY_MONTH_CODES", "GCDatasetBuildStatus",
         "GCSourceRole", "GCSegmentPartition", "GCSierraChartBarRow", "GCSierraChartExport",
-        "GCCanonicalContractSegment", "GCDatasetManifest", "GCDatasetBuildConfig",
+        "GCSierraChartCoverageEvidence", "GCCanonicalContractSegment", "GCDatasetManifest", "GCDatasetBuildConfig",
         "GCDatasetBuildResult", "parse_sierra_chart_gc_export", "make_gc_dataset_id",
         "build_gc_futures_dataset",
     ]
@@ -947,8 +1705,9 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
     expected_fields = {
         GCSierraChartBarRow: 10,
         GCSierraChartExport: 9,
+        GCSierraChartCoverageEvidence: 13,
         GCCanonicalContractSegment: 8,
-        GCDatasetManifest: 22,
+        GCDatasetManifest: 25,
         GCDatasetBuildConfig: 11,
         GCDatasetBuildResult: 6,
     }
@@ -966,18 +1725,26 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
             "source_id", "source_name", "source_sha256", "contract", "role",
             "capture_timestamp", "chart_timezone", "timeframe", "rows",
         ),
+        GCSierraChartCoverageEvidence: (
+            "coverage_id", "source_id", "source_name", "source_sha256",
+            "contract", "role", "capture_timestamp", "chart_timezone",
+            "timeframe", "coverage_start_timestamp", "coverage_end_timestamp",
+            "acquisition_completed_timestamp", "acquisition_evidence_sha256",
+        ),
         GCCanonicalContractSegment: (
             "segment_id", "contract", "partition", "first_trade_date",
             "last_trade_date", "source_ids", "bars",
             "preceding_missing_bar_count",
         ),
         GCDatasetManifest: (
-            "dataset_id", "version", "source_ids", "segment_ids",
+            "dataset_id", "version", "source_ids", "coverage_ids",
+            "coverage_digest", "segment_ids",
             "calendar_version", "timezone_data_version",
             "raw_start_timestamp", "raw_end_timestamp",
             "usable_start_timestamp", "usable_end_timestamp",
             "parsed_row_count", "eligible_row_count", "development_bar_count",
             "oos_bar_count", "excluded_row_count", "missing_bar_count",
+            "attested_no_trade_interval_count",
             "raw_volume", "eligible_volume", "excluded_volume",
             "completed_session_volumes", "exclusion_counts", "roll_trade_dates",
         ),
@@ -1021,27 +1788,61 @@ def test_case_46_exact_keyword_only_names_and_defaults() -> None:
     )
     builder_signature = inspect.signature(make_gc_dataset_id)
     assert tuple(builder_signature.parameters) == (
-        "identity_kind", "config", "source_name", "source_sha256", "contract",
+        "identity_kind", "config", "source_id", "source_name", "source_sha256", "contract",
         "role", "capture_timestamp", "source_timezone", "timeframe",
-        "first_trade_date", "last_trade_date", "source_ids", "bar_digest",
+        "coverage_start_timestamp", "coverage_end_timestamp",
+        "acquisition_completed_timestamp", "acquisition_evidence_sha256",
+        "first_trade_date", "last_trade_date", "source_ids", "coverage_ids", "bar_digest",
         "preceding_missing_bar_count", "partition", "segment_ids",
-        "calendar_digest", "evidence_digest", "roll_trade_dates",
+        "calendar_digest", "coverage_digest", "evidence_digest", "roll_trade_dates",
     )
     for name, parameter in builder_signature.parameters.items():
         if name == "identity_kind":
             assert parameter.default is inspect.Parameter.empty
-        elif name in {"source_ids", "segment_ids", "roll_trade_dates"}:
+        elif name in {"source_ids", "coverage_ids", "segment_ids", "roll_trade_dates"}:
             assert parameter.default == ()
         else:
             assert parameter.default is None
     analyzer_signature = inspect.signature(build_gc_futures_dataset)
     assert tuple(analyzer_signature.parameters) == (
-        "exports", "calendar_entries", "config",
+        "exports", "coverage_evidence", "calendar_entries", "config",
     )
     assert all(
         item.default is inspect.Parameter.empty
         for item in analyzer_signature.parameters.values()
     )
+
+
+def test_case_46_later_malformed_coverage_preserves_only_prior_segments() -> None:
+    exports, coverage, calendars, config = _manual_scope(
+        current_dates=(D1, D2),
+        current_volumes=(10, 10),
+        adjacent_volumes=(5, 5),
+    )
+    current = next(
+        item for item in exports if item.contract == config.initial_contract
+    )
+    later = next(
+        item
+        for item in coverage
+        if item.source_id == current.source_id
+        and item.coverage_start_timestamp == _bounds(D2)[0]
+    )
+    malformed = replace(later, acquisition_evidence_sha256="bad")
+    changed = tuple(
+        malformed if item.coverage_id == later.coverage_id else item
+        for item in coverage
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=changed,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert result.manifest is None
+    assert result.segments
+    assert all(segment.last_trade_date < D2 for segment in result.segments)
 
 
 # Case 47

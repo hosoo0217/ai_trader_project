@@ -7,7 +7,11 @@
   `bf28046423d9fc5c6a7b5565df1c21f027879758`.
 - Formal decision record SHA-256:
   `6C6E323D4327377D007219F3E5A5877DD076BB947FFA002BC30184684277A466`.
-- Builder version: `GC-DATASET-BUILDER-V1`.
+- V2 compatibility proposal commit:
+  `a2884c67e2e82a46f3bc52e1b0ce2fbc3b80a238`.
+- V2 compatibility proposal SHA-256:
+  `950FE6EA853099ACAB3CA46A80CD4D17CFA5F0800453ED6080636B3198522077`.
+- Builder version: `GC-DATASET-BUILDER-V2`.
 - Task classification: bounded offline canonical-dataset implementation.
 - Real private-data build status: `NOT_PERFORMED`.
 - Integration status: `NOT_STARTED`.
@@ -15,7 +19,7 @@
 
 ## 2. Exact Authorized Scope
 
-Exactly these three new paths are in scope:
+Exactly these three existing paths are in scope for the bounded V2 correction:
 
 - `analysis/gc_dataset_builder.py`
 - `tests/test_gc_dataset_builder.py`
@@ -32,64 +36,46 @@ this task and was not read, edited, staged, or otherwise promoted by this work.
 
 ## 3. Test-First and Correction Evidence
 
-The exact `48` numbered logical cases and inline synthetic evidence were created
-before the production module. The intended RED run produced:
+The committed V1 suite remained the baseline. V2 tests were added before each
+bounded source correction while preserving one sequential marker for each of
+the exact `48` logical cases.
 
-- `ModuleNotFoundError: No module named 'analysis.gc_dataset_builder'`
-- `1 error in 0.27s`
+The first V2 RED result was an import failure for the new immutable coverage
+model. After the coverage contract and identity surface were introduced, the
+focused baseline reached `144 passed`. The expanded V2 audit then added direct
+public coverage, predecessor, adjacent-roll, manifest, identity, atomic-cutoff,
+and prefix tests.
 
-The first implementation pass exposed and corrected only bounded defects:
+One additional test-first defect was found: a Sierra-style row with zero trades,
+zero total volume, zero bid volume, and zero ask volume was accepted as an
+observed bar. The focused RED result was `1 failed, 30 passed`; both the byte
+parser and internal dataclass validation now reject it as a synthetic no-data
+row through only `TypeError` or `ValueError`.
 
-- Sierra's non-zero-padded `YYYY-M-D` raw date required component-based strict
-  parsing instead of `datetime.fromisoformat`;
-- completed-session volume triples required an explicit `(contract, date)` map;
-- two test helpers incorrectly substituted a default for an explicit empty
-  source name and reused byte-identical synthetic content across distinct
-  contracts;
-- the public dataclass field-count assertions were reconciled to the exact
-  formal contracts.
-
-The initial focused GREEN result was:
-
-- `71 passed in 0.69s`
-
-The initial full regression result was:
-
-- `1932 passed in 11.20s`
-
-An independent semantic and coverage audit then found one public fail-closed
-gap. A later export with determinable row time but malformed export-level
-required fields returned a generic invalid result without retaining the
-strictly prior canonical segment. Case 47 tests were added first for malformed
-row, source name, contract, and capture timestamp evidence. The RED result was
-`3 failed, 1 passed`; the source now records a moment-bound `MALFORMED_EXPORT`,
-preserves only strictly prior segments, emits no manifest, and leaks no
-exception.
-
-The audit also expanded existing Cases 43-47 without changing the logical case
-count. Coverage now includes every required and forbidden identity field,
-payload-axis sensitivity, exact function names/defaults, complete strictly-later
-prefix invariance, and historical-repair ineligibility.
+The final V2 suite also proves that absent covered intervals add zero only to
+completed-session volume, never emit bars, split observed segments, and remain
+separately counted in the manifest. Missing coverage stays `UNKNOWN`; malformed,
+forked, out-of-order, overlapping, or source-mismatched coverage is `INVALID`.
 
 Final focused evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_dataset_builder.py`
-- `143 passed in 0.83s`
+- `218 passed in 1.06s`
 - exact logical cases: `48`
-- additional parameterized executions: `95`
+- additional parameterized executions: `170`
 
 Final full-regression evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-- `2004 passed in 13.31s`
-- decision-checkpoint baseline: `1861 passed`
-- net new collected executions: `143`
+- `2079 passed in 13.54s`
+- committed V1 checkpoint baseline: `2004 passed`
+- net new V2 collected executions: `75`
 
 ## 4. Exact Public Surface
 
-The module exports exactly these `20` names:
+The module exports exactly these `21` names:
 
 - `GC_DATASET_BUILDER_VERSION`
 - `GC_DATASET_INSTRUMENT`
@@ -104,6 +90,7 @@ The module exports exactly these `20` names:
 - `GCSegmentPartition`
 - `GCSierraChartBarRow`
 - `GCSierraChartExport`
+- `GCSierraChartCoverageEvidence`
 - `GCCanonicalContractSegment`
 - `GCDatasetManifest`
 - `GCDatasetBuildConfig`
@@ -133,6 +120,7 @@ provenance. It enforces:
 - finite Decimal OHLC on exact `0.1` ticks with canonical geometry;
 - exact nonnegative integer trade and volume fields, with
   `volume == bid_volume + ask_volume`;
+- exact rejection of zero-trade/zero-volume synthetic no-data rows;
 - completed-bar capture boundary and exact raw-byte SHA-256 binding.
 
 Boolean-as-integer, float, NaN, infinity, locale-formatted, fractional-tick,
@@ -158,27 +146,40 @@ Canonical GC session truth is:
 Each source row maps to exactly one trade date and one immutable
 `GCChronologicalBar`. Bar index is zero-based within its exact-contract segment;
 timestamp is the aware UTC close; OHLC and volume reconcile exactly to the
-source row. No missing bar is filled or synthesized. A roll, calendar,
-partition, or missing-timestamp boundary ends a segment.
+source row. No missing bar is filled or synthesized.
+
+Every source requires separately supplied immutable
+`GCSierraChartCoverageEvidence`. Its canonical identity binds the exact SOURCE
+identity, start-inclusive/end-exclusive aware UTC range, acquisition completion,
+capture boundary, and immutable acquisition-evidence SHA-256. Coverage cannot
+enlarge capture, silently sort, overlap, fork, or cover a row outside its range.
+An attested missing interval adds zero to completed-session volume but remains
+an observed-stream gap. A coverage, roll, calendar, partition, or missing-slot
+boundary ends a segment.
 
 ## 7. Roll and Partition Invariants
 
-The implementation uses only the locked prospective
+The implementation uses only the locked prospective adjacent-delivery
 `PRIOR_SESSION_VOLUME_DOMINANCE_3` policy:
 
 1. caller supplies the initial contract and trade date;
-2. only exact completed comparable session volumes participate;
-3. a later contract must dominate for three consecutive eligible calendar
+2. the initial contract requires its exact predecessor and strict dominance on
+   the three immediately preceding eligible completed sessions;
+3. only the exact next delivery contract is compared with the active contract;
+4. only exact coverage-attested completed comparable session volumes participate;
+5. the adjacent contract must dominate for three consecutive eligible calendar
    sessions;
-4. a closed session neither counts nor breaks confirmation;
-5. multiple third-day qualifiers use greatest volume, then nearer delivery;
-6. the roll becomes effective only at the next eligible session;
-7. roll order is monotonic and never reverses.
+6. a closed session neither counts nor breaks confirmation;
+7. non-dominance resets confirmation;
+8. the roll becomes effective only at the next eligible session;
+9. roll order is monotonic, never reverses, and cannot skip a delivery.
 
-Missing initial/intermediate contract coverage, incomplete comparable volume,
-or absent effective-session evidence is `UNKNOWN`. There is no filename-order,
-same-session/future-price, back-adjustment, ratio-adjustment, synthetic spread,
-or cross-contract OHLC decision.
+Missing predecessor, active/adjacent coverage, comparable completed volume, or
+effective-session evidence is `UNKNOWN`. Farther-contract absence or larger
+volume is irrelevant until it becomes the exact adjacent successor. There is no
+greatest-volume candidate set, filename/hash chronology, same-session/future-
+price decision, back-adjustment, ratio-adjustment, synthetic spread, or cross-
+contract OHLC decision.
 
 Development and OOS roles are immutable. A development segment cannot consume
 an OOS-only source and an OOS segment cannot consume development-only evidence.
@@ -190,10 +191,13 @@ Overlapping identical rows reconcile once; conflicting overlap is `INVALID`.
 
 - `SOURCE` binds source basename, raw SHA-256, contract, role, capture moment,
   source timezone, and timeframe;
+- `COVERAGE` recomputes SOURCE and binds its exact range, acquisition completion,
+  and acquisition-evidence SHA-256;
 - `SEGMENT` binds complete config, contract, partition, date range, ordered unique
   source IDs, canonical bar digest, and exact preceding missing-bar count;
-- `DATASET` binds complete config, ordered unique source and segment IDs, calendar
-  digest, complete manifest evidence digest, and ordered roll dates.
+- `DATASET` binds complete config, ordered unique source, coverage, and segment
+  IDs, calendar and coverage digests, complete manifest evidence digest, and
+  ordered roll dates.
 
 Unknown kinds, absent required fields, supplied forbidden fields, malformed or
 duplicate hashes, invalid dates, config drift, and nested malformed values raise
@@ -205,7 +209,8 @@ The immutable manifest reconciles exactly:
 - eligible = development + OOS bar count;
 - raw = eligible + excluded volume;
 - completed-session volumes, exclusion reasons, missing bars, roll dates,
-  ordered source IDs, and ordered segment IDs;
+  ordered source/coverage/segment IDs, and coverage digest;
+- attested-no-trade count is an exact subset of missing slots;
 - every manifest field except `dataset_id` through `evidence_digest`.
 
 Invalid or unknown evidence produces no partial manifest or dataset identity.
@@ -216,8 +221,8 @@ Final precedence is exact:
 
 `INVALID > AMBIGUOUS > UNKNOWN > VALID > NONE`
 
-`AMBIGUOUS` remains in the vocabulary but has no reachable V1 branch because
-valid roll candidates are totally ordered and forked evidence is invalid.
+`AMBIGUOUS` remains in the vocabulary but has no reachable V2 branch because
+exact adjacent selection is total and forked evidence is invalid.
 
 Processing is atomic by complete canonical trade-date group. A determinably
 failing group and every later group promote no bars, segments, roll, manifest,
@@ -225,32 +230,41 @@ or dataset identity. Strictly prior complete segments remain byte-for-byte
 unchanged. If the malformed effective moment is unknowable, no trustworthy
 prefix is claimed.
 
-A valid complete prefix with no pending roll, partial session, or partition
-boundary is invariant under strictly later complete source/calendar append.
-Same-effective append, historical insertion, source replacement, calendar
-repair, role/config/timezone mutation, OOS-boundary change, and added missing
-intermediate contract are explicitly not prefix extensions.
+A valid complete prefix with no pending roll, partial session, coverage, or
+partition boundary is invariant under strictly later complete source/calendar/
+coverage append. Same-effective append, historical insertion, acquisition
+repair, source replacement, calendar repair, role/config/timezone mutation,
+initial/OOS-boundary change, and added predecessor/adjacent evidence are
+explicitly not prefix extensions.
 
 ## 10. Exact 48-Case Reconciliation
 
 The test file contains one and only one sequential marker for every logical
-Case `1` through `48`. Parameterization expands them to `143` collected tests.
+Case `1` through `48`. Parameterization expands them to `218` collected tests.
 The matrix covers:
 
-- Cases 1-18: missing/malformed context precedence, empty scope, contracts,
-  timezone/config constants, exact parser, Decimal/integer validation, source
-  hash/name/order/identity, and duplicate conflicts;
-- Cases 19-27: DST conversion, standard/early/closed session semantics,
-  trade-date mapping, completed volume, overlap reconciliation, and explicit
-  missing-bar segmentation;
-- Cases 28-41: initial and intermediate coverage, exact three-session roll,
-  closed-date/reset/tie/effective-session behavior, skipped lineage, unadjusted
-  bars, all segment boundaries, development/OOS isolation, and capture/OOS proof;
-- Cases 42-46: manifest conservation, exhaustive SOURCE/SEGMENT/DATASET schemas,
-  exact signatures/defaults, frozen models, enums, constants, and exports;
-- Cases 47-48: chronological malformed cutoff, immutable prior evidence,
-  complete-prefix invariance, historical-repair ineligibility, deterministic
-  repeatability, dependency/import allowlist, and no I/O surface.
+- Cases 1-6: missing/malformed counterpart precedence, empty scope, V2 constants,
+  preserved parser rules, synthetic-no-data rejection, and no inferred bars;
+- Cases 7-16: frozen coverage contract, SOURCE recomputation, UTC range and
+  completion rules, acquisition hash, causal ordering, overlap/outside-range
+  rejection, sparse-attested versus unattested behavior, and conflicting
+  evidence precedence;
+- Cases 17-24: completed volume, early-close/closed/maintenance/calendar/tzdata
+  reconciliation, exact predecessor proof, missing historical boundary, and no
+  convenient later-start inference;
+- Cases 25-34: exact adjacent-only comparison, farther-contract irrelevance,
+  one/two/three-session confirmation, closed-date handling, reset, prospective
+  effective roll, no skip, no reverse, and hash-order independence;
+- Cases 35-40: all segment boundaries, exact missing count, no cross-boundary
+  state, role overlap and quarantine isolation, and exhaustive V2 manifest
+  conservation;
+- Cases 41-45: exhaustive SOURCE/COVERAGE/SEGMENT/DATASET identity schemas,
+  V1/V2 separation, required/forbidden fields, recomputation, normalization,
+  and payload sensitivity;
+- Cases 46-48: exact keyword-only API/defaults, frozen public models, enums,
+  constants, 21 exports, chronological malformed export/coverage cutoff,
+  immutable prior evidence, prefix/repair rules, deterministic repeatability,
+  dependency/import allowlist, and no I/O surface.
 
 ## 11. Scope and Dependency Audit
 
@@ -267,10 +281,12 @@ trace-wiring operation. All test fixtures are inline synthetic values.
 ## 12. Real-Data Stop State
 
 This implementation does not convert the current private Sierra intake into an
-accepted dataset. Real-data construction remains stopped because the formal
-intake audit has not supplied an accepted versioned historical GC calendar and
-has not independently proved the initial adjacent delivery boundary, including
-the earlier missing `GCJ25-COMEX` and `GCM25-COMEX` coverage.
+accepted dataset. Real-data construction remains stopped because no accepted,
+immutable acquisition-coverage artifact or authoritative versioned historical
+GC calendar artifact has been supplied. The initial adjacent delivery boundary
+also remains unproved, including the earlier missing `GCJ25-COMEX` and
+`GCM25-COMEX` coverage. The screenshots and exported filenames are diagnostic
+intake evidence only and are not promoted as canonical coverage proof.
 
 No model training, feature extraction, label construction, OOS opening, strategy
 selection, backtest, validation, paper trading, or live action is authorized by
@@ -280,18 +296,18 @@ this checkpoint.
 
 - `analysis/gc_dataset_builder.py`
   - SHA-256:
-    `C7A30ADEC64F55FAA887AB121FD20EFFE0BA726C1D32525D664354640FCA2D80`
-  - bytes: `68527`
-  - physical lines: `1740`
+    `9A3519DA97C0AA526EC4A5A8C867B5BF14AE514BA156F6A11ADDD410B66C1858`
+  - bytes: `94663`
+  - physical lines: `2406`
 - `tests/test_gc_dataset_builder.py`
   - SHA-256:
-    `343B4CA4D6CC256840FB7331BC6D7EF56682482431F45844C071E6B495203A8D`
-  - bytes: `41846`
-  - physical lines: `1143`
+    `DFCE06D6C9B8EECD10504F35D092D6A0652434D7A995C846E8A797F08919F9C3`
+  - bytes: `71913`
+  - physical lines: `1944`
 - `docs/gc_futures_dataset_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded
-  - bytes: `14537`
-  - physical lines: `337`
+  - bytes: `16080`
+  - physical lines: `353`
 
 All three artifacts must be UTF-8 without BOM, use LF line endings, contain no
 tabs or trailing whitespace, and pass exact-scope diff checking before audit.
@@ -321,9 +337,9 @@ Final checkpoint state:
 - `EXACT_CHANGED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=143`
+- `FOCUSED_TESTS_COLLECTED=218`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=2004`
+- `FULL_REGRESSION_COLLECTED=2079`
 - `PRIVATE_DATA_BUILD_PERFORMED=False`
 - `EXTERNAL_FIXTURE_CREATED=False`
 - `EXTERNAL_CALENDAR_CREATED=False`
