@@ -1,0 +1,1740 @@
+"""Deterministic offline GC Sierra-export canonical dataset builder.
+
+The module is intentionally isolated.  It accepts immutable caller-supplied
+bytes, calendar values, and configuration; it performs no filesystem, network,
+strategy, model, execution, or integration work.
+"""
+
+from __future__ import annotations
+
+import csv
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from enum import Enum
+import hashlib
+from importlib import metadata
+import io
+import json
+import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from core.gc_chronological_backtest import GCChronologicalBar
+from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
+
+
+GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V1"
+GC_DATASET_INSTRUMENT = "GC"
+GC_DATASET_TIMEFRAME = "5M"
+GC_DATASET_SOURCE_TIMEZONE = "Asia/Tokyo"
+GC_DATASET_EXCHANGE_TIMEZONE = "America/New_York"
+GC_DATASET_TICK_SIZE = Decimal("0.1")
+GC_ROLL_CONFIRMATION_SESSIONS = 3
+GC_DELIVERY_MONTH_CODES = ("G", "J", "M", "Q", "V", "Z")
+
+_UTC = timezone.utc
+_FIVE_MINUTES = timedelta(minutes=5)
+_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CONTRACT_PATTERN = re.compile(r"^GC([GJMQVZ])(\d{2})-COMEX$")
+_DATE_PATTERN = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}$")
+_TIME_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{6}$")
+_NONNEGATIVE_INTEGER_PATTERN = re.compile(r"^(0|[1-9]\d*)$")
+_IDENTITY_KINDS = frozenset({"SOURCE", "SEGMENT", "DATASET"})
+_HEADER = (
+    "Date",
+    "Time",
+    "Open",
+    "High",
+    "Low",
+    "Last",
+    "Volume",
+    "# of Trades",
+    "OHLC Avg",
+    "HLC Avg",
+    "HL Avg",
+    "Bid Volume",
+    "Ask Volume",
+)
+
+
+class GCDatasetBuildStatus(str, Enum):
+    VALID = "VALID"
+    NONE = "NONE"
+    UNKNOWN = "UNKNOWN"
+    AMBIGUOUS = "AMBIGUOUS"
+    INVALID = "INVALID"
+
+
+class GCSourceRole(str, Enum):
+    DEVELOPMENT = "DEVELOPMENT"
+    OOS_HOLDOUT = "OOS_HOLDOUT"
+
+
+class GCSegmentPartition(str, Enum):
+    DEVELOPMENT = "DEVELOPMENT"
+    OOS_HOLDOUT = "OOS_HOLDOUT"
+
+
+@dataclass(frozen=True)
+class GCSierraChartBarRow:
+    source_row_number: int
+    bar_start_timestamp: datetime
+    open_price: Decimal
+    high_price: Decimal
+    low_price: Decimal
+    close_price: Decimal
+    volume: int
+    number_of_trades: int
+    bid_volume: int
+    ask_volume: int
+
+
+@dataclass(frozen=True)
+class GCSierraChartExport:
+    source_id: str
+    source_name: str
+    source_sha256: str
+    contract: str
+    role: GCSourceRole
+    capture_timestamp: datetime
+    chart_timezone: str
+    timeframe: str
+    rows: tuple[GCSierraChartBarRow, ...]
+
+
+@dataclass(frozen=True)
+class GCCanonicalContractSegment:
+    segment_id: str
+    contract: str
+    partition: GCSegmentPartition
+    first_trade_date: date
+    last_trade_date: date
+    source_ids: tuple[str, ...]
+    bars: tuple[GCChronologicalBar, ...]
+    preceding_missing_bar_count: int
+
+
+@dataclass(frozen=True)
+class GCDatasetManifest:
+    dataset_id: str
+    version: str
+    source_ids: tuple[str, ...]
+    segment_ids: tuple[str, ...]
+    calendar_version: str
+    timezone_data_version: str
+    raw_start_timestamp: datetime
+    raw_end_timestamp: datetime
+    usable_start_timestamp: datetime | None
+    usable_end_timestamp: datetime | None
+    parsed_row_count: int
+    eligible_row_count: int
+    development_bar_count: int
+    oos_bar_count: int
+    excluded_row_count: int
+    missing_bar_count: int
+    raw_volume: int
+    eligible_volume: int
+    excluded_volume: int
+    completed_session_volumes: tuple[tuple[str, date, int], ...]
+    exclusion_counts: tuple[tuple[str, int], ...]
+    roll_trade_dates: tuple[date, ...]
+
+
+@dataclass(frozen=True)
+class GCDatasetBuildConfig:
+    instrument: str
+    timeframe: str
+    source_timezone: str
+    exchange_timezone: str
+    timezone_data_version: str
+    tick_size: Decimal
+    initial_contract: str
+    initial_trade_date: date
+    roll_confirmation_sessions: int
+    oos_start_trade_date: date
+    oos_end_trade_date: date
+
+
+@dataclass(frozen=True)
+class GCDatasetBuildResult:
+    status: GCDatasetBuildStatus
+    dataset_id: str | None
+    segments: tuple[GCCanonicalContractSegment, ...] = ()
+    manifest: GCDatasetManifest | None = None
+    reasons: tuple[str, ...] = ()
+    blocking_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _NormalizedCalendar:
+    calendar_version: str
+    trade_date: date
+    session_status: KillZoneSessionStatus
+    opening: datetime | None
+    closing: datetime | None
+
+
+@dataclass(frozen=True)
+class _InputRow:
+    source: GCSierraChartExport
+    row: GCSierraChartBarRow
+    start_utc: datetime
+    close_utc: datetime
+    open_tick: int
+    high_tick: int
+    low_tick: int
+    close_tick: int
+
+
+@dataclass(frozen=True)
+class _MergedRow:
+    contract: str
+    start_utc: datetime
+    close_utc: datetime
+    open_tick: int
+    high_tick: int
+    low_tick: int
+    close_tick: int
+    volume: int
+    number_of_trades: int
+    bid_volume: int
+    ask_volume: int
+    source_ids: tuple[str, ...]
+    roles: tuple[GCSourceRole, ...]
+    capture_timestamps: tuple[datetime, ...]
+    instance_count: int
+
+
+@dataclass(frozen=True)
+class _UsableRow:
+    merged: _MergedRow
+    trade_date: date
+    partition: GCSegmentPartition
+    selected_source_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _Issue:
+    status: GCDatasetBuildStatus
+    reason: str
+    moment: datetime | None
+
+
+@dataclass(frozen=True)
+class _Assembly:
+    segments: tuple[GCCanonicalContractSegment, ...]
+    manifest: GCDatasetManifest | None
+    dataset_id: str | None
+    status: GCDatasetBuildStatus
+    reasons: tuple[str, ...]
+
+
+class _ValidationError(ValueError):
+    def __init__(self, reason: str, moment: datetime | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.moment = moment
+
+
+def parse_sierra_chart_gc_export(
+    *,
+    source_name: str,
+    contract: str,
+    role: GCSourceRole,
+    capture_timestamp: datetime,
+    chart_timezone: str,
+    timeframe: str,
+    raw_bytes: bytes,
+) -> GCSierraChartExport:
+    """Parse one exact immutable Sierra Chart bar-and-study export."""
+
+    try:
+        normalized_name = _normalize_source_name(source_name)
+        normalized_contract = _normalize_contract(contract)
+        normalized_role = _require_enum(role, GCSourceRole, "role")
+        normalized_capture = _normalize_aware_timestamp(
+            capture_timestamp, name="capture_timestamp"
+        )
+        normalized_source_timezone = _normalize_exact_text(
+            chart_timezone,
+            expected=GC_DATASET_SOURCE_TIMEZONE,
+            name="chart_timezone",
+            uppercase=False,
+        )
+        normalized_timeframe = _normalize_exact_text(
+            timeframe,
+            expected=GC_DATASET_TIMEFRAME,
+            name="timeframe",
+        )
+        if type(raw_bytes) is not bytes:
+            raise TypeError("raw_bytes must be exact bytes")
+        source_hash = hashlib.sha256(raw_bytes).hexdigest()
+        try:
+            decoded = raw_bytes.decode("utf-8-sig", errors="strict")
+        except (UnicodeDecodeError, UnicodeError) as exc:
+            raise ValueError("raw bytes must be strict UTF-8 with optional BOM") from exc
+        parsed = list(csv.reader(io.StringIO(decoded), skipinitialspace=True))
+        if not parsed:
+            raise ValueError("export header is required")
+        header = tuple(value.strip() for value in parsed[0])
+        if header != _HEADER:
+            raise ValueError("export header/order must match the exact 13-column schema")
+        rows: list[GCSierraChartBarRow] = []
+        prior_timestamp: datetime | None = None
+        source_zone = _load_zone(normalized_source_timezone)
+        for row_number, values in enumerate(parsed[1:], start=2):
+            if len(values) != 13 or all(not value.strip() for value in values):
+                raise ValueError("each nonblank data row must contain exactly 13 fields")
+            fields_ = tuple(value.strip() for value in values)
+            local_start = _parse_raw_start(fields_[0], fields_[1])
+            if prior_timestamp is not None and local_start <= prior_timestamp:
+                raise ValueError("raw timestamps must be independently strictly increasing")
+            prior_timestamp = local_start
+            open_price = _parse_price(fields_[2], "open")
+            high_price = _parse_price(fields_[3], "high")
+            low_price = _parse_price(fields_[4], "low")
+            close_price = _parse_price(fields_[5], "close")
+            _validate_price_geometry(open_price, high_price, low_price, close_price)
+            volume = _parse_nonnegative_integer(fields_[6], "volume")
+            trades = _parse_nonnegative_integer(fields_[7], "number_of_trades")
+            for index, label in ((8, "ohlc_average"), (9, "hlc_average"), (10, "hl_average")):
+                _parse_finite_decimal(fields_[index], label)
+            bid_volume = _parse_nonnegative_integer(fields_[11], "bid_volume")
+            ask_volume = _parse_nonnegative_integer(fields_[12], "ask_volume")
+            if volume != bid_volume + ask_volume:
+                raise ValueError("volume must equal bid_volume plus ask_volume")
+            close_utc = local_start.replace(tzinfo=source_zone).astimezone(_UTC) + _FIVE_MINUTES
+            if close_utc > normalized_capture:
+                raise ValueError("bar close exceeds immutable capture timestamp")
+            rows.append(
+                GCSierraChartBarRow(
+                    source_row_number=row_number,
+                    bar_start_timestamp=local_start,
+                    open_price=open_price,
+                    high_price=high_price,
+                    low_price=low_price,
+                    close_price=close_price,
+                    volume=volume,
+                    number_of_trades=trades,
+                    bid_volume=bid_volume,
+                    ask_volume=ask_volume,
+                )
+            )
+        source_id = make_gc_dataset_id(
+            identity_kind="SOURCE",
+            source_name=normalized_name,
+            source_sha256=source_hash,
+            contract=normalized_contract,
+            role=normalized_role,
+            capture_timestamp=normalized_capture,
+            source_timezone=normalized_source_timezone,
+            timeframe=normalized_timeframe,
+        )
+        return GCSierraChartExport(
+            source_id=source_id,
+            source_name=normalized_name,
+            source_sha256=source_hash,
+            contract=normalized_contract,
+            role=normalized_role,
+            capture_timestamp=normalized_capture,
+            chart_timezone=normalized_source_timezone,
+            timeframe=normalized_timeframe,
+            rows=tuple(rows),
+        )
+    except (TypeError, ValueError):
+        raise
+    except Exception as exc:  # pragma: no cover - containment boundary
+        raise ValueError("malformed Sierra Chart export") from exc
+
+
+def make_gc_dataset_id(
+    *,
+    identity_kind: str,
+    config: GCDatasetBuildConfig | None = None,
+    source_name: str | None = None,
+    source_sha256: str | None = None,
+    contract: str | None = None,
+    role: GCSourceRole | None = None,
+    capture_timestamp: datetime | None = None,
+    source_timezone: str | None = None,
+    timeframe: str | None = None,
+    first_trade_date: date | None = None,
+    last_trade_date: date | None = None,
+    source_ids: tuple[str, ...] = (),
+    bar_digest: str | None = None,
+    preceding_missing_bar_count: int | None = None,
+    partition: GCSegmentPartition | None = None,
+    segment_ids: tuple[str, ...] = (),
+    calendar_digest: str | None = None,
+    evidence_digest: str | None = None,
+    roll_trade_dates: tuple[date, ...] = (),
+) -> str:
+    """Build one exact kind-specific deterministic identity."""
+
+    try:
+        kind = _normalize_identity_kind(identity_kind)
+        common = {"version": GC_DATASET_BUILDER_VERSION, "identity_kind": kind}
+        if kind == "SOURCE":
+            _require_none(config, "config")
+            _require_none(first_trade_date, "first_trade_date")
+            _require_none(last_trade_date, "last_trade_date")
+            _require_empty(source_ids, "source_ids")
+            _require_none(bar_digest, "bar_digest")
+            _require_none(preceding_missing_bar_count, "preceding_missing_bar_count")
+            _require_none(partition, "partition")
+            _require_empty(segment_ids, "segment_ids")
+            _require_none(calendar_digest, "calendar_digest")
+            _require_none(evidence_digest, "evidence_digest")
+            _require_empty(roll_trade_dates, "roll_trade_dates")
+            payload = {
+                **common,
+                "source_name": _normalize_source_name(_required(source_name, "source_name")),
+                "source_sha256": _require_hash(_required(source_sha256, "source_sha256"), "source_sha256"),
+                "contract": _normalize_contract(_required(contract, "contract")),
+                "role": _require_enum(_required(role, "role"), GCSourceRole, "role").value,
+                "capture_timestamp": _timestamp_text(
+                    _normalize_aware_timestamp(_required(capture_timestamp, "capture_timestamp"), name="capture_timestamp")
+                ),
+                "source_timezone": _normalize_exact_text(
+                    _required(source_timezone, "source_timezone"),
+                    expected=GC_DATASET_SOURCE_TIMEZONE,
+                    name="source_timezone",
+                    uppercase=False,
+                ),
+                "timeframe": _normalize_exact_text(
+                    _required(timeframe, "timeframe"),
+                    expected=GC_DATASET_TIMEFRAME,
+                    name="timeframe",
+                ),
+            }
+        elif kind == "SEGMENT":
+            normalized_config = _normalize_config(_required(config, "config"))
+            _forbid_source_fields(
+                source_name, source_sha256, role, capture_timestamp, source_timezone, timeframe
+            )
+            _require_empty(segment_ids, "segment_ids")
+            _require_none(calendar_digest, "calendar_digest")
+            _require_none(evidence_digest, "evidence_digest")
+            _require_empty(roll_trade_dates, "roll_trade_dates")
+            first = _require_date(_required(first_trade_date, "first_trade_date"), "first_trade_date")
+            last = _require_date(_required(last_trade_date, "last_trade_date"), "last_trade_date")
+            if last < first:
+                raise ValueError("segment date range is impossible")
+            payload = {
+                **common,
+                "config": _config_payload(normalized_config),
+                "contract": _normalize_contract(_required(contract, "contract")),
+                "partition": _require_enum(
+                    _required(partition, "partition"), GCSegmentPartition, "partition"
+                ).value,
+                "first_trade_date": first.isoformat(),
+                "last_trade_date": last.isoformat(),
+                "source_ids": _normalize_hash_tuple(source_ids, "source_ids", nonempty=True),
+                "bar_digest": _require_hash(_required(bar_digest, "bar_digest"), "bar_digest"),
+                "preceding_missing_bar_count": _require_nonnegative_int(
+                    _required(preceding_missing_bar_count, "preceding_missing_bar_count"),
+                    "preceding_missing_bar_count",
+                ),
+            }
+        else:
+            normalized_config = _normalize_config(_required(config, "config"))
+            _forbid_source_fields(
+                source_name, source_sha256, role, capture_timestamp, source_timezone, timeframe
+            )
+            _require_none(contract, "contract")
+            _require_none(first_trade_date, "first_trade_date")
+            _require_none(last_trade_date, "last_trade_date")
+            _require_none(bar_digest, "bar_digest")
+            _require_none(preceding_missing_bar_count, "preceding_missing_bar_count")
+            _require_none(partition, "partition")
+            payload = {
+                **common,
+                "config": _config_payload(normalized_config),
+                "source_ids": _normalize_hash_tuple(source_ids, "source_ids", nonempty=True),
+                "segment_ids": _normalize_hash_tuple(segment_ids, "segment_ids", nonempty=False),
+                "calendar_digest": _require_hash(
+                    _required(calendar_digest, "calendar_digest"), "calendar_digest"
+                ),
+                "evidence_digest": _require_hash(
+                    _required(evidence_digest, "evidence_digest"), "evidence_digest"
+                ),
+                "roll_trade_dates": tuple(
+                    item.isoformat()
+                    for item in _normalize_date_tuple(roll_trade_dates, "roll_trade_dates")
+                ),
+            }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError):
+        raise
+    except Exception as exc:  # pragma: no cover - containment boundary
+        raise ValueError("malformed GC dataset identity evidence") from exc
+
+
+def build_gc_futures_dataset(
+    *,
+    exports: tuple[GCSierraChartExport, ...] | None,
+    calendar_entries: tuple[KillZoneCalendarEntry, ...] | None,
+    config: GCDatasetBuildConfig,
+) -> GCDatasetBuildResult:
+    """Build immutable exact-contract GC segments without file or network I/O."""
+
+    try:
+        normalized_config = _normalize_config(config)
+    except (TypeError, ValueError) as exc:
+        return _result(GCDatasetBuildStatus.INVALID, "INVALID_CONFIG", str(exc))
+    try:
+        export_rows, normalized_exports, export_issues = _scan_exports(exports)
+        calendars, calendar_issues = _scan_calendars(calendar_entries, normalized_config)
+    except Exception as exc:  # pragma: no cover - containment boundary
+        return _result(GCDatasetBuildStatus.INVALID, "MALFORMED_INPUT", str(exc))
+
+    issues = list(export_issues) + list(calendar_issues)
+    if exports is None or calendar_entries is None:
+        invalid = [issue for issue in issues if issue.status is GCDatasetBuildStatus.INVALID]
+        if invalid:
+            return _issues_result(invalid, segments=())
+        return _result(
+            GCDatasetBuildStatus.UNKNOWN,
+            "MISSING_TOP_LEVEL_CONTEXT",
+            "exports and calendar_entries must both be supplied",
+        )
+    if type(exports) is not tuple or type(calendar_entries) is not tuple:
+        return _result(
+            GCDatasetBuildStatus.INVALID,
+            "NON_TUPLE_TOP_LEVEL_INPUT",
+            "exports and calendar_entries must be exact tuples or None",
+        )
+    if not exports and not calendar_entries:
+        return _result(GCDatasetBuildStatus.NONE, "NO_SOURCE_SCOPE", "no exports or calendar entries")
+    if not exports and calendar_entries:
+        return _result(
+            GCDatasetBuildStatus.INVALID,
+            "UNREQUESTED_CALENDAR_ENTRY",
+            "calendar evidence was supplied without export scope",
+        )
+    if issues:
+        invalid = [issue for issue in issues if issue.status is GCDatasetBuildStatus.INVALID]
+        final_issues = invalid if invalid else issues
+        cutoff = _earliest_issue_moment(issues)
+        prior_rows = tuple(row for row in export_rows if cutoff is not None and row.close_utc < cutoff)
+        prior_calendars = tuple(
+            item
+            for item in calendars
+            if cutoff is not None
+            and item.opening is not None
+            and item.opening < cutoff
+        )
+        prior = _assemble(
+            rows=prior_rows,
+            exports=normalized_exports,
+            calendars=prior_calendars,
+            config=normalized_config,
+            allow_manifest=False,
+        )
+        return _issues_result(final_issues, segments=prior.segments)
+
+    assembly = _assemble(
+        rows=export_rows,
+        exports=normalized_exports,
+        calendars=calendars,
+        config=normalized_config,
+        allow_manifest=True,
+    )
+    return GCDatasetBuildResult(
+        status=assembly.status,
+        dataset_id=assembly.dataset_id,
+        segments=assembly.segments,
+        manifest=assembly.manifest,
+        reasons=assembly.reasons,
+        blocking_reasons=() if assembly.status in {GCDatasetBuildStatus.VALID, GCDatasetBuildStatus.NONE} else assembly.reasons,
+    )
+
+
+def _assemble(
+    *,
+    rows: tuple[_InputRow, ...],
+    exports: tuple[GCSierraChartExport, ...],
+    calendars: tuple[_NormalizedCalendar, ...],
+    config: GCDatasetBuildConfig,
+    allow_manifest: bool,
+) -> _Assembly:
+    merged, merge_issues = _merge_rows(rows, exports)
+    calendar_map = {entry.trade_date: entry for entry in calendars}
+    usable: list[_UsableRow] = []
+    issues = list(merge_issues)
+    base_exclusions: dict[tuple[str, datetime], str] = {}
+    source_rank = {source.source_id: index for index, source in enumerate(exports)}
+
+    for item in merged:
+        trade_date = _trade_date_for_start(item.start_utc)
+        entry = calendar_map.get(trade_date)
+        if entry is None:
+            issues.append(_Issue(GCDatasetBuildStatus.UNKNOWN, "CALENDAR_COVERAGE_MISSING", item.close_utc))
+            continue
+        if entry.session_status is KillZoneSessionStatus.SESSION_CLOSED:
+            if item.volume > 0:
+                issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_IN_SESSION_CLOSED", item.close_utc))
+            else:
+                base_exclusions[(item.contract, item.start_utc)] = "SESSION_CLOSED_ZERO_VOLUME"
+            continue
+        if entry.opening is None or entry.closing is None:
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, "CALENDAR_BOUNDARY_MISSING", item.close_utc))
+            continue
+        if item.start_utc < entry.opening or item.close_utc > entry.closing:
+            if item.volume > 0:
+                issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OUTSIDE_DECLARED_SESSION", item.close_utc))
+            else:
+                base_exclusions[(item.contract, item.start_utc)] = "OUTSIDE_SESSION_ZERO_VOLUME"
+            continue
+        offset = item.start_utc - entry.opening
+        if offset.total_seconds() % _FIVE_MINUTES.total_seconds() != 0:
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OFF_FIVE_MINUTE_GRID", item.close_utc))
+            continue
+        if trade_date < config.initial_trade_date:
+            base_exclusions[(item.contract, item.start_utc)] = "BEFORE_INITIAL_BOUNDARY"
+            continue
+        if trade_date > config.oos_end_trade_date:
+            base_exclusions[(item.contract, item.start_utc)] = "AFTER_OOS_BOUNDARY"
+            continue
+        partition = (
+            GCSegmentPartition.OOS_HOLDOUT
+            if trade_date >= config.oos_start_trade_date
+            else GCSegmentPartition.DEVELOPMENT
+        )
+        required_role = (
+            GCSourceRole.OOS_HOLDOUT
+            if partition is GCSegmentPartition.OOS_HOLDOUT
+            else GCSourceRole.DEVELOPMENT
+        )
+        matching_ids = tuple(
+            source_id
+            for source_id, role in zip(item.source_ids, item.roles, strict=True)
+            if role is required_role
+        )
+        if not matching_ids:
+            status = (
+                GCDatasetBuildStatus.INVALID
+                if required_role is GCSourceRole.DEVELOPMENT
+                else GCDatasetBuildStatus.UNKNOWN
+            )
+            reason = "SOURCE_ROLE_CONTRADICTS_DEVELOPMENT" if status is GCDatasetBuildStatus.INVALID else "OOS_SOURCE_COVERAGE_MISSING"
+            issues.append(_Issue(status, reason, item.close_utc))
+            continue
+        usable.append(
+            _UsableRow(
+                merged=item,
+                trade_date=trade_date,
+                partition=partition,
+                selected_source_ids=tuple(sorted(matching_ids, key=source_rank.__getitem__)),
+            )
+        )
+
+    if issues:
+        cutoff = _earliest_issue_moment(issues)
+        usable = [item for item in usable if cutoff is not None and item.merged.close_utc < cutoff]
+
+    contracts = tuple(dict.fromkeys(source.contract for source in exports))
+    boundary_issue = _contract_coverage_issue(contracts, config, calendars)
+    if boundary_issue is not None:
+        issues.append(boundary_issue)
+
+    completed_volumes = _completed_session_volumes(usable, calendars, exports)
+    active_by_date, roll_dates, roll_issues = _roll_plan(
+        contracts=contracts,
+        calendars=calendars,
+        completed_volumes={
+            (contract, trade_date): volume
+            for contract, trade_date, volume in completed_volumes
+        },
+        config=config,
+    )
+    issues.extend(roll_issues)
+    cutoff = _earliest_issue_moment(issues)
+    selected: list[_UsableRow] = []
+    for item in usable:
+        if cutoff is not None and item.merged.close_utc >= cutoff:
+            continue
+        active = active_by_date.get(item.trade_date)
+        if active == item.merged.contract:
+            selected.append(item)
+        else:
+            base_exclusions[(item.merged.contract, item.merged.start_utc)] = "ROLL_EVIDENCE_ONLY"
+
+    segments = _make_segments(tuple(selected), config, source_rank)
+    if issues or not allow_manifest:
+        status = _highest_status(issues) if issues else GCDatasetBuildStatus.VALID
+        reasons = tuple(issue.reason for issue in _ordered_issues(issues))
+        return _Assembly(segments, None, None, status, reasons)
+
+    parsed_row_count = sum(item.instance_count for item in merged)
+    raw_volume = sum(item.volume * item.instance_count for item in merged)
+    eligible_row_count = len(selected)
+    eligible_volume = sum(item.merged.volume for item in selected)
+    duplicate_count = sum(item.instance_count - 1 for item in merged)
+    exclusion_counter: dict[str, int] = {}
+    if duplicate_count:
+        exclusion_counter["DUPLICATE_RECONCILED"] = duplicate_count
+    selected_keys = {(item.merged.contract, item.merged.start_utc) for item in selected}
+    for item in merged:
+        key = (item.contract, item.start_utc)
+        if key not in selected_keys:
+            reason = base_exclusions.get(key, "ROLL_EVIDENCE_ONLY")
+            exclusion_counter[reason] = exclusion_counter.get(reason, 0) + 1
+    excluded_row_count = parsed_row_count - eligible_row_count
+    exclusion_counts = tuple(sorted(exclusion_counter.items()))
+    if sum(count for _, count in exclusion_counts) != excluded_row_count:
+        raise _ValidationError("manifest exclusion conservation failed")
+    source_ids = tuple(source.source_id for source in exports)
+    segment_ids = tuple(segment.segment_id for segment in segments)
+    calendar_digest = _digest_calendar(calendars)
+    raw_moments = tuple(item.close_utc for item in merged)
+    usable_moments = tuple(item.merged.close_utc for item in selected)
+    missing_count = sum(segment.preceding_missing_bar_count for segment in segments)
+    dev_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.DEVELOPMENT)
+    oos_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.OOS_HOLDOUT)
+    evidence = {
+        "version": GC_DATASET_BUILDER_VERSION,
+        "source_ids": source_ids,
+        "segment_ids": segment_ids,
+        "calendar_version": calendars[0].calendar_version if calendars else "",
+        "timezone_data_version": config.timezone_data_version,
+        "raw_start_timestamp": _timestamp_text(min(raw_moments)),
+        "raw_end_timestamp": _timestamp_text(max(raw_moments)),
+        "usable_start_timestamp": _timestamp_text(min(usable_moments)) if usable_moments else None,
+        "usable_end_timestamp": _timestamp_text(max(usable_moments)) if usable_moments else None,
+        "parsed_row_count": parsed_row_count,
+        "eligible_row_count": eligible_row_count,
+        "development_bar_count": dev_count,
+        "oos_bar_count": oos_count,
+        "excluded_row_count": excluded_row_count,
+        "missing_bar_count": missing_count,
+        "raw_volume": raw_volume,
+        "eligible_volume": eligible_volume,
+        "excluded_volume": raw_volume - eligible_volume,
+        "completed_session_volumes": tuple(
+            (contract, trade_date.isoformat(), volume)
+            for contract, trade_date, volume in completed_volumes
+        ),
+        "exclusion_counts": exclusion_counts,
+        "roll_trade_dates": tuple(item.isoformat() for item in roll_dates),
+    }
+    evidence_digest = _hash_payload(evidence)
+    dataset_id = make_gc_dataset_id(
+        identity_kind="DATASET",
+        config=config,
+        source_ids=source_ids,
+        segment_ids=segment_ids,
+        calendar_digest=calendar_digest,
+        evidence_digest=evidence_digest,
+        roll_trade_dates=roll_dates,
+    )
+    manifest = GCDatasetManifest(
+        dataset_id=dataset_id,
+        version=GC_DATASET_BUILDER_VERSION,
+        source_ids=source_ids,
+        segment_ids=segment_ids,
+        calendar_version=calendars[0].calendar_version if calendars else "",
+        timezone_data_version=config.timezone_data_version,
+        raw_start_timestamp=min(raw_moments),
+        raw_end_timestamp=max(raw_moments),
+        usable_start_timestamp=min(usable_moments) if usable_moments else None,
+        usable_end_timestamp=max(usable_moments) if usable_moments else None,
+        parsed_row_count=parsed_row_count,
+        eligible_row_count=eligible_row_count,
+        development_bar_count=dev_count,
+        oos_bar_count=oos_count,
+        excluded_row_count=excluded_row_count,
+        missing_bar_count=missing_count,
+        raw_volume=raw_volume,
+        eligible_volume=eligible_volume,
+        excluded_volume=raw_volume - eligible_volume,
+        completed_session_volumes=completed_volumes,
+        exclusion_counts=exclusion_counts,
+        roll_trade_dates=roll_dates,
+    )
+    status = GCDatasetBuildStatus.VALID if segments else GCDatasetBuildStatus.NONE
+    return _Assembly(segments, manifest, dataset_id, status, ("CANONICAL_DATASET_BUILT",))
+
+
+def _scan_exports(
+    exports: tuple[GCSierraChartExport, ...] | None,
+) -> tuple[tuple[_InputRow, ...], tuple[GCSierraChartExport, ...], tuple[_Issue, ...]]:
+    if exports is None:
+        return (), (), ()
+    if type(exports) is not tuple:
+        return (), (), (_Issue(GCDatasetBuildStatus.INVALID, "EXPORTS_NOT_TUPLE", None),)
+    rows: list[_InputRow] = []
+    valid_exports: list[GCSierraChartExport] = []
+    issues: list[_Issue] = []
+    keys: list[tuple[tuple[int, int], str, str]] = []
+    hash_roles: dict[str, tuple[str, GCSourceRole]] = {}
+    for item in exports:
+        try:
+            normalized, normalized_rows = _validate_export(item)
+            key = (_contract_key(normalized.contract), normalized.role.value, normalized.source_sha256)
+            keys.append(key)
+            prior = hash_roles.get(normalized.source_sha256)
+            if prior is not None and prior != (normalized.contract, normalized.role):
+                raise _ValidationError("SOURCE_HASH_ROLE_OR_CONTRACT_CONFLICT", _export_first_moment(normalized))
+            hash_roles[normalized.source_sha256] = (normalized.contract, normalized.role)
+            valid_exports.append(normalized)
+            rows.extend(normalized_rows)
+        except _ValidationError as exc:
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, exc.reason, exc.moment))
+        except (TypeError, ValueError):
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "MALFORMED_EXPORT",
+                    _export_first_moment(item),
+                )
+            )
+    if len(keys) > 1 and any(right <= left for left, right in zip(keys, keys[1:])):
+        issues.append(_Issue(GCDatasetBuildStatus.INVALID, "EXPORT_TUPLE_OUT_OF_ORDER", None))
+    return tuple(rows), tuple(valid_exports), tuple(issues)
+
+
+def _validate_export(item: object) -> tuple[GCSierraChartExport, tuple[_InputRow, ...]]:
+    if not isinstance(item, GCSierraChartExport):
+        raise _ValidationError("MALFORMED_EXPORT_TYPE")
+    moment = _export_first_moment(item)
+    source_name = _normalize_source_name(item.source_name)
+    source_hash = _require_hash(item.source_sha256, "source_sha256")
+    contract = _normalize_contract(item.contract)
+    role = _require_enum(item.role, GCSourceRole, "role")
+    capture = _normalize_aware_timestamp(item.capture_timestamp, name="capture_timestamp")
+    source_timezone = _normalize_exact_text(
+        item.chart_timezone,
+        expected=GC_DATASET_SOURCE_TIMEZONE,
+        name="chart_timezone",
+        uppercase=False,
+    )
+    timeframe = _normalize_exact_text(
+        item.timeframe, expected=GC_DATASET_TIMEFRAME, name="timeframe"
+    )
+    expected_id = make_gc_dataset_id(
+        identity_kind="SOURCE",
+        source_name=source_name,
+        source_sha256=source_hash,
+        contract=contract,
+        role=role,
+        capture_timestamp=capture,
+        source_timezone=source_timezone,
+        timeframe=timeframe,
+    )
+    if _require_hash(item.source_id, "source_id") != expected_id:
+        raise _ValidationError("SOURCE_ID_MISMATCH", moment)
+    if type(item.rows) is not tuple:
+        raise _ValidationError("EXPORT_ROWS_NOT_TUPLE", moment)
+    source_zone = _load_zone(source_timezone)
+    normalized_rows: list[_InputRow] = []
+    prior_number: int | None = None
+    prior_start: datetime | None = None
+    for row in item.rows:
+        row_moment = _row_effective_moment(row, source_zone)
+        try:
+            normalized = _validate_row(row, source_zone, capture)
+        except (TypeError, ValueError) as exc:
+            raise _ValidationError("MALFORMED_EXPORT_ROW", row_moment) from exc
+        if prior_number is not None and normalized.row.source_row_number <= prior_number:
+            raise _ValidationError("SOURCE_ROW_NUMBER_OUT_OF_ORDER", normalized.close_utc)
+        if prior_start is not None and normalized.start_utc <= prior_start:
+            raise _ValidationError("SOURCE_ROW_TIMESTAMP_OUT_OF_ORDER", normalized.close_utc)
+        prior_number = normalized.row.source_row_number
+        prior_start = normalized.start_utc
+        normalized_rows.append(
+            _InputRow(
+                source=GCSierraChartExport(
+                    item.source_id,
+                    source_name,
+                    source_hash,
+                    contract,
+                    role,
+                    capture,
+                    source_timezone,
+                    timeframe,
+                    item.rows,
+                ),
+                row=normalized.row,
+                start_utc=normalized.start_utc,
+                close_utc=normalized.close_utc,
+                open_tick=normalized.open_tick,
+                high_tick=normalized.high_tick,
+                low_tick=normalized.low_tick,
+                close_tick=normalized.close_tick,
+            )
+        )
+    normalized_export = GCSierraChartExport(
+        expected_id,
+        source_name,
+        source_hash,
+        contract,
+        role,
+        capture,
+        source_timezone,
+        timeframe,
+        item.rows,
+    )
+    return normalized_export, tuple(normalized_rows)
+
+
+@dataclass(frozen=True)
+class _ValidatedRow:
+    row: GCSierraChartBarRow
+    start_utc: datetime
+    close_utc: datetime
+    open_tick: int
+    high_tick: int
+    low_tick: int
+    close_tick: int
+
+
+def _validate_row(row: object, source_zone: ZoneInfo, capture: datetime) -> _ValidatedRow:
+    if not isinstance(row, GCSierraChartBarRow):
+        raise TypeError("row type")
+    row_number = _require_nonnegative_int(row.source_row_number, "source_row_number")
+    if row_number < 2:
+        raise ValueError("source_row_number must be at least two")
+    local_start = _normalize_naive_timestamp(row.bar_start_timestamp, "bar_start_timestamp")
+    prices = tuple(
+        _require_decimal(value, name)
+        for value, name in (
+            (row.open_price, "open_price"),
+            (row.high_price, "high_price"),
+            (row.low_price, "low_price"),
+            (row.close_price, "close_price"),
+        )
+    )
+    _validate_price_geometry(*prices)
+    ticks = tuple(_decimal_to_ticks(value, GC_DATASET_TICK_SIZE) for value in prices)
+    volume = _require_nonnegative_int(row.volume, "volume")
+    trades = _require_nonnegative_int(row.number_of_trades, "number_of_trades")
+    bid = _require_nonnegative_int(row.bid_volume, "bid_volume")
+    ask = _require_nonnegative_int(row.ask_volume, "ask_volume")
+    if volume != bid + ask:
+        raise ValueError("volume conservation")
+    start_utc = local_start.replace(tzinfo=source_zone).astimezone(_UTC)
+    close_utc = start_utc + _FIVE_MINUTES
+    if close_utc > capture:
+        raise ValueError("bar after capture")
+    normalized_row = GCSierraChartBarRow(
+        row_number, local_start, prices[0], prices[1], prices[2], prices[3], volume, trades, bid, ask
+    )
+    return _ValidatedRow(normalized_row, start_utc, close_utc, *ticks)
+
+
+def _scan_calendars(
+    entries: tuple[KillZoneCalendarEntry, ...] | None,
+    config: GCDatasetBuildConfig,
+) -> tuple[tuple[_NormalizedCalendar, ...], tuple[_Issue, ...]]:
+    if entries is None:
+        return (), ()
+    if type(entries) is not tuple:
+        return (), (_Issue(GCDatasetBuildStatus.INVALID, "CALENDAR_NOT_TUPLE", None),)
+    normalized: list[_NormalizedCalendar] = []
+    issues: list[_Issue] = []
+    prior_date: date | None = None
+    version: str | None = None
+    for item in entries:
+        moment: datetime | None = None
+        try:
+            if not isinstance(item, KillZoneCalendarEntry):
+                raise _ValidationError("MALFORMED_CALENDAR_TYPE")
+            trade_date = _require_date(item.trade_date, "calendar.trade_date")
+            calendar_version = _normalize_nonempty_text(item.calendar_version, "calendar_version")
+            status = _require_enum(item.session_status, KillZoneSessionStatus, "session_status")
+            expected_open, standard_close = _standard_bounds(trade_date)
+            moment = expected_open
+            if prior_date is not None and trade_date <= prior_date:
+                raise _ValidationError("CALENDAR_OUT_OF_ORDER", expected_open)
+            if version is not None and calendar_version != version:
+                raise _ValidationError("CALENDAR_VERSION_MISMATCH", expected_open)
+            if status is KillZoneSessionStatus.SESSION_CLOSED:
+                if item.session_open_timestamp is not None or item.session_close_timestamp is not None:
+                    raise _ValidationError("CLOSED_SESSION_HAS_TIMESTAMPS", expected_open)
+                opening = closing = None
+            else:
+                opening = _normalize_aware_timestamp(
+                    _required(item.session_open_timestamp, "session_open_timestamp"),
+                    name="session_open_timestamp",
+                )
+                closing = _normalize_aware_timestamp(
+                    _required(item.session_close_timestamp, "session_close_timestamp"),
+                    name="session_close_timestamp",
+                )
+                if opening != expected_open:
+                    raise _ValidationError("CALENDAR_OPEN_MISMATCH", expected_open)
+                if status is KillZoneSessionStatus.OPEN and closing != standard_close:
+                    raise _ValidationError("STANDARD_CLOSE_MISMATCH", expected_open)
+                if status is KillZoneSessionStatus.EARLY_CLOSE and not (opening < closing <= standard_close):
+                    raise _ValidationError("EARLY_CLOSE_GEOMETRY_INVALID", expected_open)
+            normalized.append(
+                _NormalizedCalendar(calendar_version, trade_date, status, opening, closing)
+            )
+            prior_date = trade_date
+            version = calendar_version
+        except _ValidationError as exc:
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, exc.reason, exc.moment or moment))
+        except (TypeError, ValueError):
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, "MALFORMED_CALENDAR_ENTRY", moment))
+    return tuple(normalized), tuple(issues)
+
+
+def _merge_rows(
+    rows: tuple[_InputRow, ...],
+    exports: tuple[GCSierraChartExport, ...],
+) -> tuple[tuple[_MergedRow, ...], tuple[_Issue, ...]]:
+    rank = {source.source_id: index for index, source in enumerate(exports)}
+    groups: dict[tuple[str, datetime], list[_InputRow]] = {}
+    for item in rows:
+        groups.setdefault((item.source.contract, item.start_utc), []).append(item)
+    merged: list[_MergedRow] = []
+    issues: list[_Issue] = []
+    for (contract, _), members in sorted(
+        groups.items(), key=lambda pair: (pair[0][1], _contract_key(pair[0][0]))
+    ):
+        reference = members[0]
+        reference_value = _row_value(reference)
+        if any(_row_value(member) != reference_value for member in members[1:]):
+            issues.append(_Issue(GCDatasetBuildStatus.INVALID, "OVERLAPPING_ROW_CONFLICT", reference.close_utc))
+            continue
+        ordered_members = sorted(members, key=lambda member: rank[member.source.source_id])
+        merged.append(
+            _MergedRow(
+                contract=contract,
+                start_utc=reference.start_utc,
+                close_utc=reference.close_utc,
+                open_tick=reference.open_tick,
+                high_tick=reference.high_tick,
+                low_tick=reference.low_tick,
+                close_tick=reference.close_tick,
+                volume=reference.row.volume,
+                number_of_trades=reference.row.number_of_trades,
+                bid_volume=reference.row.bid_volume,
+                ask_volume=reference.row.ask_volume,
+                source_ids=tuple(member.source.source_id for member in ordered_members),
+                roles=tuple(member.source.role for member in ordered_members),
+                capture_timestamps=tuple(member.source.capture_timestamp for member in ordered_members),
+                instance_count=len(members),
+            )
+        )
+    return tuple(merged), tuple(issues)
+
+
+def _completed_session_volumes(
+    rows: list[_UsableRow],
+    calendars: tuple[_NormalizedCalendar, ...],
+    exports: tuple[GCSierraChartExport, ...],
+) -> tuple[tuple[str, date, int], ...]:
+    source_capture = {source.source_id: source.capture_timestamp for source in exports}
+    grouped: dict[tuple[str, date], list[_UsableRow]] = {}
+    for item in rows:
+        grouped.setdefault((item.merged.contract, item.trade_date), []).append(item)
+    calendar_map = {entry.trade_date: entry for entry in calendars}
+    output: list[tuple[str, date, int]] = []
+    for (contract, trade_date), members in grouped.items():
+        entry = calendar_map[trade_date]
+        if entry.opening is None or entry.closing is None:
+            continue
+        expected: list[datetime] = []
+        cursor = entry.opening
+        while cursor + _FIVE_MINUTES <= entry.closing:
+            expected.append(cursor)
+            cursor += _FIVE_MINUTES
+        starts = sorted(member.merged.start_utc for member in members)
+        captures = [
+            source_capture[source_id]
+            for member in members
+            for source_id in member.selected_source_ids
+        ]
+        if starts == expected and captures and max(captures) >= entry.closing:
+            output.append((contract, trade_date, sum(member.merged.volume for member in members)))
+    output.sort(key=lambda item: (_contract_key(item[0]), item[1]))
+    return tuple(output)
+
+
+def _roll_plan(
+    *,
+    contracts: tuple[str, ...],
+    calendars: tuple[_NormalizedCalendar, ...],
+    completed_volumes: dict[tuple[str, date], int],
+    config: GCDatasetBuildConfig,
+) -> tuple[dict[date, str], tuple[date, ...], tuple[_Issue, ...]]:
+    if config.initial_contract not in contracts:
+        opening = _calendar_open_for(config.initial_trade_date, calendars)
+        return {}, (), (_Issue(GCDatasetBuildStatus.UNKNOWN, "INITIAL_CONTRACT_COVERAGE_MISSING", opening),)
+    active = config.initial_contract
+    ordered_contracts = tuple(sorted(contracts, key=_contract_key))
+    eligible = tuple(
+        entry
+        for entry in calendars
+        if entry.session_status is not KillZoneSessionStatus.SESSION_CLOSED
+        and config.initial_trade_date <= entry.trade_date <= config.oos_end_trade_date
+    )
+    active_by_date: dict[date, str] = {}
+    scheduled: dict[date, str] = {}
+    counters: dict[str, int] = {}
+    roll_dates: list[date] = []
+    issues: list[_Issue] = []
+    for position, entry in enumerate(eligible):
+        if entry.trade_date in scheduled:
+            active = scheduled[entry.trade_date]
+            counters = {}
+            roll_dates.append(entry.trade_date)
+        active_by_date[entry.trade_date] = active
+        later = tuple(
+            contract
+            for contract in ordered_contracts
+            if _contract_key(contract) > _contract_key(active)
+        )
+        if not later:
+            continue
+        current_volume = completed_volumes.get((active, entry.trade_date))
+        missing = current_volume is None or any(
+            (contract, entry.trade_date) not in completed_volumes for contract in later
+        )
+        if missing:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.UNKNOWN,
+                    "COMPARABLE_COMPLETED_VOLUME_MISSING",
+                    entry.closing,
+                )
+            )
+            continue
+        qualifiers: list[str] = []
+        for contract in later:
+            volume = completed_volumes[(contract, entry.trade_date)]
+            counters[contract] = counters.get(contract, 0) + 1 if volume > current_volume else 0
+            if counters[contract] >= GC_ROLL_CONFIRMATION_SESSIONS:
+                qualifiers.append(contract)
+        if qualifiers:
+            selected = min(
+                qualifiers,
+                key=lambda contract: (
+                    -completed_volumes[(contract, entry.trade_date)],
+                    _contract_key(contract),
+                ),
+            )
+            if position + 1 >= len(eligible):
+                issues.append(
+                    _Issue(
+                        GCDatasetBuildStatus.UNKNOWN,
+                        "ROLL_EFFECTIVE_SESSION_MISSING",
+                        entry.closing,
+                    )
+                )
+            else:
+                scheduled[eligible[position + 1].trade_date] = selected
+    return active_by_date, tuple(roll_dates), tuple(issues)
+
+
+def _make_segments(
+    rows: tuple[_UsableRow, ...],
+    config: GCDatasetBuildConfig,
+    source_rank: dict[str, int],
+) -> tuple[GCCanonicalContractSegment, ...]:
+    ordered = sorted(rows, key=lambda item: (item.merged.close_utc, _contract_key(item.merged.contract)))
+    groups: list[tuple[list[_UsableRow], int]] = []
+    current: list[_UsableRow] = []
+    current_preceding_missing = 0
+    prior: _UsableRow | None = None
+    for item in ordered:
+        split = False
+        preceding_missing = 0
+        if prior is not None:
+            same_context = (
+                item.merged.contract == prior.merged.contract
+                and item.partition is prior.partition
+                and item.trade_date == prior.trade_date
+            )
+            delta = item.merged.start_utc - prior.merged.start_utc
+            if not same_context or delta != _FIVE_MINUTES:
+                split = True
+                if same_context and delta > _FIVE_MINUTES:
+                    seconds = int(delta.total_seconds())
+                    if seconds % int(_FIVE_MINUTES.total_seconds()) != 0:
+                        raise _ValidationError("nonintegral missing-bar gap")
+                    preceding_missing = seconds // int(_FIVE_MINUTES.total_seconds()) - 1
+        if split and current:
+            groups.append((current, current_preceding_missing))
+            current = []
+            current_preceding_missing = preceding_missing
+        current.append(item)
+        prior = item
+    if current:
+        groups.append((current, current_preceding_missing))
+
+    output: list[GCCanonicalContractSegment] = []
+    for members, missing_before in groups:
+        bars = tuple(
+            GCChronologicalBar(
+                index=index,
+                timestamp=item.merged.close_utc,
+                open_tick=item.merged.open_tick,
+                high_tick=item.merged.high_tick,
+                low_tick=item.merged.low_tick,
+                close_tick=item.merged.close_tick,
+                volume=item.merged.volume,
+                is_closed=True,
+            )
+            for index, item in enumerate(members)
+        )
+        source_ids = tuple(
+            sorted(
+                {source_id for item in members for source_id in item.selected_source_ids},
+                key=source_rank.__getitem__,
+            )
+        )
+        digest = _digest_bars(bars)
+        first = members[0]
+        last = members[-1]
+        segment_id = make_gc_dataset_id(
+            identity_kind="SEGMENT",
+            config=config,
+            contract=first.merged.contract,
+            partition=first.partition,
+            first_trade_date=first.trade_date,
+            last_trade_date=last.trade_date,
+            source_ids=source_ids,
+            bar_digest=digest,
+            preceding_missing_bar_count=missing_before,
+        )
+        output.append(
+            GCCanonicalContractSegment(
+                segment_id,
+                first.merged.contract,
+                first.partition,
+                first.trade_date,
+                last.trade_date,
+                source_ids,
+                bars,
+                missing_before,
+            )
+        )
+    return tuple(output)
+
+
+def _contract_coverage_issue(
+    contracts: tuple[str, ...],
+    config: GCDatasetBuildConfig,
+    calendars: tuple[_NormalizedCalendar, ...],
+) -> _Issue | None:
+    if config.initial_contract not in contracts:
+        return _Issue(
+            GCDatasetBuildStatus.UNKNOWN,
+            "INITIAL_CONTRACT_COVERAGE_MISSING",
+            _calendar_open_for(config.initial_trade_date, calendars),
+        )
+    ordered = tuple(sorted(contracts, key=_contract_key))
+    start = ordered.index(config.initial_contract)
+    for left, right in zip(ordered[start:], ordered[start + 1 :]):
+        if _next_contract(left) != right:
+            return _Issue(
+                GCDatasetBuildStatus.UNKNOWN,
+                "INTERMEDIATE_CONTRACT_COVERAGE_MISSING",
+                _calendar_open_for(config.initial_trade_date, calendars),
+            )
+    return None
+
+
+def _normalize_config(value: object) -> GCDatasetBuildConfig:
+    if not isinstance(value, GCDatasetBuildConfig):
+        raise TypeError("config must be GCDatasetBuildConfig")
+    runtime_version = _runtime_timezone_data_version()
+    if runtime_version is None:
+        raise ValueError("runtime timezone-data version is unavailable")
+    _load_zone(GC_DATASET_SOURCE_TIMEZONE)
+    _load_zone(GC_DATASET_EXCHANGE_TIMEZONE)
+    instrument = _normalize_exact_text(value.instrument, expected=GC_DATASET_INSTRUMENT, name="instrument")
+    timeframe = _normalize_exact_text(value.timeframe, expected=GC_DATASET_TIMEFRAME, name="timeframe")
+    source_timezone = _normalize_exact_text(
+        value.source_timezone,
+        expected=GC_DATASET_SOURCE_TIMEZONE,
+        name="source_timezone",
+        uppercase=False,
+    )
+    exchange_timezone = _normalize_exact_text(
+        value.exchange_timezone,
+        expected=GC_DATASET_EXCHANGE_TIMEZONE,
+        name="exchange_timezone",
+        uppercase=False,
+    )
+    timezone_version = _normalize_nonempty_text(value.timezone_data_version, "timezone_data_version")
+    if timezone_version != runtime_version:
+        raise ValueError("timezone-data version mismatch")
+    tick_size = _require_decimal(value.tick_size, "tick_size")
+    if tick_size != GC_DATASET_TICK_SIZE:
+        raise ValueError("tick_size mismatch")
+    initial_contract = _normalize_contract(value.initial_contract)
+    initial_date = _require_date(value.initial_trade_date, "initial_trade_date")
+    confirmation = _require_nonnegative_int(value.roll_confirmation_sessions, "roll_confirmation_sessions")
+    if confirmation != GC_ROLL_CONFIRMATION_SESSIONS:
+        raise ValueError("roll confirmation count mismatch")
+    oos_start = _require_date(value.oos_start_trade_date, "oos_start_trade_date")
+    oos_end = _require_date(value.oos_end_trade_date, "oos_end_trade_date")
+    if not (initial_date < oos_start <= oos_end):
+        raise ValueError("OOS date range must follow initial trade date")
+    return GCDatasetBuildConfig(
+        instrument,
+        timeframe,
+        source_timezone,
+        exchange_timezone,
+        timezone_version,
+        tick_size,
+        initial_contract,
+        initial_date,
+        confirmation,
+        oos_start,
+        oos_end,
+    )
+
+
+def _config_payload(config: GCDatasetBuildConfig) -> dict[str, object]:
+    return {
+        "instrument": config.instrument,
+        "timeframe": config.timeframe,
+        "source_timezone": config.source_timezone,
+        "exchange_timezone": config.exchange_timezone,
+        "timezone_data_version": config.timezone_data_version,
+        "tick_size": _decimal_text(config.tick_size),
+        "initial_contract": config.initial_contract,
+        "initial_trade_date": config.initial_trade_date.isoformat(),
+        "roll_confirmation_sessions": config.roll_confirmation_sessions,
+        "oos_start_trade_date": config.oos_start_trade_date.isoformat(),
+        "oos_end_trade_date": config.oos_end_trade_date.isoformat(),
+    }
+
+
+def _runtime_timezone_data_version() -> str | None:
+    try:
+        value = metadata.version("tzdata")
+    except metadata.PackageNotFoundError:
+        return None
+    return value.strip() or None
+
+
+def _load_zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise ValueError(f"timezone unavailable: {name}") from exc
+
+
+def _standard_bounds(trade_date: date) -> tuple[datetime, datetime]:
+    zone = _load_zone(GC_DATASET_EXCHANGE_TIMEZONE)
+    opening = datetime.combine(
+        trade_date - timedelta(days=1), time(18), tzinfo=zone
+    ).astimezone(_UTC)
+    closing = datetime.combine(trade_date, time(17), tzinfo=zone).astimezone(_UTC)
+    return opening, closing
+
+
+def _trade_date_for_start(start_utc: datetime) -> date:
+    local = start_utc.astimezone(_load_zone(GC_DATASET_EXCHANGE_TIMEZONE))
+    if local.time() >= time(18):
+        return local.date() + timedelta(days=1)
+    return local.date()
+
+
+def _normalize_contract(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("contract must be str")
+    normalized = value.strip().upper()
+    if _CONTRACT_PATTERN.fullmatch(normalized) is None:
+        raise ValueError("contract must be exact GC delivery token")
+    return normalized
+
+
+def _contract_key(contract: str) -> tuple[int, int]:
+    match = _CONTRACT_PATTERN.fullmatch(_normalize_contract(contract))
+    if match is None:  # pragma: no cover
+        raise ValueError("invalid contract")
+    year = 2000 + int(match.group(2))
+    return year, GC_DELIVERY_MONTH_CODES.index(match.group(1))
+
+
+def _next_contract(contract: str) -> str:
+    match = _CONTRACT_PATTERN.fullmatch(_normalize_contract(contract))
+    if match is None:  # pragma: no cover
+        raise ValueError("invalid contract")
+    code = match.group(1)
+    year = int(match.group(2))
+    position = GC_DELIVERY_MONTH_CODES.index(code)
+    if position + 1 == len(GC_DELIVERY_MONTH_CODES):
+        position = 0
+        year = (year + 1) % 100
+    else:
+        position += 1
+    return f"GC{GC_DELIVERY_MONTH_CODES[position]}{year:02d}-COMEX"
+
+
+def _parse_raw_start(day: str, clock: str) -> datetime:
+    if _DATE_PATTERN.fullmatch(day) is None or _TIME_PATTERN.fullmatch(clock) is None:
+        raise ValueError("raw Date/Time format is invalid")
+    try:
+        year_text, month_text, day_text = day.split("-")
+        hour_text, minute_text, second_text = clock.split(":")
+        second, microsecond = second_text.split(".")
+        value = datetime(
+            int(year_text),
+            int(month_text),
+            int(day_text),
+            int(hour_text),
+            int(minute_text),
+            int(second),
+            int(microsecond),
+        )
+    except ValueError as exc:
+        raise ValueError("raw Date/Time value is invalid") from exc
+    if value.tzinfo is not None:
+        raise ValueError("raw Date/Time must be naive")
+    return value
+
+
+def _parse_price(value: str, name: str) -> Decimal:
+    number = _parse_finite_decimal(value, name)
+    _decimal_to_ticks(number, GC_DATASET_TICK_SIZE)
+    return number
+
+
+def _parse_finite_decimal(value: object, name: str) -> Decimal:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError(f"{name} must be canonical Decimal text")
+    if value.lower() in {"true", "false", "nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity"}:
+        raise ValueError(f"{name} must be finite Decimal text")
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be finite Decimal text") from exc
+    if not number.is_finite():
+        raise ValueError(f"{name} must be finite")
+    return number
+
+
+def _parse_nonnegative_integer(value: str, name: str) -> int:
+    if _NONNEGATIVE_INTEGER_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{name} must be a nonnegative exact integer")
+    return int(value)
+
+
+def _validate_price_geometry(
+    open_price: Decimal,
+    high_price: Decimal,
+    low_price: Decimal,
+    close_price: Decimal,
+) -> None:
+    if low_price > high_price or not (low_price <= open_price <= high_price) or not (
+        low_price <= close_price <= high_price
+    ):
+        raise ValueError("OHLC geometry is invalid")
+
+
+def _decimal_to_ticks(value: Decimal, tick: Decimal) -> int:
+    numerator, denominator = value.as_integer_ratio()
+    tick_numerator, tick_denominator = tick.as_integer_ratio()
+    combined_numerator = numerator * tick_denominator
+    combined_denominator = denominator * tick_numerator
+    if combined_denominator == 0 or combined_numerator % combined_denominator:
+        raise ValueError("price is not aligned to tick size")
+    return combined_numerator // combined_denominator
+
+
+def _decimal_text(value: Decimal) -> str:
+    number = _require_decimal(value, "decimal")
+    if number.is_zero():
+        return "0.0"
+    text = format(number, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text + ".0" if "." not in text else text
+
+
+def _normalize_source_name(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("source_name must be str")
+    normalized = value.strip()
+    if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
+        raise ValueError("source_name must be a nonempty basename")
+    return normalized
+
+
+def _normalize_identity_kind(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("identity_kind must be str")
+    normalized = value.strip().upper()
+    if normalized not in _IDENTITY_KINDS:
+        raise ValueError("unknown identity kind")
+    return normalized
+
+
+def _normalize_exact_text(
+    value: object,
+    *,
+    expected: str,
+    name: str,
+    uppercase: bool = True,
+) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be str")
+    normalized = value.strip().upper() if uppercase else value.strip()
+    if normalized != expected:
+        raise ValueError(f"{name} must equal {expected}")
+    return expected
+
+
+def _normalize_nonempty_text(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be str")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{name} must be nonempty")
+    return normalized
+
+
+def _normalize_aware_timestamp(value: object, *, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{name} must be datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
+    return value.astimezone(_UTC)
+
+
+def _normalize_naive_timestamp(value: object, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{name} must be datetime")
+    if value.tzinfo is not None:
+        raise ValueError(f"{name} must be naive")
+    return value
+
+
+def _timestamp_text(value: datetime) -> str:
+    return _normalize_aware_timestamp(value, name="timestamp").strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _require_decimal(value: object, name: str) -> Decimal:
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise TypeError(f"{name} must be finite Decimal")
+    return value
+
+
+def _require_nonnegative_int(value: object, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise TypeError(f"{name} must be nonnegative int")
+    return value
+
+
+def _require_date(value: object, name: str) -> date:
+    if type(value) is not date:
+        raise TypeError(f"{name} must be date")
+    return value
+
+
+def _require_enum(value: object, enum_type: type[Enum], name: str):
+    if not isinstance(value, enum_type):
+        raise TypeError(f"{name} must be {enum_type.__name__}")
+    return value
+
+
+def _require_hash(value: object, name: str) -> str:
+    if not isinstance(value, str) or _HASH_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{name} must be lowercase SHA-256")
+    return value
+
+
+def _required(value: object, name: str):
+    if value is None:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _require_none(value: object, name: str) -> None:
+    if value is not None:
+        raise ValueError(f"{name} is forbidden")
+
+
+def _require_empty(value: object, name: str) -> None:
+    if type(value) is not tuple or value:
+        raise ValueError(f"{name} is forbidden")
+
+
+def _forbid_source_fields(*values: object) -> None:
+    if any(value is not None for value in values):
+        raise ValueError("source-local field is forbidden")
+
+
+def _normalize_hash_tuple(value: object, name: str, *, nonempty: bool) -> tuple[str, ...]:
+    if type(value) is not tuple:
+        raise TypeError(f"{name} must be tuple")
+    output = tuple(_require_hash(item, name) for item in value)
+    if nonempty and not output:
+        raise ValueError(f"{name} must be nonempty")
+    if len(set(output)) != len(output):
+        raise ValueError(f"{name} must be unique")
+    return output
+
+
+def _normalize_date_tuple(value: object, name: str) -> tuple[date, ...]:
+    if type(value) is not tuple:
+        raise TypeError(f"{name} must be tuple")
+    output = tuple(_require_date(item, name) for item in value)
+    if any(right <= left for left, right in zip(output, output[1:])):
+        raise ValueError(f"{name} must be strictly increasing and unique")
+    return output
+
+
+def _digest_bars(bars: tuple[GCChronologicalBar, ...]) -> str:
+    return _hash_payload(
+        tuple(
+            {
+                "index": bar.index,
+                "timestamp": _timestamp_text(bar.timestamp),
+                "open_tick": bar.open_tick,
+                "high_tick": bar.high_tick,
+                "low_tick": bar.low_tick,
+                "close_tick": bar.close_tick,
+                "volume": bar.volume,
+                "is_closed": bar.is_closed,
+            }
+            for bar in bars
+        )
+    )
+
+
+def _digest_calendar(entries: tuple[_NormalizedCalendar, ...]) -> str:
+    return _hash_payload(
+        tuple(
+            {
+                "calendar_version": item.calendar_version,
+                "trade_date": item.trade_date.isoformat(),
+                "session_status": item.session_status.value,
+                "opening": _timestamp_text(item.opening) if item.opening is not None else None,
+                "closing": _timestamp_text(item.closing) if item.closing is not None else None,
+            }
+            for item in entries
+        )
+    )
+
+
+def _hash_payload(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _row_value(item: _InputRow) -> tuple[object, ...]:
+    return (
+        item.start_utc,
+        item.open_tick,
+        item.high_tick,
+        item.low_tick,
+        item.close_tick,
+        item.row.volume,
+        item.row.number_of_trades,
+        item.row.bid_volume,
+        item.row.ask_volume,
+    )
+
+
+def _row_effective_moment(row: object, zone: ZoneInfo) -> datetime | None:
+    try:
+        if not isinstance(row, GCSierraChartBarRow):
+            return None
+        local = _normalize_naive_timestamp(row.bar_start_timestamp, "bar_start_timestamp")
+        return local.replace(tzinfo=zone).astimezone(_UTC) + _FIVE_MINUTES
+    except (TypeError, ValueError):
+        return None
+
+
+def _export_first_moment(item: object) -> datetime | None:
+    try:
+        if not isinstance(item, GCSierraChartExport) or not item.rows:
+            return _normalize_aware_timestamp(item.capture_timestamp, name="capture_timestamp") if isinstance(item, GCSierraChartExport) else None
+        zone = _load_zone(GC_DATASET_SOURCE_TIMEZONE)
+        return _row_effective_moment(item.rows[0], zone)
+    except (TypeError, ValueError):
+        return None
+
+
+def _calendar_open_for(
+    trade_date: date, entries: tuple[_NormalizedCalendar, ...]
+) -> datetime | None:
+    for entry in entries:
+        if entry.trade_date == trade_date:
+            return entry.opening or _standard_bounds(trade_date)[0]
+    try:
+        return _standard_bounds(trade_date)[0]
+    except (TypeError, ValueError):
+        return None
+
+
+def _earliest_issue_moment(issues: list[_Issue] | tuple[_Issue, ...]) -> datetime | None:
+    if any(issue.moment is None for issue in issues):
+        return None
+    moments = [issue.moment for issue in issues if issue.moment is not None]
+    return min(moments) if moments else None
+
+
+def _highest_status(issues: list[_Issue] | tuple[_Issue, ...]) -> GCDatasetBuildStatus:
+    precedence = {
+        GCDatasetBuildStatus.INVALID: 5,
+        GCDatasetBuildStatus.AMBIGUOUS: 4,
+        GCDatasetBuildStatus.UNKNOWN: 3,
+        GCDatasetBuildStatus.VALID: 2,
+        GCDatasetBuildStatus.NONE: 1,
+    }
+    return max((issue.status for issue in issues), key=precedence.__getitem__)
+
+
+def _ordered_issues(issues: list[_Issue] | tuple[_Issue, ...]) -> tuple[_Issue, ...]:
+    return tuple(
+        sorted(
+            issues,
+            key=lambda issue: (
+                issue.moment is None,
+                issue.moment or datetime.max.replace(tzinfo=_UTC),
+                issue.reason,
+            ),
+        )
+    )
+
+
+def _issues_result(
+    issues: list[_Issue] | tuple[_Issue, ...],
+    *,
+    segments: tuple[GCCanonicalContractSegment, ...],
+) -> GCDatasetBuildResult:
+    ordered = _ordered_issues(issues)
+    status = _highest_status(ordered)
+    reasons = tuple(item.reason for item in ordered)
+    return GCDatasetBuildResult(status, None, segments, None, reasons, reasons)
+
+
+def _result(status: GCDatasetBuildStatus, reason: str, detail: str) -> GCDatasetBuildResult:
+    reasons = (reason, detail) if detail and detail != reason else (reason,)
+    blocking = reasons if status in {GCDatasetBuildStatus.INVALID, GCDatasetBuildStatus.UNKNOWN} else ()
+    return GCDatasetBuildResult(status, None, (), None, reasons, blocking)
+
+
+__all__ = [
+    "GC_DATASET_BUILDER_VERSION",
+    "GC_DATASET_INSTRUMENT",
+    "GC_DATASET_TIMEFRAME",
+    "GC_DATASET_SOURCE_TIMEZONE",
+    "GC_DATASET_EXCHANGE_TIMEZONE",
+    "GC_DATASET_TICK_SIZE",
+    "GC_ROLL_CONFIRMATION_SESSIONS",
+    "GC_DELIVERY_MONTH_CODES",
+    "GCDatasetBuildStatus",
+    "GCSourceRole",
+    "GCSegmentPartition",
+    "GCSierraChartBarRow",
+    "GCSierraChartExport",
+    "GCCanonicalContractSegment",
+    "GCDatasetManifest",
+    "GCDatasetBuildConfig",
+    "GCDatasetBuildResult",
+    "parse_sierra_chart_gc_export",
+    "make_gc_dataset_id",
+    "build_gc_futures_dataset",
+]
