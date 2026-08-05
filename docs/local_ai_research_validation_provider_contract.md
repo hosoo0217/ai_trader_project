@@ -4,6 +4,7 @@
 
 - Contract ID: `LOCAL-AI-RESEARCH-VALIDATION-PROVIDER-2026-08-05`.
 - Contract version: `LOCAL-AI-RESEARCH-VALIDATION-1`.
+- Response schema version: `LOCAL-AI-REVIEW-PAYLOAD-1`.
 - Status: `PROPOSED_FOR_INDEPENDENT_AUDIT`.
 - Change type: `DOCUMENTATION_ONLY`.
 - Global code freeze: `ACTIVE`.
@@ -21,8 +22,15 @@ This contract is subordinate to and must not weaken:
 - `docs/mvp_code_freeze.md`;
 - `docs/gc_futures_ai_strategy_training_decision.md`;
 - `docs/human_approval_workflow.md`;
-- `docs/strategy_approval_pipeline.md`; and
-- `docs/smc_v2_diagnostic_context_integration_change_proposal.md`.
+- `docs/strategy_approval_pipeline.md`.
+
+`docs/smc_v2_diagnostic_context_integration_change_proposal.md` is currently an
+unaccepted, untracked proposal and is therefore non-governing compatibility
+context only. This provider contract grants no diagnostic-context integration
+authority and must not import, call, aggregate, or otherwise depend on that
+proposal. The proposal can become governing only after its own independent
+audit, explicit acceptance, committed immutable identity, and remote
+synchronization.
 
 Where wording conflicts, the stricter non-execution, data-integrity,
 no-look-ahead, or human-approval rule wins. The local model is not the Version-1
@@ -87,6 +95,19 @@ LocalAIEvidenceCompleteness: COMPLETE, BOUNDED
 assembled immutable research packet. `VALIDATION_REVIEW` may review an already
 computed validation packet. Neither active mode grants strategy, data, training,
 risk, or execution authority.
+
+Mode handling never bypasses independently determinable input safety. The
+controller first validates the exact provider and request types, required
+fields, recomputable controller identities, loopback endpoint,
+source-artifact hashes/order, and forbidden-request rules. `artifact_id`,
+`artifact_kind`, `question_id`, `runtime_name`, `runtime_version`, `model_id`,
+and `model_artifact_id` are opaque supplied provenance strings: they must be
+nonempty canonical NFC text and are identity-bearing, but the adapter must not
+claim to recompute an unavailable foreign namespace. Any independently
+determinable defect is `INVALID` even when `mode=OFF`.
+Only a fully canonical `OFF` request returns `NONE / PROVIDER_OFF` without
+checking provider availability, checking the loaded model, or making a provider
+call.
 
 ## 6. Permitted research and validation duties
 
@@ -157,6 +178,8 @@ model_format: str
 quantization: str
 context_length: int
 max_output_tokens: int
+connect_timeout_seconds: Decimal
+read_timeout_seconds: Decimal
 temperature: Decimal
 top_p: Decimal
 top_k: int
@@ -173,7 +196,6 @@ byte_count: int
 data_classification: LocalAIDataClassification
 completeness: LocalAIEvidenceCompleteness
 evidence_json: str
-evidence_sha256: str
 effective_index: int | None = None
 effective_timestamp: datetime | None = None
 
@@ -189,10 +211,38 @@ cutoff_timestamp: datetime | None = None
 postmortem_only: bool = False
 ```
 
-All non-defaulted configuration fields are required. Numeric generation fields
-use exact `Decimal`/integer values and canonical text serialization; booleans are
-not accepted as integers. `model_artifact_sha256=None` is permitted only as
-explicit unverified provenance and prevents a review from reaching `VALID`.
+All non-defaulted configuration fields are required. Numeric timeout and
+generation fields use exact finite `Decimal`/integer values and canonical text
+serialization; booleans are not accepted as integers. Connect and read timeouts
+must be strictly positive and are material provider-run identity fields.
+`model_artifact_sha256=None` is permitted only as explicit unverified provenance
+and, in an active review mode, forces `UNKNOWN / MODEL_ARTIFACT_UNVERIFIED`
+unless higher-precedence invalid evidence exists. It does not override the
+canonical `OFF` result. A non-null model-artifact hash is accepted only as supplied
+immutable provenance; the adapter must not claim that it re-hashed inaccessible
+model bytes. The model ID returned by inference must match `model_id`; any
+artifact identifier or hash returned by loaded-model runtime evidence must also
+match the configured value. A reported mismatch is `INVALID /
+MODEL_IDENTITY_MISMATCH` regardless of the supplied hash; absence of optional
+runtime artifact-hash metadata is not silently represented as a verified hash.
+
+`context_length` and `max_output_tokens` are positive non-boolean integers and
+`max_output_tokens <= context_length`; timeout values are greater than zero;
+`temperature >= 0`; `0 < top_p <= 1`; `top_k >= 0`; and a supplied `seed` is a
+nonnegative non-boolean integer. The controller owns the exact immutable prompt
+template and system prompt used for inference and must recompute their canonical
+UTF-8 SHA-256 values before every call. A mismatch with either configured prompt
+hash is `INVALID / PROVIDER_IDENTITY_MISMATCH`; an unavailable prompt body is a
+stop condition, not unverifiable configured provenance.
+
+Every public `contract_version` field and builder argument must equal
+`LOCAL-AI-RESEARCH-VALIDATION-1`; `response_schema_version` must equal
+`LOCAL-AI-REVIEW-PAYLOAD-1`; and `provider_kind` must equal
+`LOCAL_OPENAI_COMPATIBLE`. A different value is an unreviewed version, not a
+compatible alias, and is `INVALID / PROVIDER_IDENTITY_MISMATCH`. `base_url` must
+be exactly `http://127.0.0.1:1234/v1` after ordinary URL parsing; user-info,
+query, fragment, alternate hostname text, implicit port, redirect, trailing
+path, and alternate loopback spelling are forbidden rather than normalized.
 
 Inputs are caller-built, immutable, and point-in-time. Every artifact ID is
 unique within the caller-supplied tuple. Hashes are lowercase 64-character
@@ -201,13 +251,44 @@ timezone-aware normalized UTC values. At least one effective index or timestamp
 is required for temporal evidence. Caller order is causal evidence and is never
 silently sorted.
 
+The supplied `request_id` must exactly equal `make_local_ai_request_id()` using
+the SHA-256 of the canonical UTF-8 bytes of the exact `question` and the exact
+ordered `source_artifacts`. A caller-supplied question hash is never trusted
+without this recomputation. `artifact_id` and `question_id` remain opaque
+lineage labels under the preceding rule; binding them into `REQUEST` identity
+does not assert that the adapter verified their external origin.
+
 `question` must be limited to a Section 6 duty. Requests for trading action,
 dataset mutation, training, tools, secrets, or forbidden output are rejected
-before inference. The evidence body is canonical UTF-8 JSON text and must exactly
-match `evidence_sha256`; the referenced source artifact must independently match
-`sha256` and `byte_count`. The provider cannot follow file paths or URLs.
-References without embedded evidence are provenance only and do not give the
-provider read access.
+before inference. For this adapter, the review artifact is exactly the canonical
+UTF-8 bytes of `evidence_json`: `sha256` must equal the SHA-256 of those bytes and
+`byte_count` must equal their exact byte length. This rule is locally
+recomputable and leaves no unverifiable second hash. A raw source file, database
+record, URL, email, or market-data object is not itself a review artifact unless
+an independently authorized upstream acquisition workflow has already converted
+the minimum necessary evidence into this immutable canonical JSON artifact.
+Original-source lineage may be included as data inside `evidence_json`, but the
+adapter must report it as supplied provenance and must not claim to have
+independently re-read or verified unavailable source bytes. The provider cannot
+follow file paths or URLs. References without embedded evidence grant no read
+authority and are invalid review inputs.
+
+Canonical JSON means UTF-8 encoded JSON with object keys sorted, array order
+preserved, no insignificant whitespace, no byte-order mark, Unicode text in NFC,
+and no `NaN`, infinity, duplicate object keys, or non-JSON scalar. The same
+canonicalization is used for artifact, request, model-payload, response, and
+identity hashing. A parser must reject rather than silently normalize an
+already-supplied noncanonical `evidence_json` string.
+
+For identity serialization, enums use their exact string `.value`; tuples use
+JSON arrays; `None` uses JSON `null`; integers use ordinary base-10 JSON numbers;
+and booleans are JSON booleans, never integers. A finite `Decimal` uses a JSON
+string containing fixed-point text with no exponent, no leading plus sign, and
+no insignificant trailing zeros or trailing decimal point; every signed or
+scaled zero is exactly `0`. Every datetime uses a JSON string after first being
+normalized to UTC and is serialized with exactly six
+fractional-second digits as `YYYY-MM-DDTHH:MM:SS.ffffffZ`. Noncanonical supplied
+text, naive datetimes, and lossy numeric coercion are rejected before hashing.
 
 ## 10. Minimum-necessary and private-data rule
 
@@ -290,6 +371,7 @@ The exact reason-token vocabulary is:
 ```text
 PROVIDER_OFF
 PROVIDER_UNAVAILABLE
+PROVIDER_TIMEOUT
 PROVIDER_NON_LOOPBACK
 PROVIDER_IDENTITY_MISMATCH
 MODEL_ARTIFACT_UNVERIFIED
@@ -319,6 +401,7 @@ reason vocabulary.
 contract_version: str
 review_id: str
 provider_run_id: str
+attempt_index: int
 request_id: str
 mode: LocalAIReviewMode
 source_artifact_ids: tuple[str, ...]
@@ -339,15 +422,21 @@ entry, exit, stop, target, size, order, PnL, dataset mutation, training command,
 and tool-call fields. Unknown extra fields make the response `INVALID`.
 
 The language model returns only the restricted status/findings/uncertainties/
-verification/reason payload. The deterministic controller, not the model,
-recomputes `request_id` and `provider_run_id`, copies the ordered source lineage
-and request cutoff, validates all reason tokens and finding references, computes
-`response_sha256`, computes `review_id`, and constructs the frozen public review.
-`response_sha256` is the hash of canonical model payload excluding controller
-IDs; `review_id` then binds that response hash without a circular hash. Every
-finding must name at least one exact supplied artifact ID. The response effective
-index/timestamp must exactly equal the request cutoff; the model cannot move the
-effective moment.
+verification/reason payload. Its exact allowed object keys are `status`,
+`findings`, `uncertainties`, `verification_requests`, `reasons`, and
+`blocking_reasons`; all six are required, tuple-valued fields arrive as JSON
+arrays of strings, `status` is one exact `LocalAIReviewStatus` string value, and
+unknown keys are forbidden. The deterministic controller, not the model,
+recomputes `request_id` and `provider_run_id`, applies the locked final-status
+precedence without allowing the model to elevate itself, copies
+`attempt_index`, the ordered source lineage, and the request cutoff, validates
+all reason tokens and finding references, computes `response_sha256`, computes
+`review_id`, and constructs the frozen public review. `response_sha256` is the
+hash of the canonical model payload excluding controller IDs; `review_id` then
+binds that response hash without a circular hash. Every finding must name at
+least one exact supplied artifact ID. The response effective index/timestamp
+must exactly equal the request cutoff; the model cannot move the effective
+moment.
 
 ## 16. Non-authoritative evidence rule
 
@@ -371,24 +460,44 @@ Every invocation requires a deterministic `provider_run_id` over canonical:
 - model ID, model artifact identifier/hash when available, format, and
   quantization;
 - prompt-template and system-prompt SHA-256 values;
-- request ID, evidence SHA-256, and ordered source hashes;
-- context-length limit, max-output-token limit, temperature, top-p, top-k, seed
-  when supported, and all other generation parameters; and
+- request ID, which transitively binds the exact question hash and every field
+  of every ordered source artifact, including canonical evidence bytes, hash,
+  byte count, classification, completeness, and effective moment;
+- a nonnegative caller-supplied `attempt_index`, where the initial attempt is
+  `0` and every retry for the same request uses a distinct increasing value;
+- context-length limit, max-output-token limit, connect/read timeouts,
+  temperature, top-p, top-k, seed when supported, and all other generation
+  parameters; and
 - response schema version.
 
 The model may remain nondeterministic despite fixed parameters. Repeatability
 must be measured and reported; identical output must not be assumed. A retry is a
-new attempt linked to the same request, never a silent replacement of prior
-evidence.
+new attempt linked to the same request through its shared `request_id`, with a
+distinct `attempt_index`, `provider_run_id`, and review record. It is never a
+silent replacement of prior evidence. The caller must not reuse an attempt index
+for the same request/provider identity. This first stateless adapter does not
+claim to discover prior invocations; if a later review ledger detects reuse with
+different response evidence, both conflicting records remain unpromoted with
+`MALFORMED_INPUT` until independently resolved. Adding such persistence is
+outside the reserved first-adapter scope.
 
 ## 18. Fail-closed provider behavior
 
 The review is `INVALID` with no promotion when the endpoint is non-loopback, the
-configured model does not exactly match the loaded model, required identity
-evidence is malformed, a response violates schema, forbidden content is emitted,
-or output cannot be parsed safely. Provider unavailable, timeout, context-limit
-exhaustion, or missing necessary evidence returns `UNKNOWN` unless independently
-determinable invalid evidence requires `INVALID`.
+configured model does not exactly match the model identity returned by the
+inference response, required identity evidence is malformed, a response violates
+schema, forbidden content is emitted, or output cannot be parsed safely. A
+`/v1/models` listing alone is discovery evidence and does not prove that the
+configured model is loaded or that inference used it. Provider unavailable,
+connect/read timeout at the exact configured bound, context-limit exhaustion, or
+missing necessary evidence returns `UNKNOWN` unless independently determinable
+invalid evidence requires `INVALID`.
+
+The exact active-mode `UNKNOWN` mappings are: unavailable endpoint ->
+`PROVIDER_UNAVAILABLE`; connect/read timeout -> `PROVIDER_TIMEOUT`; absent model
+artifact hash -> `MODEL_ARTIFACT_UNVERIFIED`; and context-limit exhaustion or
+missing review evidence -> `INSUFFICIENT_EVIDENCE`. These mappings do not bypass
+higher-precedence `INVALID` evidence or canonical `OFF` behavior.
 
 There is no fallback to a cloud service, different model, previous response,
 uncited model memory, or permissive parser. Exceptions must be contained and
@@ -412,12 +521,14 @@ review_local_ai_research(
     *,
     provider: LocalAIProviderConfig,
     request: LocalAIResearchRequest,
+    attempt_index: int = 0,
 ) -> LocalAIResearchReview
 
 make_local_ai_provider_run_id(
     *,
     provider: LocalAIProviderConfig,
     request_id: str,
+    attempt_index: int,
 ) -> str
 
 make_local_ai_request_id(
@@ -426,8 +537,7 @@ make_local_ai_request_id(
     mode: LocalAIReviewMode,
     question_id: str,
     question_sha256: str,
-    source_artifact_ids: tuple[str, ...] = (),
-    source_hashes: tuple[str, ...] = (),
+    source_artifacts: tuple[LocalAIArtifactReference, ...] = (),
     cutoff_index: int | None = None,
     cutoff_timestamp: datetime | None = None,
     postmortem_only: bool = False,
@@ -437,6 +547,7 @@ make_local_ai_review_id(
     *,
     contract_version: str,
     provider_run_id: str,
+    attempt_index: int,
     request_id: str,
     source_artifact_ids: tuple[str, ...] = (),
     source_hashes: tuple[str, ...] = (),
@@ -449,13 +560,47 @@ make_local_ai_review_id(
 ```
 
 `PROVIDER_RUN` identity requires every exact `LocalAIProviderConfig` field plus
-`request_id`. `REQUEST` identity requires the exact request-builder fields shown
-above and recomputes the ordered artifact IDs/hashes from the embedded tuple.
-`REVIEW` identity requires every non-default argument of the review builder;
-effective moment, mode, status, and response hash are material. Each builder
-rejects unknown parameters, malformed hashes, noncanonical timestamps, and
-field values that belong to another identity. The supplied IDs in public records
-must exactly match recomputation.
+`request_id` and `attempt_index`. `REQUEST` identity requires the exact
+request-builder fields shown above and binds every field of each ordered embedded
+artifact; changing evidence text/hash/byte count, classification, completeness,
+or effective moment is material even if `artifact_id` is unchanged. `REVIEW`
+identity requires every argument of the review builder, with the displayed
+defaults used as canonical values when omitted. `attempt_index`, effective
+moment, mode, status, and response hash are material. Nonempty
+`source_artifact_ids` and `source_hashes` must have equal length and must exactly
+match the ordered `(artifact_id, sha256)` lineage in the request bound by
+`request_id`; the empty defaults are valid only for a source-free request.
+Each builder rejects unknown parameters, malformed hashes, noncanonical
+timestamps, and field values that belong to another identity. The supplied IDs
+in public records must exactly match recomputation.
+
+Every identity is the lowercase SHA-256 hex digest of one canonical JSON object
+that contains `contract_version`, an exact domain-separation field
+`identity_kind`, and every field locked for that kind. The only identity-kind
+values are `PROVIDER_RUN`, `REQUEST`, and `REVIEW`; cross-kind fields or IDs are
+rejected. No raw secret, unrestricted file content, or unavailable source bytes
+are introduced solely to calculate an identity.
+
+The exact future module `__all__` is limited to:
+
+```text
+LocalAIProviderKind
+LocalAIReviewMode
+LocalAIReviewStatus
+LocalAIDataClassification
+LocalAIEvidenceCompleteness
+LocalAIProviderConfig
+LocalAIArtifactReference
+LocalAIResearchRequest
+LocalAIResearchReview
+review_local_ai_research
+make_local_ai_provider_run_id
+make_local_ai_request_id
+make_local_ai_review_id
+```
+
+No other public constant, class, function, provider client, or convenience
+wrapper is authorized by this contract.
 
 All future public dataclasses must be frozen. Expanding this API, adding tools,
 or adding action fields requires a new proposal and is not an implementation
@@ -481,22 +626,29 @@ record.
 The logical matrix count is exactly 36; parameterization may increase collected
 tests without changing the logical count.
 
-1. `OFF` returns a canonical `NONE` envelope with `PROVIDER_OFF` and makes no
-   provider call.
+1. Canonical `OFF` returns `NONE / PROVIDER_OFF` with no provider call, while an
+   independently malformed provider/request remains `INVALID` before mode
+   dispatch.
 2. `RESEARCH_REVIEW` accepts a canonical immutable packet.
 3. `VALIDATION_REVIEW` accepts a canonical immutable packet.
 4. unknown mode is `INVALID`.
 5. exact `127.0.0.1:1234/v1` loopback endpoint is eligible.
 6. `0.0.0.0`, LAN, remote, proxy, and cloud endpoints are rejected.
-7. unavailable server returns `UNKNOWN` with no fallback.
-8. configured/loaded model mismatch is `INVALID`.
-9. every provider field is required and runtime/model/quantization/generation
-   changes create distinct provider-run IDs.
+7. unavailable server or exact configured connect/read timeout returns `UNKNOWN`
+   with `PROVIDER_UNAVAILABLE` or `PROVIDER_TIMEOUT` and no fallback.
+8. configured/inference model or reported runtime-artifact mismatch is `INVALID`;
+   an absent artifact hash in an active mode is `UNKNOWN /
+   MODEL_ARTIFACT_UNVERIFIED`.
+9. every provider field is required and runtime/model/quantization/timeout/
+   generation changes create distinct provider-run IDs.
 10. exact provider-run, request, and review identity schemas reject cross-kind,
-    missing, forbidden, and malformed fields and reproduce deterministic IDs.
-11. retries remain separate attempts and do not overwrite prior evidence.
+    missing, forbidden, and malformed fields; request identity binds every
+    ordered artifact field and all IDs reproduce deterministically.
+11. initial attempt `0` and increasing retry attempt indices create separate
+    provider-run/review identities without overwriting prior evidence.
 12. non-tuple source references and malformed nested values are `INVALID`.
-13. malformed hashes, duplicate IDs, or unequal ID/hash tuples are `INVALID`.
+13. malformed hashes, duplicate IDs, noncanonical evidence JSON, or mismatched
+    evidence byte/hash reconciliation are `INVALID`.
 14. naive timestamps and noncanonical UTC moments are rejected or normalized by
     the caller before hashing.
 15. caller order is preserved and no silent source sorting occurs.
@@ -520,12 +672,15 @@ tests without changing the logical count.
 29. independent conflicting interpretations yield `AMBIGUOUS` without promotion.
 30. missing required evidence yields `UNKNOWN` without optimistic default.
 31. later malformed review preserves strictly prior immutable valid reviews.
-32. unknown response fields, malformed JSON, and nested exceptions fail closed.
-33. prompt/response/evidence/source hashes, byte counts, and ordered source
-    lineage reconcile exactly.
-34. response repeatability is measured and nondeterminism is not hidden.
-35. exact keyword-only signatures, every typed/defaulted frozen field, exact
-    enum/reason values, and exports match the contract.
+32. unknown/missing response fields, malformed/noncanonical JSON, and nested
+    exceptions fail closed.
+33. question, prompt, response, evidence hashes/bytes, every source-artifact
+    identity field, and ordered source lineage reconcile exactly.
+34. response repeatability uses distinct attempt indices and nondeterminism is
+    measured rather than hidden.
+35. exact keyword-only signatures/defaults, timeout and attempt fields, every
+    typed/defaulted frozen field, exact enum/reason values, and exports match the
+    contract.
 36. exact three-path scope and forbidden imports/wiring remain absent.
 
 All fixtures must be inline and synthetic. External market-data, account, calendar,
@@ -552,7 +707,7 @@ identity ambiguity, unavailable required provenance, or scope breach.
 
 ## 24. Final locked decision and next boundary
 
-The local model is approved by this proposal only as a prospective,
+The local model is defined by this proposal only as a prospective,
 non-authoritative, local-only research and validation reviewer. It owns no source
 truth, dataset, training, strategy, risk, or trading authority. The immediate
 next permitted action is an independent read-only audit of this exact document.
