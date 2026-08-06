@@ -168,6 +168,7 @@ Before any builder call, a future approved private pilot step must create determ
 - retain only rows whose normalized New York trade date is between `2026-02-18` and `2026-03-30`, inclusive;
 - preserve original row text, field order, and chronological order byte-for-byte apart from the removed out-of-window lines;
 - do not aggregate, interpolate, forward-fill, sort, repair, relabel, or change prices or volumes;
+- do not create a synthetic zero-volume or no-data bar for a five-minute slot in which the parent acquisition contains no trade record;
 - bind each derivative hash to its parent canonical artifact hash, exact predicate, source row-number range, retained-row count, byte count, and derivation-tool hash;
 - parse the derivative bytes through the existing public `parse_sierra_chart_gc_export()` API.
 
@@ -198,13 +199,32 @@ The pilot calendar ends on `2026-03-30`, so the configured OOS sentinel contains
 Each bounded derivative requires new immutable coverage evidence that:
 
 - references the derivative source ID and derivative SHA-256, not only its parent;
-- records exact retained first and last bar timestamps;
+- records exact observed first-bar start and last-bar close timestamps in its private provenance sidecar;
 - records the original acquisition completion and capture timestamps;
 - proves acquisition completed after every retained bar close;
 - carries a sidecar provenance link to the parent raw artifact and acquisition checkpoint;
-- never expands coverage beyond retained bytes.
+- uses the public `GCSierraChartCoverageEvidence.coverage_start_timestamp` and `coverage_end_timestamp` only for an interval whose market-data availability is established by the immutable parent acquisition evidence.
 
-Coverage mismatch, dangling source ID, timestamp inconsistency, or a claimed interval not present in the derivative is `INVALID`.
+The default rule is exact observed-bar coverage: public coverage start equals the first retained bar start, and public coverage end equals the last retained bar close. A leading or trailing interval containing no parent price row may extend the public coverage interval beyond those observed bounds only when every condition below is true:
+
+1. the interval lies wholly inside an exact `DERIVED_STANDARD_SESSION` that is already inside the bounded derivative predicate window;
+2. the canonical parent raw artifact contains zero rows in the interval, and the derivative contains every parent row selected by the locked predicate;
+3. the immutable Sierra acquisition message log proves that the historical request covered the interval and completed before export;
+4. the interval remains inside both the exact server-reported acquisition range and the declared session bounds;
+5. the private sidecar labels it `ACQUISITION_ATTESTED_NO_TRADE_INTERVAL` and records the contract, trade date, start-inclusive/end-exclusive bounds, parent filename and SHA-256, acquisition-log filename and SHA-256, historical-request ID, server-reported range, download-completion moment, export-completion moment, observed first-bar start, and observed last-bar close;
+6. no bar, volume, trade, price, or timestamp is synthesized, inferred, or inserted.
+
+Phase A authorizes exactly one such interval:
+
+| Contract | Trade date | Attested interval (UTC) | America/New_York interval | Exact evidence |
+|---|---|---|---|---|
+| `GCG26-COMEX` | `2026-02-18` | `[2026-02-17T23:00:00Z, 2026-02-17T23:20:00Z)` | `[2026-02-17 18:00, 2026-02-17 18:20)` | parent `GCG26_COMEX_5m_186d_export_20260803.txt` SHA-256 `FA3F7F5913E597E09A5003702CF89D2D2D12FC2DC25AC800A6E76FE6F78D8719`; message log `Sierra_Message_Log_20260803_full.txt` SHA-256 `19FFA3B0C8459455D6F7D546770E802B5FB902A7C1FCFA47128640F62BE584E0`; HD Request `13`, server-reported range `2025-08-27 09:45:19.094000` through `2026-02-25 20:41:04.199000`, completed `2026-08-03 20:27:13.925`, export completed `2026-08-03 20:29:40.822` |
+
+The exact server-reported range, download-completion moment, and export-completion moment in the table are interpreted in the acquisition's locked `Asia/Tokyo` chart/host timezone; public coverage bounds are timezone-aware UTC values with the equivalent America/New_York interval shown separately.
+
+For that derivative only, public coverage start is `2026-02-17T23:00:00Z` while observed first-bar start remains `2026-02-17T23:20:00Z`. The observed last bar starts `2026-02-25T11:40:00Z`, so public coverage end and observed last-bar close both remain `2026-02-25T11:45:00Z`. This interval is an acquisition-proven absence of trade rows, not a price bar and not evidence of a historical point-in-time decision feed. No other observed-bound expansion is authorized by this proposal. Naturally empty slots between observed first and last bars remain subject to exact parent-row absence and acquisition/session/predicate containment checks, but they are not additional observed-bound expansion exceptions.
+
+Coverage mismatch, dangling source ID, timestamp inconsistency, a parent row inside an attested no-trade interval, an interval outside the exact acquisition/session/predicate intersection, or any observed-bound expansion other than the single interval above is `INVALID`.
 
 ## 18. Atomicity, Status Precedence, and Prior Evidence
 
@@ -220,6 +240,7 @@ No manifest or dataset ID is promoted when blocking findings exist. A determinab
 - The selected contract for a trade date may use only completed sessions strictly before that trade date.
 - The `2026-03-31` third dominance must not influence any Phase-A contract choice because it is outside the pilot window.
 - Post-hoc acquisition is disclosed. This pilot can test deterministic mechanics but cannot prove historical point-in-time availability for model evaluation.
+- `ACQUISITION_ATTESTED_NO_TRADE_INTERVAL` proves only that the completed parent acquisition contained no trade row in the declared slot; it does not convert post-hoc acquisition into point-in-time evidence and cannot be used as a feature or signal.
 - No future bar, outcome, entry, exit, PnL, or frozen OOS observation may influence slicing, validation, or selection.
 
 ## 20. Output Classification and Private Location
@@ -252,14 +273,16 @@ The private checkpoint must record and independently verify at least:
 6. nonnegative integer volume and trades;
 7. exact `volume = bid_volume + ask_volume`;
 8. no synthetic no-data row;
-9. exact 29-entry calendar sequence and standard bounds;
-10. exact initial `GCJ26-COMEX` three-session dominance proof;
-11. no scheduled roll through `2026-03-30`;
-12. zero OOS rows and no access to frozen OOS data;
-13. deterministic repeat build identity and byte-for-byte output;
-14. no missing, duplicated, reordered, silently sorted, or off-session promoted bar;
-15. `VALID` result with no blocking reason;
-16. unchanged repository source, tests, staged state, HEAD, and origin/main.
+9. exact one authorized observed-bound expansion labeled `ACQUISITION_ATTESTED_NO_TRADE_INTERVAL`, zero parent rows in it, and exact acquisition/session/predicate containment;
+10. exact GCG26 observed-versus-coverage bounds and completed-session volume `53` for trade date `2026-02-18` without any inserted bar;
+11. exact 29-entry calendar sequence and standard bounds;
+12. exact initial `GCJ26-COMEX` three-session dominance proof;
+13. no scheduled roll through `2026-03-30`;
+14. zero OOS rows and no access to frozen OOS data;
+15. deterministic repeat build identity and byte-for-byte output;
+16. no unaccounted missing slot, duplicated or reordered row, silent sort, or off-session promoted bar; every recorded missing slot must have zero parent rows and remain inside exact acquisition/session/predicate coverage, and only the Section 17 interval may expand an observed bound;
+17. `VALID` result with no blocking reason;
+18. unchanged repository source, tests, staged state, HEAD, and origin/main.
 
 ## 23. Rollback, Promotion, and Stop Conditions
 
@@ -273,6 +296,8 @@ Stop immediately on any of the following:
 - any need to edit a canonical raw artifact;
 - any special-session date inside the chosen window;
 - any inability to reproduce bounded derivative bytes exactly;
+- any parent row inside the authorized no-trade interval, any failure to reproduce its zero-row proof, or any attempt to attest another interval;
+- any coverage boundary outside the exact parent-acquisition, session, and derivative-predicate intersection;
 - any builder result other than `VALID`;
 - any nonzero OOS row count;
 - any accidental read of the frozen OOS outcome artifact;
@@ -284,6 +309,6 @@ Stop immediately on any of the following:
 
 This proposal authorizes no execution by itself. If independent semantic and structural audit passes, the next single task is:
 
-> Create the private Phase-A pilot directory, deterministically derive and hash the exact bounded GCG26/GCJ26/GCM26 inputs, construct the exact 29-entry pilot calendar and coverage sidecars, then run the existing public builder once and produce a private validation checkpoint. Do not train, inspect OOS outcomes, integrate, stage, commit, or push.
+> Create the private Phase-A pilot directory, deterministically derive and hash the exact bounded GCG26/GCJ26/GCM26 inputs, construct the exact 29-entry pilot calendar and coverage sidecars including the single locked GCG26 acquisition-attested no-trade interval, then run the existing public builder once and produce a private validation checkpoint. Do not train, inspect OOS outcomes, integrate, stage, commit, or push.
 
 The CME response has been received and independently reviewed. The 2024–2025 final dataset and all training promotion nevertheless remain frozen until both Section 4 quarantine intervals are fully reconciled and a later formal decision explicitly lifts the quarantine.
