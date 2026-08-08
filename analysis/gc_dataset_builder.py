@@ -23,7 +23,7 @@ from core.gc_chronological_backtest import GCChronologicalBar
 from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
 
 
-GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V2"
+GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
 GC_DATASET_INSTRUMENT = "GC"
 GC_DATASET_TIMEFRAME = "5M"
 GC_DATASET_SOURCE_TIMEZONE = "Asia/Tokyo"
@@ -73,6 +73,21 @@ class GCSourceRole(str, Enum):
 class GCSegmentPartition(str, Enum):
     DEVELOPMENT = "DEVELOPMENT"
     OOS_HOLDOUT = "OOS_HOLDOUT"
+
+
+@dataclass(frozen=True)
+class GCDatasetSessionInterval:
+    start_timestamp: datetime
+    end_timestamp: datetime
+
+
+@dataclass(frozen=True)
+class GCSplitSessionCalendarEntry:
+    calendar_version: str
+    trade_date: date
+    intervals: tuple[GCDatasetSessionInterval, ...]
+    source_artifact_ids: tuple[str, ...]
+    source_artifact_sha256s: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -190,8 +205,18 @@ class _NormalizedCalendar:
     calendar_version: str
     trade_date: date
     session_status: KillZoneSessionStatus
-    opening: datetime | None
-    closing: datetime | None
+    intervals: tuple[tuple[datetime, datetime], ...]
+    source_artifact_ids: tuple[str, ...]
+    source_artifact_sha256s: tuple[str, ...]
+    kind: str
+
+    @property
+    def opening(self) -> datetime | None:
+        return self.intervals[0][0] if self.intervals else None
+
+    @property
+    def closing(self) -> datetime | None:
+        return self.intervals[-1][1] if self.intervals else None
 
 
 @dataclass(frozen=True)
@@ -645,7 +670,9 @@ def build_gc_futures_dataset(
     *,
     exports: tuple[GCSierraChartExport, ...] | None,
     coverage_evidence: tuple[GCSierraChartCoverageEvidence, ...] | None,
-    calendar_entries: tuple[KillZoneCalendarEntry, ...] | None,
+    calendar_entries: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ] | None,
     config: GCDatasetBuildConfig,
 ) -> GCDatasetBuildResult:
     """Build immutable exact-contract GC segments without file or network I/O."""
@@ -776,8 +803,50 @@ def _assemble(
     }
 
     for item in merged:
-        trade_date = _trade_date_for_start(item.start_utc)
-        entry = calendar_map.get(trade_date)
+        interval_matches = tuple(
+            (entry, interval_start)
+            for entry in calendars
+            for interval_start, interval_end in entry.intervals
+            if interval_start <= item.start_utc
+            and item.close_utc <= interval_end
+        )
+        if len(interval_matches) > 1:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "CALENDAR_INTERVAL_OVERLAP",
+                    item.close_utc,
+                )
+            )
+            continue
+        if interval_matches:
+            entry, interval_start = interval_matches[0]
+            trade_date = entry.trade_date
+        else:
+            outer_matches = tuple(
+                entry
+                for entry in calendars
+                if entry.opening is not None
+                and entry.closing is not None
+                and entry.opening <= item.start_utc
+                and item.close_utc <= entry.closing
+            )
+            if len(outer_matches) > 1:
+                issues.append(
+                    _Issue(
+                        GCDatasetBuildStatus.INVALID,
+                        "CALENDAR_INTERVAL_OVERLAP",
+                        item.close_utc,
+                    )
+                )
+                continue
+            trade_date = _trade_date_for_start(item.start_utc)
+            entry = (
+                outer_matches[0]
+                if outer_matches
+                else calendar_map.get(trade_date)
+            )
+            interval_start = None
         if entry is None:
             issues.append(_Issue(GCDatasetBuildStatus.UNKNOWN, "CALENDAR_COVERAGE_MISSING", item.close_utc))
             continue
@@ -790,13 +859,13 @@ def _assemble(
         if entry.opening is None or entry.closing is None:
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, "CALENDAR_BOUNDARY_MISSING", item.close_utc))
             continue
-        if item.start_utc < entry.opening or item.close_utc > entry.closing:
+        if interval_start is None:
             if item.volume > 0:
                 issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OUTSIDE_DECLARED_SESSION", item.close_utc))
             else:
                 base_exclusions[(item.contract, item.start_utc)] = "OUTSIDE_SESSION_ZERO_VOLUME"
             continue
-        offset = item.start_utc - entry.opening
+        offset = item.start_utc - interval_start
         if offset.total_seconds() % _FIVE_MINUTES.total_seconds() != 0:
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OFF_FIVE_MINUTE_GRID", item.close_utc))
             continue
@@ -979,7 +1048,9 @@ def _assemble(
         for trade_date, active in active_by_date.items()
         if config.initial_trade_date <= trade_date <= config.oos_end_trade_date
     )
-    attested_no_trade_count = missing_count
+    attested_no_trade_count = _attested_official_gap_count(
+        tuple(selected), calendar_map
+    )
     dev_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.DEVELOPMENT)
     oos_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.OOS_HOLDOUT)
     evidence = {
@@ -1421,7 +1492,9 @@ def _reconcile_coverage(
 
 
 def _scan_calendars(
-    entries: tuple[KillZoneCalendarEntry, ...] | None,
+    entries: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ] | None,
     config: GCDatasetBuildConfig,
 ) -> tuple[tuple[_NormalizedCalendar, ...], tuple[_Issue, ...]]:
     if entries is None:
@@ -1435,38 +1508,88 @@ def _scan_calendars(
     for item in entries:
         moment: datetime | None = None
         try:
-            if not isinstance(item, KillZoneCalendarEntry):
+            if not isinstance(
+                item, (KillZoneCalendarEntry, GCSplitSessionCalendarEntry)
+            ):
                 raise _ValidationError("MALFORMED_CALENDAR_TYPE")
             trade_date = _require_date(item.trade_date, "calendar.trade_date")
             calendar_version = _normalize_nonempty_text(item.calendar_version, "calendar_version")
-            status = _require_enum(item.session_status, KillZoneSessionStatus, "session_status")
             expected_open, standard_close = _standard_bounds(trade_date)
             moment = expected_open
             if prior_date is not None and trade_date <= prior_date:
                 raise _ValidationError("CALENDAR_OUT_OF_ORDER", expected_open)
             if version is not None and calendar_version != version:
                 raise _ValidationError("CALENDAR_VERSION_MISMATCH", expected_open)
-            if status is KillZoneSessionStatus.SESSION_CLOSED:
-                if item.session_open_timestamp is not None or item.session_close_timestamp is not None:
-                    raise _ValidationError("CLOSED_SESSION_HAS_TIMESTAMPS", expected_open)
-                opening = closing = None
+            if isinstance(item, KillZoneCalendarEntry):
+                status = _require_enum(
+                    item.session_status, KillZoneSessionStatus, "session_status"
+                )
+                if status is KillZoneSessionStatus.SESSION_CLOSED:
+                    if (
+                        item.session_open_timestamp is not None
+                        or item.session_close_timestamp is not None
+                    ):
+                        raise _ValidationError(
+                            "CLOSED_SESSION_HAS_TIMESTAMPS", expected_open
+                        )
+                    intervals: tuple[tuple[datetime, datetime], ...] = ()
+                else:
+                    opening = _normalize_aware_timestamp(
+                        _required(
+                            item.session_open_timestamp,
+                            "session_open_timestamp",
+                        ),
+                        name="session_open_timestamp",
+                    )
+                    closing = _normalize_aware_timestamp(
+                        _required(
+                            item.session_close_timestamp,
+                            "session_close_timestamp",
+                        ),
+                        name="session_close_timestamp",
+                    )
+                    if opening != expected_open:
+                        raise _ValidationError(
+                            "CALENDAR_OPEN_MISMATCH", expected_open
+                        )
+                    if (
+                        status is KillZoneSessionStatus.OPEN
+                        and closing != standard_close
+                    ):
+                        raise _ValidationError(
+                            "STANDARD_CLOSE_MISMATCH", expected_open
+                        )
+                    if status is KillZoneSessionStatus.EARLY_CLOSE and not (
+                        opening < closing <= standard_close
+                    ):
+                        raise _ValidationError(
+                            "EARLY_CLOSE_GEOMETRY_INVALID", expected_open
+                        )
+                    intervals = ((opening, closing),)
+                source_artifact_ids: tuple[str, ...] = ()
+                source_artifact_sha256s: tuple[str, ...] = ()
+                kind = "SINGLE_INTERVAL"
             else:
-                opening = _normalize_aware_timestamp(
-                    _required(item.session_open_timestamp, "session_open_timestamp"),
-                    name="session_open_timestamp",
+                status = KillZoneSessionStatus.OPEN
+                intervals = _normalize_split_intervals(item.intervals, expected_open)
+                source_artifact_ids, source_artifact_sha256s = (
+                    _normalize_split_provenance(
+                        item.source_artifact_ids,
+                        item.source_artifact_sha256s,
+                        expected_open,
+                    )
                 )
-                closing = _normalize_aware_timestamp(
-                    _required(item.session_close_timestamp, "session_close_timestamp"),
-                    name="session_close_timestamp",
-                )
-                if opening != expected_open:
-                    raise _ValidationError("CALENDAR_OPEN_MISMATCH", expected_open)
-                if status is KillZoneSessionStatus.OPEN and closing != standard_close:
-                    raise _ValidationError("STANDARD_CLOSE_MISMATCH", expected_open)
-                if status is KillZoneSessionStatus.EARLY_CLOSE and not (opening < closing <= standard_close):
-                    raise _ValidationError("EARLY_CLOSE_GEOMETRY_INVALID", expected_open)
+                kind = "SPLIT_SESSION"
             normalized.append(
-                _NormalizedCalendar(calendar_version, trade_date, status, opening, closing)
+                _NormalizedCalendar(
+                    calendar_version,
+                    trade_date,
+                    status,
+                    intervals,
+                    source_artifact_ids,
+                    source_artifact_sha256s,
+                    kind,
+                )
             )
             prior_date = trade_date
             version = calendar_version
@@ -1474,7 +1597,102 @@ def _scan_calendars(
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, exc.reason, exc.moment or moment))
         except (TypeError, ValueError):
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, "MALFORMED_CALENDAR_ENTRY", moment))
+    ordered_intervals = sorted(
+        (
+            start,
+            end,
+            entry.trade_date,
+        )
+        for entry in normalized
+        for start, end in entry.intervals
+    )
+    for left, right in zip(ordered_intervals, ordered_intervals[1:]):
+        if right[0] < left[1]:
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "CALENDAR_INTERVAL_OVERLAP",
+                    right[0],
+                )
+            )
+            break
     return tuple(normalized), tuple(issues)
+
+
+def _normalize_split_intervals(
+    value: object, moment: datetime
+) -> tuple[tuple[datetime, datetime], ...]:
+    if type(value) is not tuple:
+        raise _ValidationError("SPLIT_SESSION_INTERVALS_NOT_TUPLE", moment)
+    if len(value) < 2:
+        raise _ValidationError("SPLIT_SESSION_REQUIRES_MULTIPLE_INTERVALS", moment)
+    output: list[tuple[datetime, datetime]] = []
+    prior_start: datetime | None = None
+    prior_end: datetime | None = None
+    width = int(_FIVE_MINUTES.total_seconds())
+    for member in value:
+        if not isinstance(member, GCDatasetSessionInterval):
+            raise _ValidationError("MALFORMED_SPLIT_SESSION_INTERVAL", moment)
+        start = _normalize_aware_timestamp(
+            member.start_timestamp, name="interval.start_timestamp"
+        )
+        end = _normalize_aware_timestamp(
+            member.end_timestamp, name="interval.end_timestamp"
+        )
+        if start >= end:
+            raise _ValidationError("SPLIT_SESSION_INTERVAL_GEOMETRY_INVALID", start)
+        if (
+            start.second
+            or start.microsecond
+            or start.minute % 5
+            or end.second
+            or end.microsecond
+            or end.minute % 5
+            or int((end - start).total_seconds()) % width
+        ):
+            raise _ValidationError("SPLIT_SESSION_INTERVAL_OFF_GRID", start)
+        if prior_end is not None:
+            if prior_start is not None and start <= prior_start:
+                raise _ValidationError(
+                    "SPLIT_SESSION_INTERVALS_OUT_OF_ORDER", start
+                )
+            if start < prior_end:
+                raise _ValidationError("SPLIT_SESSION_INTERVAL_OVERLAP", start)
+            if start == prior_end:
+                raise _ValidationError("SPLIT_SESSION_INTERVALS_TOUCH", start)
+        output.append((start, end))
+        prior_start = start
+        prior_end = end
+    return tuple(output)
+
+
+def _normalize_split_provenance(
+    ids_value: object,
+    hashes_value: object,
+    moment: datetime,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if type(ids_value) is not tuple or type(hashes_value) is not tuple:
+        raise _ValidationError("SOURCE_ARTIFACT_PROVENANCE_NOT_TUPLE", moment)
+    if not ids_value or len(ids_value) != len(hashes_value):
+        raise _ValidationError("CALENDAR_SOURCE_ARTIFACT_LENGTH_MISMATCH", moment)
+    ids = tuple(
+        _normalize_nonempty_text(item, "source_artifact_id")
+        for item in ids_value
+    )
+    if len(set(ids)) != len(ids):
+        raise _ValidationError("DUPLICATE_CALENDAR_SOURCE_ARTIFACT", moment)
+    if any(right < left for left, right in zip(ids, ids[1:])):
+        raise _ValidationError("CALENDAR_SOURCE_ARTIFACTS_OUT_OF_ORDER", moment)
+    hashes = tuple(
+        _require_hash(
+            _normalize_nonempty_text(item, "source_artifact_sha256").lower(),
+            "source_artifact_sha256",
+        )
+        for item in hashes_value
+    )
+    if len(set(zip(ids, hashes, strict=True))) != len(ids):
+        raise _ValidationError("SOURCE_ARTIFACT_PROVENANCE_DUPLICATE", moment)
+    return ids, hashes
 
 
 def _merge_rows(
@@ -1557,15 +1775,20 @@ def _completed_session_volumes(
                     (contract, required_role), ()
                 )
                 if item.capture_timestamp > entry.closing
-                and item.acquisition_completed >= entry.closing
+                and (
+                    item.acquisition_completed > entry.closing
+                    if entry.kind == "SPLIT_SESSION"
+                    else item.acquisition_completed >= entry.closing
+                )
             )
             if not accepted:
                 continue
             expected: list[datetime] = []
-            cursor = entry.opening
-            while cursor + _FIVE_MINUTES <= entry.closing:
-                expected.append(cursor)
-                cursor += _FIVE_MINUTES
+            for interval_start, interval_end in entry.intervals:
+                cursor = interval_start
+                while cursor + _FIVE_MINUTES <= interval_end:
+                    expected.append(cursor)
+                    cursor += _FIVE_MINUTES
             if not all(
                 any(
                     item.start <= slot
@@ -1587,6 +1810,8 @@ def _completed_session_volumes(
             if any(start not in expected for start in observed_by_start):
                 continue
             missing = sum(1 for slot in expected if slot not in observed_by_start)
+            if entry.kind == "SPLIT_SESSION" and missing:
+                continue
             output.append(
                 (
                     contract,
@@ -1738,9 +1963,12 @@ def _make_segments(
         preceding_missing = 0
         if prior is None:
             entry = calendar_map.get(item.trade_date)
-            if entry is not None and entry.opening is not None:
+            interval = _calendar_interval_for_bar(
+                entry, item.merged.start_utc, item.merged.close_utc
+            )
+            if interval is not None:
                 preceding_missing = _missing_slot_count(
-                    entry.opening, item.merged.start_utc
+                    interval[0], item.merged.start_utc
                 )
                 current_preceding_missing = preceding_missing
         else:
@@ -1754,15 +1982,24 @@ def _make_segments(
             if not same_context or delta != _FIVE_MINUTES:
                 split = True
                 if same_context and delta > _FIVE_MINUTES:
-                    preceding_missing = _missing_slot_count(
-                        prior.merged.start_utc + _FIVE_MINUTES,
+                    entry = calendar_map.get(item.trade_date)
+                    if not _is_official_calendar_gap(
+                        entry,
+                        prior.merged.start_utc,
                         item.merged.start_utc,
-                    )
+                    ):
+                        preceding_missing = _missing_slot_count(
+                            prior.merged.start_utc + _FIVE_MINUTES,
+                            item.merged.start_utc,
+                        )
                 elif item.trade_date != prior.trade_date:
                     entry = calendar_map.get(item.trade_date)
-                    if entry is not None and entry.opening is not None:
+                    interval = _calendar_interval_for_bar(
+                        entry, item.merged.start_utc, item.merged.close_utc
+                    )
+                    if interval is not None:
                         preceding_missing = _missing_slot_count(
-                            entry.opening, item.merged.start_utc
+                            interval[0], item.merged.start_utc
                         )
         if split and current:
             groups.append((current, current_preceding_missing))
@@ -1823,6 +2060,35 @@ def _make_segments(
     return tuple(output)
 
 
+def _calendar_interval_for_bar(
+    entry: _NormalizedCalendar | None,
+    start: datetime,
+    close: datetime,
+) -> tuple[datetime, datetime] | None:
+    if entry is None:
+        return None
+    matches = tuple(
+        interval
+        for interval in entry.intervals
+        if interval[0] <= start and close <= interval[1]
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _is_official_calendar_gap(
+    entry: _NormalizedCalendar | None,
+    prior_start: datetime,
+    next_start: datetime,
+) -> bool:
+    if entry is None or len(entry.intervals) < 2:
+        return False
+    return any(
+        prior_start + _FIVE_MINUTES == left[1]
+        and next_start == right[0]
+        for left, right in zip(entry.intervals, entry.intervals[1:])
+    )
+
+
 def _missing_slot_count(start: datetime, end: datetime) -> int:
     delta = end - start
     seconds = int(delta.total_seconds())
@@ -1830,6 +2096,34 @@ def _missing_slot_count(start: datetime, end: datetime) -> int:
     if seconds < 0 or seconds % width:
         raise _ValidationError("nonintegral missing-bar gap")
     return seconds // width
+
+
+def _attested_official_gap_count(
+    rows: tuple[_UsableRow, ...],
+    calendar_map: dict[date, _NormalizedCalendar],
+) -> int:
+    starts_by_scope: dict[tuple[str, date], set[datetime]] = {}
+    for row in rows:
+        starts_by_scope.setdefault(
+            (row.merged.contract, row.trade_date), set()
+        ).add(row.merged.start_utc)
+    count = 0
+    for (_, trade_date), starts in starts_by_scope.items():
+        entry = calendar_map.get(trade_date)
+        if entry is None or len(entry.intervals) < 2:
+            continue
+        represented = tuple(
+            any(interval_start <= start < interval_end for start in starts)
+            for interval_start, interval_end in entry.intervals
+        )
+        count += sum(
+            1
+            for left_present, right_present in zip(
+                represented, represented[1:]
+            )
+            if left_present and right_present
+        )
+    return count
 
 
 def _normalize_config(value: object) -> GCDatasetBuildConfig:
@@ -2229,11 +2523,19 @@ def _digest_calendar(entries: tuple[_NormalizedCalendar, ...]) -> str:
     return _hash_payload(
         tuple(
             {
+                "calendar_kind": item.kind,
                 "calendar_version": item.calendar_version,
                 "trade_date": item.trade_date.isoformat(),
                 "session_status": item.session_status.value,
-                "opening": _timestamp_text(item.opening) if item.opening is not None else None,
-                "closing": _timestamp_text(item.closing) if item.closing is not None else None,
+                "intervals": tuple(
+                    {
+                        "start_timestamp": _timestamp_text(start),
+                        "end_timestamp": _timestamp_text(end),
+                    }
+                    for start, end in item.intervals
+                ),
+                "source_artifact_ids": item.source_artifact_ids,
+                "source_artifact_sha256s": item.source_artifact_sha256s,
             }
             for item in entries
         )
@@ -2393,6 +2695,8 @@ __all__ = [
     "GCDatasetBuildStatus",
     "GCSourceRole",
     "GCSegmentPartition",
+    "GCDatasetSessionInterval",
+    "GCSplitSessionCalendarEntry",
     "GCSierraChartBarRow",
     "GCSierraChartExport",
     "GCSierraChartCoverageEvidence",

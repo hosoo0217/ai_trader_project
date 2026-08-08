@@ -10,7 +10,7 @@ import importlib.metadata
 import inspect
 import json
 from pathlib import Path
-from typing import get_type_hints
+from typing import Callable, get_type_hints
 
 import pytest
 from zoneinfo import ZoneInfo
@@ -30,6 +30,8 @@ from analysis.gc_dataset_builder import (
     GCDatasetBuildResult,
     GCDatasetBuildStatus,
     GCDatasetManifest,
+    GCDatasetSessionInterval,
+    GCSplitSessionCalendarEntry,
     GCSegmentPartition,
     GCSierraChartBarRow,
     GCSierraChartCoverageEvidence,
@@ -55,6 +57,9 @@ HEADER = (
 HASH_A = "a" * 64
 HASH_B = "b" * 64
 HASH_C = "c" * 64
+AUTHENTICATED_CME_EMAIL_SHA256 = (
+    "8964183FDD4F9A2D64EB53C7BD9D13CA1CF6FA9C0066226BFABC3C4F6CD02EF2"
+)
 D1 = date(2026, 1, 6)
 D2 = date(2026, 1, 7)
 D3 = date(2026, 1, 8)
@@ -91,6 +96,94 @@ def _calendar(
         opening,
         standard_close if status is KillZoneSessionStatus.OPEN else short_close,
     )
+
+
+def _split_calendar(
+    trade_date: date,
+    *,
+    intervals: tuple[GCDatasetSessionInterval, ...] | None = None,
+    version: str = CALENDAR_VERSION,
+    source_artifact_ids: tuple[str, ...] = ("CME-GCC-04687271-FINAL",),
+    source_artifact_sha256s: tuple[str, ...] = (
+        AUTHENTICATED_CME_EMAIL_SHA256,
+    ),
+) -> GCSplitSessionCalendarEntry:
+    opening, _ = _bounds(trade_date)
+    selected_intervals = intervals or (
+        GCDatasetSessionInterval(opening, opening + timedelta(minutes=10)),
+        GCDatasetSessionInterval(
+            opening + timedelta(minutes=20),
+            opening + timedelta(minutes=30),
+        ),
+    )
+    return GCSplitSessionCalendarEntry(
+        version,
+        trade_date,
+        selected_intervals,
+        source_artifact_ids,
+        source_artifact_sha256s,
+    )
+
+
+def _calendar_intervals(
+    item: KillZoneCalendarEntry | GCSplitSessionCalendarEntry,
+) -> tuple[tuple[datetime, datetime], ...]:
+    if isinstance(item, GCSplitSessionCalendarEntry):
+        return tuple(
+            (interval.start_timestamp, interval.end_timestamp)
+            for interval in item.intervals
+        )
+    if (
+        item.session_open_timestamp is None
+        or item.session_close_timestamp is None
+    ):
+        return ()
+    return ((item.session_open_timestamp, item.session_close_timestamp),)
+
+
+def _calendar_status(
+    item: KillZoneCalendarEntry | GCSplitSessionCalendarEntry,
+) -> KillZoneSessionStatus:
+    return (
+        KillZoneSessionStatus.OPEN
+        if isinstance(item, GCSplitSessionCalendarEntry)
+        else item.session_status
+    )
+
+
+def _raw_starts(
+    starts: tuple[datetime, ...],
+    volumes: tuple[int, ...],
+    *,
+    price: Decimal = Decimal("4000.0"),
+) -> bytes:
+    if len(starts) != len(volumes):
+        raise ValueError("starts and volumes must have equal length")
+    lines = [HEADER]
+    for start, volume in zip(starts, volumes, strict=True):
+        local = start.astimezone(TOKYO).replace(tzinfo=None)
+        bid = volume // 2
+        ask = volume - bid
+        lines.append(
+            ", ".join(
+                (
+                    f"{local.year}-{local.month}-{local.day}",
+                    local.strftime("%H:%M:%S.%f"),
+                    str(price),
+                    str(price + Decimal("0.2")),
+                    str(price - Decimal("0.2")),
+                    str(price),
+                    str(volume),
+                    str(max(volume, 1)),
+                    str(price),
+                    str(price),
+                    str(price),
+                    str(bid),
+                    str(ask),
+                )
+            )
+        )
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def _raw(
@@ -185,7 +278,9 @@ def _prior_eligible_dates(trade_date: date) -> tuple[date, date, date]:
 
 def _coverage(
     export: GCSierraChartExport,
-    calendars: tuple[KillZoneCalendarEntry, ...],
+    calendars: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ],
 ) -> GCSierraChartCoverageEvidence:
     starts = tuple(
         row.bar_start_timestamp.replace(tzinfo=TOKYO).astimezone(UTC)
@@ -198,16 +293,14 @@ def _coverage(
         for start in starts
     }
     relevant = tuple(
-        item
+        (item, _calendar_intervals(item))
         for item in calendars
-        if item.trade_date in trade_dates
-        and item.session_open_timestamp is not None
-        and item.session_close_timestamp is not None
+        if item.trade_date in trade_dates and _calendar_intervals(item)
     )
     if not relevant:
         raise ValueError("coverage requires at least one matching open calendar")
-    start = min(item.session_open_timestamp for item in relevant if item.session_open_timestamp)
-    end = max(item.session_close_timestamp for item in relevant if item.session_close_timestamp)
+    start = min(intervals[0][0] for _, intervals in relevant)
+    end = max(intervals[-1][1] for _, intervals in relevant)
     evidence_hash = hashlib.sha256(
         f"{export.source_id}:{start.isoformat()}:{end.isoformat()}".encode()
     ).hexdigest()
@@ -245,7 +338,9 @@ def _coverage(
 
 def _coverage_per_session(
     export: GCSierraChartExport,
-    calendars: tuple[KillZoneCalendarEntry, ...],
+    calendars: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ],
 ) -> tuple[GCSierraChartCoverageEvidence, ...]:
     output: list[GCSierraChartCoverageEvidence] = []
     starts = {
@@ -253,11 +348,23 @@ def _coverage_per_session(
         for row in export.rows
     }
     for calendar in calendars:
-        opening = calendar.session_open_timestamp
-        closing = calendar.session_close_timestamp
-        if opening is None or closing is None or closing > export.capture_timestamp:
+        intervals = _calendar_intervals(calendar)
+        if not intervals:
             continue
-        if not any(opening <= start < closing for start in starts):
+        opening = intervals[0][0]
+        closing = intervals[-1][1]
+        completed = (
+            closing + timedelta(minutes=1)
+            if isinstance(calendar, GCSplitSessionCalendarEntry)
+            else closing
+        )
+        if closing > export.capture_timestamp:
+            continue
+        if not any(
+            interval_start <= start < interval_end
+            for start in starts
+            for interval_start, interval_end in intervals
+        ):
             continue
         evidence_hash = hashlib.sha256(
             f"{export.source_id}:{opening.isoformat()}:{closing.isoformat()}".encode()
@@ -274,7 +381,7 @@ def _coverage_per_session(
             timeframe=export.timeframe,
             coverage_start_timestamp=opening,
             coverage_end_timestamp=closing,
-            acquisition_completed_timestamp=closing,
+            acquisition_completed_timestamp=completed,
             acquisition_evidence_sha256=evidence_hash,
         )
         output.append(
@@ -290,7 +397,7 @@ def _coverage_per_session(
                 export.timeframe,
                 opening,
                 closing,
-                closing,
+                completed,
                 evidence_hash,
             )
         )
@@ -393,9 +500,16 @@ def _build(
     *,
     exports: tuple[GCSierraChartExport, ...] | None = None,
     coverage: tuple[GCSierraChartCoverageEvidence, ...] | None = None,
-    calendars: tuple[KillZoneCalendarEntry, ...] | None = None,
+    calendars: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ] | None = None,
     config: GCDatasetBuildConfig | None = None,
     auto_dependencies: bool = True,
+    coverage_mutator: Callable[
+        [tuple[GCSierraChartCoverageEvidence, ...]],
+        tuple[GCSierraChartCoverageEvidence, ...],
+    ]
+    | None = None,
 ) -> GCDatasetBuildResult:
     selected_config = _config() if config is None else config
     selected_calendars = (_calendar(D1),) if calendars is None else calendars
@@ -423,28 +537,69 @@ def _build(
                 active_dates = tuple(
                     item.trade_date
                     for item in selected_calendars
-                    if item.session_status is not KillZoneSessionStatus.SESSION_CLOSED
+                    if _calendar_status(item)
+                    is not KillZoneSessionStatus.SESSION_CLOSED
                     and selected_config.initial_trade_date
                     <= item.trade_date
                     <= selected_config.oos_end_trade_date
                 )
                 if active_dates:
                     active_closes = tuple(
-                        item.session_close_timestamp
+                        _calendar_intervals(item)[-1][1]
                         for item in selected_calendars
                         if item.trade_date in active_dates
-                        and item.session_close_timestamp is not None
+                        and _calendar_intervals(item)
                     )
                     if active_closes:
-                        additions.append(
-                            _export(
-                                adjacent,
-                                tuple((day, 5) for day in active_dates),
-                                source_name="adjacent_roll_evidence.txt",
-                                capture_timestamp=max(active_closes)
-                                + timedelta(minutes=1),
-                            )
+                        active_entries = tuple(
+                            item
+                            for item in selected_calendars
+                            if item.trade_date in active_dates
+                            and _calendar_intervals(item)
                         )
+                        if any(
+                            isinstance(item, GCSplitSessionCalendarEntry)
+                            for item in active_entries
+                        ):
+                            starts = tuple(
+                                start
+                                for item in active_entries
+                                for interval_start, interval_end in _calendar_intervals(item)
+                                for start in (
+                                    interval_start
+                                    + offset * timedelta(minutes=5)
+                                    for offset in range(
+                                        int(
+                                            (interval_end - interval_start)
+                                            / timedelta(minutes=5)
+                                        )
+                                    )
+                                )
+                            )
+                            additions.append(
+                                _export(
+                                    adjacent,
+                                    tuple((day, 5) for day in active_dates),
+                                    source_name="adjacent_roll_evidence.txt",
+                                    raw_bytes=_raw_starts(
+                                        starts,
+                                        tuple(1 for _ in starts),
+                                        price=Decimal("4100.0"),
+                                    ),
+                                    capture_timestamp=max(active_closes)
+                                    + timedelta(minutes=1),
+                                )
+                            )
+                        else:
+                            additions.append(
+                                _export(
+                                    adjacent,
+                                    tuple((day, 5) for day in active_dates),
+                                    source_name="adjacent_roll_evidence.txt",
+                                    capture_timestamp=max(active_closes)
+                                    + timedelta(minutes=1),
+                                )
+                            )
             selected_exports = _sorted_exports(selected_exports + tuple(additions))
     if coverage is None:
         generated: list[GCSierraChartCoverageEvidence] = []
@@ -456,6 +611,8 @@ def _build(
         selected_coverage = _sorted_coverage(tuple(generated))
     else:
         selected_coverage = coverage
+    if coverage_mutator is not None:
+        selected_coverage = coverage_mutator(selected_coverage)
     return build_gc_futures_dataset(
         exports=selected_exports,
         coverage_evidence=selected_coverage,
@@ -657,7 +814,10 @@ def test_case_04_runtime_timezone_binding(monkeypatch: pytest.MonkeyPatch) -> No
 
 # Case 5
 def test_case_05_exact_constants() -> None:
-    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V2"
+    assert (
+        GC_DATASET_BUILDER_VERSION
+        == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+    )
     assert GC_DATASET_INSTRUMENT == "GC"
     assert GC_DATASET_TIMEFRAME == "5M"
     assert GC_DATASET_SOURCE_TIMEZONE == "Asia/Tokyo"
@@ -699,7 +859,7 @@ def test_case_06_absent_interval_never_emits_inferred_bar() -> None:
     assert sum(len(segment.bars) for segment in result.segments) == 1
     assert result.manifest is not None
     assert result.manifest.missing_bar_count == 1
-    assert result.manifest.attested_no_trade_interval_count == 1
+    assert result.manifest.attested_no_trade_interval_count == 0
 
 
 # Case 7
@@ -959,6 +1119,75 @@ def test_case_20_calendar_boundaries_are_start_inclusive_end_exclusive() -> None
     assert len(result.segments[0].bars) == 2
 
 
+def test_case_20_split_session_maps_both_intervals_to_one_trade_date() -> None:
+    opening, _ = _bounds(D1)
+    starts = tuple(
+        opening + timedelta(minutes=offset)
+        for offset in (0, 5, 20, 25)
+    )
+    export = _export(
+        source_name="split-session.txt",
+        raw_bytes=_raw_starts(starts, (10, 20, 30, 40)),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    result = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    session_segments = tuple(
+        segment
+        for segment in result.segments
+        if segment.first_trade_date == D1
+    )
+    assert len(session_segments) == 2
+    assert sum(len(segment.bars) for segment in session_segments) == 4
+    assert session_segments[1].preceding_missing_bar_count == 0
+    assert ("GCG26-COMEX", D1, 100) in (
+        result.manifest.completed_session_volumes
+    )
+    assert result.manifest.missing_bar_count == 0
+    assert result.manifest.attested_no_trade_interval_count == 1
+
+
+def test_case_20_positive_row_in_official_gap_is_invalid() -> None:
+    opening, _ = _bounds(D1)
+    export = _export(
+        source_name="gap-positive.txt",
+        raw_bytes=_raw_starts(
+            (opening, opening + timedelta(minutes=15)),
+            (10, 10),
+        ),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    result = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert "ROW_OUTSIDE_DECLARED_SESSION" in result.blocking_reasons
+    assert result.manifest is None
+
+
+def test_case_20_zero_volume_row_in_official_gap_is_excluded() -> None:
+    opening, _ = _bounds(D1)
+    export = _export(
+        source_name="gap-zero.txt",
+        raw_bytes=_raw_starts(
+            (
+                opening,
+                opening + timedelta(minutes=5),
+                opening + timedelta(minutes=15),
+                opening + timedelta(minutes=20),
+                opening + timedelta(minutes=25),
+            ),
+            (10, 10, 0, 10, 10),
+        ),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    result = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    assert ("OUTSIDE_SESSION_ZERO_VOLUME", 1) in (
+        result.manifest.exclusion_counts
+    )
+
+
 # Case 21
 def test_case_21_early_close_rejects_later_positive_row() -> None:
     export = _export(
@@ -1012,6 +1241,158 @@ def test_case_23_missing_calendar_unknown_malformed_calendar_invalid() -> None:
     assert invalid.status is GCDatasetBuildStatus.INVALID
 
 
+def test_case_23_authoritative_2024_and_2025_split_session_moments() -> None:
+    entry_2024 = GCSplitSessionCalendarEntry(
+        CALENDAR_VERSION,
+        date(2024, 11, 29),
+        (
+            GCDatasetSessionInterval(
+                datetime(2024, 11, 27, 18, tzinfo=NY),
+                datetime(2024, 11, 28, 14, 30, tzinfo=NY),
+            ),
+            GCDatasetSessionInterval(
+                datetime(2024, 11, 28, 18, tzinfo=NY),
+                datetime(2024, 11, 29, 14, 45, tzinfo=NY),
+            ),
+        ),
+        ("CME-GCC-04687271-FINAL",),
+        (AUTHENTICATED_CME_EMAIL_SHA256,),
+    )
+    entry_2025 = GCSplitSessionCalendarEntry(
+        CALENDAR_VERSION,
+        date(2025, 11, 28),
+        (
+            GCDatasetSessionInterval(
+                datetime(2025, 11, 27, 18, tzinfo=NY),
+                datetime(2025, 11, 27, 21, 40, tzinfo=NY),
+            ),
+            GCDatasetSessionInterval(
+                datetime(2025, 11, 28, 8, 30, tzinfo=NY),
+                datetime(2025, 11, 28, 17, tzinfo=NY),
+            ),
+        ),
+        ("CME-GCC-04687271-FINAL",),
+        (AUTHENTICATED_CME_EMAIL_SHA256,),
+    )
+    normalized, issues = dataset._scan_calendars(
+        (entry_2024, entry_2025), _config()
+    )
+    assert issues == ()
+    assert normalized[0].trade_date == date(2024, 11, 29)
+    assert normalized[0].intervals[0][1] == datetime(
+        2024, 11, 28, 14, 30, tzinfo=NY
+    ).astimezone(UTC)
+    assert normalized[1].intervals[1][0] == datetime(
+        2025, 11, 28, 8, 30, tzinfo=NY
+    ).astimezone(UTC)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ("one_interval", "SPLIT_SESSION_REQUIRES_MULTIPLE_INTERVALS"),
+        ("touching", "SPLIT_SESSION_INTERVALS_TOUCH"),
+        ("out_of_order", "SPLIT_SESSION_INTERVALS_OUT_OF_ORDER"),
+        ("overlap", "SPLIT_SESSION_INTERVAL_OVERLAP"),
+        ("off_grid", "SPLIT_SESSION_INTERVAL_OFF_GRID"),
+        ("naive", "MALFORMED_CALENDAR_ENTRY"),
+        ("non_tuple", "SPLIT_SESSION_INTERVALS_NOT_TUPLE"),
+        ("source_order", "CALENDAR_SOURCE_ARTIFACTS_OUT_OF_ORDER"),
+        ("source_lengths", "CALENDAR_SOURCE_ARTIFACT_LENGTH_MISMATCH"),
+        ("source_duplicate", "DUPLICATE_CALENDAR_SOURCE_ARTIFACT"),
+        ("bad_hash", "MALFORMED_CALENDAR_ENTRY"),
+    ],
+)
+def test_case_23_split_calendar_malformed_shapes_fail_closed(
+    mutation: str,
+    reason: str,
+) -> None:
+    opening, _ = _bounds(D1)
+    intervals = (
+        GCDatasetSessionInterval(opening, opening + timedelta(minutes=10)),
+        GCDatasetSessionInterval(
+            opening + timedelta(minutes=20),
+            opening + timedelta(minutes=30),
+        ),
+    )
+    ids = ("A", "B")
+    hashes = (HASH_A, HASH_B)
+    if mutation == "one_interval":
+        intervals = intervals[:1]
+    elif mutation == "touching":
+        intervals = (
+            intervals[0],
+            GCDatasetSessionInterval(
+                intervals[0].end_timestamp,
+                intervals[0].end_timestamp + timedelta(minutes=10),
+            ),
+        )
+    elif mutation == "overlap":
+        intervals = (
+            intervals[0],
+            GCDatasetSessionInterval(
+                opening + timedelta(minutes=5),
+                opening + timedelta(minutes=15),
+            ),
+        )
+    elif mutation == "out_of_order":
+        intervals = (intervals[1], intervals[0])
+    elif mutation == "off_grid":
+        intervals = (
+            intervals[0],
+            GCDatasetSessionInterval(
+                opening + timedelta(minutes=21),
+                opening + timedelta(minutes=31),
+            ),
+        )
+    elif mutation == "naive":
+        intervals = (
+            intervals[0],
+            GCDatasetSessionInterval(
+                (opening + timedelta(minutes=20)).replace(tzinfo=None),
+                opening + timedelta(minutes=30),
+            ),
+        )
+    elif mutation == "source_order":
+        ids = ("B", "A")
+    elif mutation == "source_lengths":
+        hashes = (HASH_A,)
+    elif mutation == "source_duplicate":
+        ids = ("A", "A")
+    elif mutation == "bad_hash":
+        hashes = (HASH_A, "bad")
+    item = _split_calendar(
+        D1,
+        intervals=intervals,
+        source_artifact_ids=ids,
+        source_artifact_sha256s=hashes,
+    )
+    if mutation == "non_tuple":
+        item = replace(item, intervals=list(intervals))  # type: ignore[arg-type]
+    _, issues = dataset._scan_calendars((item,), _config())
+    assert any(issue.reason == reason for issue in issues)
+
+
+def test_case_23_split_calendar_global_interval_overlap_is_invalid() -> None:
+    opening, _ = _bounds(D1)
+    first = _split_calendar(D1)
+    second = _split_calendar(
+        D2,
+        intervals=(
+            GCDatasetSessionInterval(
+                opening + timedelta(minutes=25),
+                opening + timedelta(minutes=35),
+            ),
+            GCDatasetSessionInterval(
+                opening + timedelta(minutes=40),
+                opening + timedelta(minutes=50),
+            ),
+        ),
+    )
+    _, issues = dataset._scan_calendars((first, second), _config())
+    assert any(issue.reason == "CALENDAR_INTERVAL_OVERLAP" for issue in issues)
+
+
 def test_case_23_missing_exact_predecessor_blocks_initial_acceptance() -> None:
     exports, coverage, calendars, config = _manual_scope(
         include_predecessor=False
@@ -1061,7 +1442,7 @@ def test_case_25_attested_sparse_session_is_completed_without_synthetic_bar() ->
     assert ("GCG26-COMEX", D1, 5) in result.manifest.completed_session_volumes
     assert len(result.segments[0].bars) == 1
     assert result.manifest.missing_bar_count == 1
-    assert result.manifest.attested_no_trade_interval_count == 1
+    assert result.manifest.attested_no_trade_interval_count == 0
 
 
 # Case 26
@@ -1171,6 +1552,47 @@ def test_case_32_closed_dates_neither_count_nor_break_confirmation() -> None:
     assert result.manifest.roll_trade_dates == (D5,)
 
 
+def test_case_32_split_acquisition_must_finish_strictly_after_final_close() -> None:
+    opening, _ = _bounds(D1)
+    closing = opening + timedelta(minutes=30)
+    export = _export(
+        source_name="split-acquisition-boundary.txt",
+        raw_bytes=_raw_starts(
+            tuple(
+                opening + timedelta(minutes=offset)
+                for offset in (0, 5, 20, 25)
+            ),
+            (10, 10, 10, 10),
+        ),
+        capture_timestamp=closing + timedelta(minutes=1),
+    )
+    baseline = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    assert baseline.status is GCDatasetBuildStatus.VALID
+
+    def acquisition_at_close(
+        entries: tuple[GCSierraChartCoverageEvidence, ...],
+    ) -> tuple[GCSierraChartCoverageEvidence, ...]:
+        return tuple(
+            _reidentify_coverage(
+                item,
+                acquisition_completed_timestamp=closing,
+            )
+            if item.coverage_start_timestamp == opening
+            and item.coverage_end_timestamp == closing
+            else item
+            for item in entries
+        )
+
+    ineligible = _build(
+        exports=(export,),
+        calendars=(_split_calendar(D1),),
+        coverage_mutator=acquisition_at_close,
+    )
+    assert ineligible.status is GCDatasetBuildStatus.UNKNOWN
+    assert "COMPARABLE_COMPLETED_VOLUME_MISSING" in ineligible.blocking_reasons
+    assert ineligible.manifest is None
+
+
 # Case 33
 def test_case_33_non_dominance_resets_confirmation() -> None:
     dates = (D1, D2, D3, D4, D5)
@@ -1190,6 +1612,22 @@ def test_case_34_multiple_candidates_use_volume_then_nearer_delivery() -> None:
     assert result.manifest is not None and result.manifest.roll_trade_dates == (D4,)
     rolled = [segment for segment in result.segments if segment.first_trade_date == D4]
     assert rolled and rolled[0].contract == "GCJ26-COMEX"
+
+
+def test_case_34_incomplete_split_session_cannot_supply_roll_volume() -> None:
+    opening, _ = _bounds(D1)
+    export = _export(
+        source_name="partial-split-session.txt",
+        raw_bytes=_raw_starts(
+            (opening, opening + timedelta(minutes=5)),
+            (10, 10),
+        ),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    result = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "COMPARABLE_COMPLETED_VOLUME_MISSING" in result.blocking_reasons
+    assert result.manifest is None
 
 
 def test_case_34_farther_volume_cannot_skip_exact_adjacent_delivery() -> None:
@@ -1306,10 +1744,10 @@ def test_case_40_v2_manifest_binds_coverage_and_conserves_sparse_evidence() -> N
     result = _build(exports=(export,))
     manifest = result.manifest
     assert manifest is not None
-    assert manifest.version == "GC-DATASET-BUILDER-V2"
+    assert manifest.version == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
     assert manifest.coverage_ids
     assert len(manifest.coverage_digest) == 64
-    assert manifest.attested_no_trade_interval_count <= manifest.missing_bar_count
+    assert manifest.attested_no_trade_interval_count == 0
     assert manifest.parsed_row_count == (
         manifest.eligible_row_count + manifest.excluded_row_count
     )
@@ -1371,6 +1809,65 @@ def test_case_42_manifest_conservation_and_evidence_digest() -> None:
     assert manifest.raw_volume == manifest.eligible_volume + manifest.excluded_volume
     assert sum(count for _, count in manifest.exclusion_counts) == manifest.excluded_row_count
     assert _dataset_id(evidence_digest="e" * 64) != _dataset_id()
+
+
+def test_case_42_split_calendar_digest_binds_intervals_and_provenance() -> None:
+    first, first_issues = dataset._scan_calendars(
+        (_split_calendar(D1),), _config()
+    )
+    changed, changed_issues = dataset._scan_calendars(
+        (
+            _split_calendar(
+                D1,
+                source_artifact_ids=("CME-GCC-04687271-OTHER",),
+            ),
+        ),
+        _config(),
+    )
+    opening, _ = _bounds(D1)
+    boundary_changed, boundary_issues = dataset._scan_calendars(
+        (
+            _split_calendar(
+                D1,
+                intervals=(
+                    GCDatasetSessionInterval(
+                        opening, opening + timedelta(minutes=10)
+                    ),
+                    GCDatasetSessionInterval(
+                        opening + timedelta(minutes=20),
+                        opening + timedelta(minutes=35),
+                    ),
+                ),
+            ),
+        ),
+        _config(),
+    )
+    lowercase_hash, lowercase_issues = dataset._scan_calendars(
+        (
+            _split_calendar(
+                D1,
+                source_artifact_sha256s=(
+                    AUTHENTICATED_CME_EMAIL_SHA256.lower(),
+                ),
+            ),
+        ),
+        _config(),
+    )
+    assert (
+        first_issues
+        == changed_issues
+        == boundary_issues
+        == lowercase_issues
+        == ()
+    )
+    assert dataset._digest_calendar(first) != dataset._digest_calendar(changed)
+    assert (
+        dataset._digest_calendar(first)
+        != dataset._digest_calendar(boundary_changed)
+    )
+    assert dataset._digest_calendar(first) == dataset._digest_calendar(
+        lowercase_hash
+    )
 
 
 @pytest.mark.parametrize(
@@ -1692,7 +2189,8 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
         "GC_DATASET_BUILDER_VERSION", "GC_DATASET_INSTRUMENT", "GC_DATASET_TIMEFRAME",
         "GC_DATASET_SOURCE_TIMEZONE", "GC_DATASET_EXCHANGE_TIMEZONE", "GC_DATASET_TICK_SIZE",
         "GC_ROLL_CONFIRMATION_SESSIONS", "GC_DELIVERY_MONTH_CODES", "GCDatasetBuildStatus",
-        "GCSourceRole", "GCSegmentPartition", "GCSierraChartBarRow", "GCSierraChartExport",
+        "GCSourceRole", "GCSegmentPartition", "GCDatasetSessionInterval",
+        "GCSplitSessionCalendarEntry", "GCSierraChartBarRow", "GCSierraChartExport",
         "GCSierraChartCoverageEvidence", "GCCanonicalContractSegment", "GCDatasetManifest", "GCDatasetBuildConfig",
         "GCDatasetBuildResult", "parse_sierra_chart_gc_export", "make_gc_dataset_id",
         "build_gc_futures_dataset",
@@ -1703,6 +2201,8 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
             for parameter in inspect.signature(function).parameters.values()
         )
     expected_fields = {
+        GCDatasetSessionInterval: 2,
+        GCSplitSessionCalendarEntry: 5,
         GCSierraChartBarRow: 10,
         GCSierraChartExport: 9,
         GCSierraChartCoverageEvidence: 13,
@@ -1716,6 +2216,13 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
         assert model.__dataclass_params__.frozen is True
         assert get_type_hints(model)
     expected_names = {
+        GCDatasetSessionInterval: (
+            "start_timestamp", "end_timestamp",
+        ),
+        GCSplitSessionCalendarEntry: (
+            "calendar_version", "trade_date", "intervals",
+            "source_artifact_ids", "source_artifact_sha256s",
+        ),
         GCSierraChartBarRow: (
             "source_row_number", "bar_start_timestamp", "open_price",
             "high_price", "low_price", "close_price", "volume",
@@ -1773,6 +2280,7 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
     assert [item.value for item in GCSourceRole] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert [item.value for item in GCSegmentPartition] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert GC_DELIVERY_MONTH_CODES == ("G", "J", "M", "Q", "V", "Z")
+    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
     assert issubclass(GCDatasetBuildStatus, (str, Enum))
 
 
@@ -1810,6 +2318,13 @@ def test_case_46_exact_keyword_only_names_and_defaults() -> None:
     assert all(
         item.default is inspect.Parameter.empty
         for item in analyzer_signature.parameters.values()
+    )
+    analyzer_hints = get_type_hints(build_gc_futures_dataset)
+    assert analyzer_hints["calendar_entries"] == (
+        tuple[
+            KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+        ]
+        | None
     )
 
 
@@ -1898,6 +2413,60 @@ def test_case_47_complete_strictly_later_prefix_is_invariant() -> None:
     assert prefix.status is GCDatasetBuildStatus.VALID
     assert extended.status is GCDatasetBuildStatus.VALID
     assert extended.segments[0] == prefix.segments[0]
+
+
+def test_case_47_complete_split_session_prefix_is_invariant() -> None:
+    opening, _ = _bounds(D1)
+    split_export = _export(
+        source_name="split-prefix.txt",
+        raw_bytes=_raw_starts(
+            tuple(
+                opening + timedelta(minutes=offset)
+                for offset in (0, 5, 20, 25)
+            ),
+            (10, 10, 10, 10),
+        ),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    prefix = _build(
+        exports=(split_export,),
+        calendars=(_split_calendar(D1),),
+    )
+    later = _export(sessions=((D2, 10),), source_name="later-prefix.txt")
+    extended = _build(
+        exports=_sorted_exports((split_export, later)),
+        calendars=(_split_calendar(D1), _calendar(D2)),
+    )
+    assert prefix.status is GCDatasetBuildStatus.VALID
+    assert extended.status is GCDatasetBuildStatus.VALID
+    assert extended.segments[:2] == prefix.segments[:2]
+
+
+def test_case_47_split_session_historical_provenance_mutation_is_not_prefix() -> None:
+    opening, _ = _bounds(D1)
+    export = _export(
+        source_name="split-mutation.txt",
+        raw_bytes=_raw_starts(
+            tuple(
+                opening + timedelta(minutes=offset)
+                for offset in (0, 5, 20, 25)
+            ),
+            (10, 10, 10, 10),
+        ),
+        capture_timestamp=opening + timedelta(minutes=31),
+    )
+    first = _build(exports=(export,), calendars=(_split_calendar(D1),))
+    changed = _build(
+        exports=(export,),
+        calendars=(
+            _split_calendar(
+                D1,
+                source_artifact_ids=("CME-GCC-04687271-REVISED",),
+            ),
+        ),
+    )
+    assert first.status is changed.status is GCDatasetBuildStatus.VALID
+    assert first.dataset_id != changed.dataset_id
 
 
 def test_case_47_historical_repair_is_not_prefix_extension() -> None:
