@@ -4,60 +4,58 @@
 
 - Proposal ID: `GC-PHASE-A-STRUCTURAL-SEED-PRIVATE-RUN-PROPOSAL-V1`.
 - Date: `2026-08-09`.
-- Baseline commit: `2edbcf7b0c6ca70f856c8d0e200c5d82f8c0466e`.
-- Baseline subject: `feat(analysis): add GC Candidate Evidence builder`.
+- Baseline commit: `dba0322116b5c174bc5a318ea03747f39f0d9a07`.
+- Baseline subject: `fix(analysis): preserve GC no-trade attestation count`.
 - Classification: documentation-only private-execution boundary and readiness record.
-- Current decision: `BLOCKED_PENDING_V3_PILOT_REBUILD`.
+- Current decision: `READY_FOR_EXPLICIT_V3_STRUCTURAL_PRIVATE_RUN_AUTHORIZATION`.
 
 This record defines the only admissible future path from an accepted immutable Phase-A GC dataset
 to private canonical structural-seed evidence. It deliberately does not authorize that execution.
-The currently stored pilot was built by dataset builder V2, while the committed public dataset
-builder and structural validator are V3. That version and identity mismatch is a mandatory
-fail-closed prerequisite, not a formatting difference.
+The immutable V2 pilot remains historical evidence, and a separate immutable V3 split-session pilot
+has now been reconstructed and independently accepted. This correction binds that exact V3 evidence
+without mutating either private root or granting downstream authority.
 
 ## 2. Decision Summary
 
-The standalone structural-seed source, focused tests, checkpoint, and downstream candidate builder
-are committed. The accepted private pilot is present, Git-ignored, non-promotable, and contains no
-OOS bars. The structural private output root is absent.
+The standalone dataset, structural-seed, and candidate-evidence implementations and checkpoints are
+committed. The accepted V3 pilot is present, Git-ignored, non-promotable, contains no OOS bars, and
+has passed two object-equal and machine-byte-identical reconstructions. The exact V3 structural
+private output root remains absent.
 
-However, the private pilot manifest binds:
+The accepted V3 pilot binds:
 
-- builder version `GC-DATASET-BUILDER-V2`;
+- builder version `GC-DATASET-BUILDER-V3-SPLIT-SESSION`;
 - builder source SHA-256
-  `9A3519DA97C0AA526EC4A5A8C867B5BF14AE514BA156F6A11ADDD410B66C1858`;
+  `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843`;
 - builder-test SHA-256
-  `DFCE06D6C9B8EECD10504F35D092D6A0652434D7A995C846E8A797F08919F9C3`;
-- dataset ID `81e40b6bfc397caf859226ebf16328562a9b8cc148a1cafae9075dc0f82140d8`.
+  `3D470CC13BEDDB93B2212C9A7B97B4B1B9AAB3DABF208355534B5ADD9401B878`;
+- dataset ID `a10f39ba08a86e15bd1696752c762d55456e4bcc65954143d4e1addf1ec7f3a2`;
+- artifact-manifest SHA-256
+  `077D1FF1E62E97E005F019CEDED3B0CE0AC22B4CA9DFB273904E41618AD05658`;
+- artifact-set identity
+  `2a752b2c68eeb1a1dc9d56c36d10fce584fde4c94ae89641ff09f8234c62f6eb`.
 
-The committed builder now binds:
-
-- version `GC-DATASET-BUILDER-V3-SPLIT-SESSION`;
-- source SHA-256
-  `DEBD341B3E8CDE3F27E1FAD5DE048E1EF1735F3B4694BC9574A3244255660121`;
-- builder-test SHA-256
-  `4D179ED76198DA44263535FA497B2E2B8D67F2FAFEA4C3F8A6DC63A32F267974`.
-
-`validate_gc_structural_seed_evidence()` calls the committed structural builder, whose manifest
-validator requires `manifest.version == GC_DATASET_BUILDER_VERSION` and recomputes every segment
-identity under the current builder contract. Direct JSON-to-dataclass reconstruction, accepting the
-old dataset ID, or relabeling V2 bytes as V3 would violate the accepted identity boundary.
-
-Therefore the structural private run is not ready. A separate deterministic V3 pilot rebuild must
-produce and independently accept a new private dataset identity before this proposal can be revised
-or execution can be authorized.
+`validate_gc_structural_seed_evidence()` still requires the current V3 manifest version and
+recomputes every segment identity. The V2 root therefore remains inadmissible as a runtime object,
+but the accepted V3 root now satisfies the previously blocking version and identity prerequisite.
+Readiness authorizes only a separately approved private structural run; it does not authorize
+candidate evidence, feature/label generation, training, OOS access, integration, or trading.
 
 ## 3. Verified Repository Baseline
 
-At the baseline:
+At the corrected baseline:
 
 - `HEAD`, local `origin/main`, and the pushed implementation commit equal
-  `2edbcf7b0c6ca70f856c8d0e200c5d82f8c0466e`;
+  `dba0322116b5c174bc5a318ea03747f39f0d9a07`;
 - the tracked worktree and index are clean;
 - three pre-existing untracked documentation files are outside this proposal and remain untouched;
-- the accepted private pilot root exists at
+- the immutable historical V2 pilot root exists at
   `private_data/sierra_chart/gc_2026_phase_a_pilot/` and is ignored by Git;
+- the accepted V3 pilot root exists at
+  `private_data/sierra_chart/gc_2026_phase_a_pilot_v3_split_session/`, contains exactly six files,
+  and is ignored by Git;
 - `private_data/sierra_chart/gc_2026_phase_a_structural_seed_evidence/` is absent;
+- `private_data/sierra_chart/gc_2026_phase_a_structural_seed_evidence_v3/` is absent;
 - `private_data/sierra_chart/gc_2026_phase_a_candidate_evidence/` is absent;
 - structural private execution, candidate private execution, feature/label execution, training,
   model fitting, OOS evaluation, strategy integration, and trading have not begun.
@@ -68,6 +66,10 @@ Historical test evidence remains evidence only and is not rerun by this document
   cases;
 - candidate evidence: `52` focused executions, `2270` full regression executions, exact `48`
   logical cases.
+
+The corrected dataset-builder evidence is `245` focused passes and `2276` full-regression passes,
+with exact `48` logical cases. Those passing tests and the deterministic V3 rebuild prove bounded
+engineering consistency only; they do not prove research validity, edge, or promotion readiness.
 
 ## 4. Exact Documentation-Only Scope
 
@@ -97,9 +99,9 @@ The global code freeze remains active. This record grants no authority to:
   local Git authority.
 
 No future permission is inferred from a reserved path, committed implementation, passing unit
-tests, or the existence of private V2 evidence.
+tests, or the existence of private V2/V3 evidence.
 
-## 6. Accepted Private Pilot Evidence
+## 6. Accepted V2 History and V3 Pilot Evidence
 
 The present private root is:
 
@@ -125,7 +127,136 @@ Its immutable recorded identity is:
 These facts remain accepted as historical V2 engineering evidence. They do not authorize reuse as
 a V3 runtime object, training data, final 2024-2025 research evidence, or production data.
 
-## 7. Mandatory V2-to-V3 Rebuild Boundary
+The accepted non-overwriting V3 root is:
+
+`private_data/sierra_chart/gc_2026_phase_a_pilot_v3_split_session/`
+
+Its external acceptance binding is:
+
+- purpose: `NON_PROMOTABLE_ENGINEERING_PILOT`;
+- status: `PASS` with dataset status `VALID`;
+- exact reason tuple: `("CANONICAL_DATASET_BUILT",)`;
+- blocking reasons: `()`;
+- proposal ID: `GC-PHASE-A-PILOT-V3-SPLIT-SESSION-REBUILD-PROPOSAL-V1`;
+- proposal SHA-256:
+  `FEF0D8E96C37B261ACF2B252B59FE7F6ACD9B635E1C9A4656117509DCD73E0AD`;
+- artifact-manifest SHA-256:
+  `077D1FF1E62E97E005F019CEDED3B0CE0AC22B4CA9DFB273904E41618AD05658`;
+- build-result SHA-256:
+  `3A5F28D47B2D1A7662E5D6EC581E04F1BCFC6E79CD20AE3BE99127756C307FA9`;
+- input-binding SHA-256:
+  `99E7356985C6C6BFC7A23BF6250DE0B13274732788570FF37BCD8AEF7219DFFA`;
+- V2/V3-comparison SHA-256:
+  `AFA155619348985D07255D432B9B77FF79529ECFD5B2A917CDDEE0BED43285AD`;
+- validation-report SHA-256:
+  `02A80C77B169C8E691569C847BB9F50B233C90E843A005CD395BAAB25A29FF85`;
+- README SHA-256:
+  `B7DD64CE871AD673F43B79A06E91EB1EC9204A3BE7D328DD0EABE53CD1E024DC`;
+- artifact-set identity:
+  `2a752b2c68eeb1a1dc9d56c36d10fce584fde4c94ae89641ff09f8234c62f6eb`;
+- dataset ID: `a10f39ba08a86e15bd1696752c762d55456e4bcc65954143d4e1addf1ec7f3a2`;
+- builder version: `GC-DATASET-BUILDER-V3-SPLIT-SESSION`;
+- calendar version:
+  `GC-2026-PILOT-V1-ACE75CFEC60473FCA13CB681C588B5DDE268E691EF37ACC4BE66208C4C470345`;
+- timezone and timezone-data version: `America/New_York`, `2026.2`;
+- ordered source IDs:
+  `("1a8c876a57852d07c9bcd068c36c0c2244057ca13cc9e737d0909962e7c2cac1",`
+  `"863aaff9e97cd8448a3edb008639e00be4bd0e35bcb72af8e9ed3a083a661a5e",`
+  `"84a5b8e5599c6dce1bf06599c6cdefad7d27118a13ea86b856c1c9427d6c8918")`;
+- ordered coverage IDs:
+  `("c0a728eec42ca9cc692e3776ce83e95e99884ce3bfaad84d96adda6ef4505290",`
+  `"35092c5d8e97251a6cf2afa323ae8195cfb4ba9675b51c8cd784c3ce75bb92c6",`
+  `"1030b2cb66bf3154deeed18528d94f8fc5ba7357563dc9c6e00fe50c25eba205")`;
+- coverage digest:
+  `002734838874446ce4305f7d73664187400556b6b161ebb34d0e7b64b50b43d6`;
+- raw UTC bounds: `2026-02-17T23:05:00.000000Z` through
+  `2026-03-30T21:00:00.000000Z`;
+- usable UTC bounds: `2026-02-22T23:05:00.000000Z` through
+  `2026-03-30T21:00:00.000000Z`;
+- source rows: `15412` parsed, `7103` eligible, `8309` excluded;
+- volumes: `4742010` raw, `3829577` eligible, `912433` excluded;
+- excluded rows: `1523` `BEFORE_INITIAL_BOUNDARY` and `6786` `ROLL_EVIDENCE_ONLY`;
+- development bars: `7103`;
+- OOS bars: `0`;
+- canonical segments: `54`;
+- missing parent slots: `73`;
+- acquisition-attested no-trade intervals: `73`;
+- roll trade dates: `()`;
+- public parser/builder calls per reconstruction: `3/1`;
+- independent reconstructions: `2`, object-equal and machine-byte-identical;
+- `oos_outcome_accessed=false`, `structural_run_performed=false`,
+  `training_started=false`, and `integration_started=false`.
+
+The exact ordered V3 segment IDs are:
+
+```text
+22128c48a1fd066eb3e2f05db6edf8e04078b147de548256f7a9c634bfdbd72a
+b4a6b226e2684c40d3ca5d11fa58ec779b3d9e440620ecc1437b93ff397228f4
+96a2534525780bd95395c2128b0125b61dbbaca6788c0c94c251098337b52ac0
+f04384b29c60a4c2a4f6da5c6cc03999d01520d170670a1db848f03b84989232
+d132a5f39d3aeda2799e116af069d69d099b5516372105d3c217984fcee300a7
+6f51c3c73d64639cc0d8e86391eb2c68ae596b80e1c96c6c857cea1d48d1fd8c
+2f012cc0567bf5ec19716aa8e617ada16298900ac8f4c364da9c6d19fa711d6a
+41c673ee6ab46e721d908256b462765956f060f97c1cebecd844ee9c9dd5f11f
+3fc5d8302dfa006d2819ab8464704b972c42d04879f6e20a144769328dcd7e67
+0bf69ff5c705ab9ebde43db67d8df954b0508d4dcc054d74942a73bacdd26fe0
+22ed6c8e9f9f5b1fae036732255e5d8be3a4e11b57149cd8357a358cc5b253e0
+e1d4f06409b0183ccc06ad2a5b9a680ad0978d7b9aba6443743e3f04b2ddb069
+059c3350307d7822b7e2ab10b014fc8901218c8058ca4db633fe66e09f6864db
+ed1b1bf51468e6b5c89aca6bf9c05291dc24b7944ad81c74ba10d8fd39bfbe28
+44c34edec25ff5ac18f8da064a9a1cbc5b8f574fdb3e632f313ed6d0195a42f8
+d500fde98a38bea2a8ffe96c5760c8e47080e4f7546b5a9498af04478c3397b8
+79db5bb9021a551f74d3aa926cefecb2920cf551c8af71386056095358bfb028
+26db8a7064318c040df66f5d1cc3e041c034556661354c54bc3968a9d2848c0f
+c26c2880fe0fe33725967734b0feaee3a93f44a7cfcfa3630c72017bca8cd7fe
+126f93b048071ae097aee9ae8b5eed3c0c775508708406f37f7e9e6d6a754622
+34b15a2e12ecbaba30e4f5fa8b2e47132d48e383fa7ed47287ce8689450700ec
+58bbe5e8a48245d151275aa6b9ea4ceeaac4561b67d075e1dd46aebc7c8059ae
+6fc49150144808bc5cc5f410a9275f0f059819d7102b37f3e644c15b9a5db702
+55ae0c2f3b6b148056c434a6ea4640f6c46ef7f3b8764a71e8e5d15a125c5860
+e5bc42c8d74e8476556e3f5d867a8d4ceb15e44c8185d7f27f079912bbe414a9
+b4ddf84e05c36a2ecb870d949e7bb66b2704588bfb5aeed27d2ca711c894f8e2
+95002c047408dfc13fbe0ef100924565a6b76dfd9d7e23e9e74002afc0f8acd5
+041a607d66ff8af4faf2540f8b56955f1a7ecf04eea8a293d4dd5da6584f7fb8
+abe2ca7d22ab29b6e09dcb788fb0cbdfe07d7a0a740dcfbe6eeb9e548901ba60
+1853860322a3b09dd090c993cff02e6ebb55df57c5f76577f817ab55f53e153d
+ae62f594137bbff20ac3c2aa37573e9bf13c9e9dbf274ceaf65a4d2e8b6552bc
+0947a0cf75bee1059ea1253ddfef32e377790de760e743b60c45996ab6797acc
+5d5de18ce4bed5522ae4f2a22ca60ab7734c504567f4eed3bb6d6f873277cff4
+fae4f5e600b58abb63f6c60fe4857b7f9dc7d2f16dc11d2cdb6f42931661115a
+95301f0e09ea7aec412b99c388fda41f2174a1c57be1c3cf675a451f877648ca
+6a6fd3c1dd0fd28bba040c24de05b09922567f6dd5c6efc5167444b1d8488fd2
+c9aacbc990d3ecaeee329acbf5afe9b47aef1779f65dfb915578beec47979d17
+434ff48821d42d4563c306a2747494881186930ba48f0e904ac1ece05ccc1a07
+07f7f1e7e2251f1a65c02e19d411867f619662c51a84835ada30f1ff8891b9c1
+f8d64585d63eacb922d38074b0bab173a39034a0cccb0ecd0854bb8908bef20e
+171560c112c7bb2fec429e46c30db4792f83b44b01ed8f17d60081e92390093a
+deca61f241b9f43eeffe5ba9b2f2fc9671ecc844cb9da2b1218825963f253aec
+ab66f2671ed56c12c4d7e7dd3e4999f44650d05719c865f0317dfff8217b1caf
+19c17a2287fd77a58a2f13cecd738ee35e94f53d8a23b778ecd50fd26748c393
+23e8cff42113624d71ec1580abf40814719a7a135a06758ba03bad2b801a9dbf
+31859725a9bce47e4ae841486c6af5fd0351bb32680bac27ed40e3b45a7301f1
+f15d9ab3d263c05fc328972c59f2dbc3af9167a4c0428343ae4a3e98856200c9
+f08d917d048d7aefa0ea3e6bf79f06b9b082f48252ed3e92cde4135200ab982b
+cfbb6c878d36a32056945d799dadf34fa4c5ba8569e3d9a2da9a490d948e5bfd
+8952c033a027473cd873d8289df67c96b609adb9b21a40cb939848eac51ff8c8
+a4890163aea0c355f8cb18654b3b1c3fb13bc12aca08c0c1049e96d06e83eaa3
+5f62c3d49005b4614a49b1ebfda1ff4b62ad9d3dac47689f3834a44a719fc1e7
+859732ddad2c37a70b8dc2ec11fe95a9f5b28f1d6e68d64eb6cac6513643ecc4
+0dbdf5627f39ad33a893a62cceaf23084d7a2b17a8e594589b9a6817e89ba1bc
+```
+
+The V3 input binding records execution commit `02700c78afb74225c0e3a4b09e06bb8f7af60df9`
+and the exact corrected dependency bytes later committed and pushed by
+`dba0322116b5c174bc5a318ea03747f39f0d9a07`. This provenance distinction is explicit: acceptance
+depends on exact bytes and repeatability, while the later commit is the durable Git acceptance of
+those bytes. The V3 input also records predecessor structural-proposal SHA-256
+`6117863D6874B7DA34A81EECADCA68654BBFDE89D1A966299DB20BF3FDCEAD20`;
+this documentation-only readiness correction necessarily changes that proposal byte hash without
+mutating the already accepted V3 root. A future structural input binding must bind the corrected
+proposal's committed hash separately.
+
+## 7. Satisfied V2-to-V3 Rebuild Boundary
 
 Builder version is identity-bearing. The V3 split-session implementation intentionally separates
 V3 dataset, segment, source, and coverage identities from V2. A V2 manifest cannot pass the current
@@ -138,12 +269,16 @@ structural validator because:
 5. the accepted split-session contract forbids silently treating identity mutation as compatible
    reconstruction.
 
-The V3 rebuild must start from the same immutable bounded derivative sources, coverage evidence,
-calendar bytes, and locked configuration. It must call the current public builder exactly once and
-must publish under a new private immutable root. It must not overwrite or relabel the V2 root.
+The accepted V3 rebuild was required to start from the same immutable bounded derivative sources,
+coverage evidence, calendar bytes, and locked configuration. It called the current public builder
+exactly once per reconstruction, published under a new private immutable root, and did not overwrite
+or relabel the V2 root.
 
-Any assumption that V3 will retain dataset ID, segment IDs, counts, reasons, or manifest bytes is
-forbidden. Those values must be observed, validated, and independently accepted after the rebuild.
+The V3 root was rebuilt from those exact immutable inputs without overwriting V2. Dataset and all
+segment identities rebased, while the accepted semantic comparison proved status, reason, source,
+coverage, counts, partitions, bars, and manifest semantics equal under the locked comparison
+contract. No identity was copied forward. The exact observed V3 values are externally bound in
+Section 6 and must be revalidated before any structural call.
 
 ## 8. Accepted Committed Dependency Bytes
 
@@ -151,8 +286,8 @@ Any future readiness revision or private execution must stop on drift from these
 
 | Artifact | SHA-256 |
 |---|---|
-| `analysis/gc_dataset_builder.py` | `DEBD341B3E8CDE3F27E1FAD5DE048E1EF1735F3B4694BC9574A3244255660121` |
-| `tests/test_gc_dataset_builder.py` | `4D179ED76198DA44263535FA497B2E2B8D67F2FAFEA4C3F8A6DC63A32F267974` |
+| `analysis/gc_dataset_builder.py` | `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843` |
+| `tests/test_gc_dataset_builder.py` | `3D470CC13BEDDB93B2212C9A7B97B4B1B9AAB3DABF208355534B5ADD9401B878` |
 | `analysis/gc_feature_label_builder.py` | `7B13C40802BB4FA24063041CA1D32817D3654F0F20A2A1928639F45CC75B3153` |
 | `core/gc_chronological_backtest.py` | `07ACAC43DB9D74079F9699EFA60F7E5E4212E2D12AA88D9F14B7B055B165DB6A` |
 | `smc/smc_v2_primitives.py` | `091EDFEA9A05E128EED573932C3C98D261E463E828B82C15B28B87FF56A464FD` |
@@ -166,14 +301,15 @@ Any future readiness revision or private execution must stop on drift from these
 | `tests/test_gc_candidate_evidence_builder.py` | `090668870F4AD4C49AB540D9E64D2E53BD07657D743FAE391C48CF73C5584116` |
 | `docs/gc_futures_phase_a_candidate_evidence_checkpoint.md` | `DA7F657FFB2D787E343E37E69571315D97128389F2594F007FEE9BD87574C5EC` |
 | `docs/gc_futures_split_session_calendar_change_proposal.md` | `D2B6968527F3A19423B3535FA19AB57C008691CFFFF2B07863D1FC2BC2710923` |
-| `docs/gc_futures_split_session_calendar_checkpoint.md` | `D7F9261347C931FC5C897CA8330016C9AA974A69199A181D29F02CD519BC7760` |
+| `docs/gc_futures_split_session_calendar_checkpoint.md` | `730332BD2CE71BA9E6FEB2DD29F9100CD6125300E3563B700734CEE3F2BC6087` |
+| `docs/gc_futures_phase_a_pilot_v3_split_session_rebuild_change_proposal.md` | `FEF0D8E96C37B261ACF2B252B59FE7F6ACD9B635E1C9A4656117509DCD73E0AD` |
 
 Hash equality is necessary but not sufficient. Exact public signatures, version constants,
 dataclass fields, enum values, deterministic identities, and status semantics must also pass.
 
 ## 9. Exact Future Dataset Reconstruction Contract
 
-After a separately accepted V3 rebuild, the private structural run must reconstruct the runtime
+The future private structural run must reconstruct the accepted V3 runtime
 `GCDatasetBuildResult` once through only these public APIs:
 
 - `parse_sierra_chart_gc_export()`;
@@ -245,9 +381,9 @@ Before any structural derivation, the rebuilt dataset must independently prove a
 2. the manifest version is exactly `GC-DATASET-BUILDER-V3-SPLIT-SESSION`;
 3. dataset ID and every segment ID recompute under current public identities;
 4. source, coverage, calendar, timezone-data, row, volume, segment, partition, and reason evidence
-   exactly match the accepted V3 rebuild checkpoint;
+   exactly match the Section 6 external V3 acceptance binding and all six accepted artifact hashes;
 5. development bars, OOS bars, segment count, missing-slot count, and roll dates reconcile to the
-   new V3 manifest without assuming the old V2 values;
+   accepted V3 manifest without assuming the old V2 values;
 6. OOS bar count is exactly zero;
 7. frozen OOS outcomes were not opened or used;
 8. no private input or manifest was modified after acceptance.
@@ -342,7 +478,8 @@ change the structural seed identity.
 - proposal ID and proposal-file SHA-256;
 - exact source commit;
 - all Section 8 dependency hashes;
-- accepted V3 pilot root purpose and accepted V3 build-manifest SHA-256;
+- accepted V3 pilot root purpose, artifact-manifest SHA-256, build-result SHA-256, and artifact-set
+  identity;
 - V3 dataset ID, builder version, calendar version, timezone-data version, exact dataset config,
   counts, segments, partitions, missing slots, roll dates, reasons, and blocking reasons;
 - structural version and exact structural config;
@@ -413,7 +550,7 @@ readiness, or trading authority.
 
 ## 21. Inline Synthetic Exact 48-Case Future Matrix
 
-The future V3 rebuild proposal and later structural private-run tooling/tests must preserve this
+The accepted V3 rebuild evidence and future structural private-run tooling/tests must preserve this
 exact sequential logical matrix. Parameterization may expand collection without changing the 48
 logical cases.
 
@@ -423,14 +560,14 @@ logical cases.
 4. V2 dataset or segment ID carry-forward is rejected.
 5. Builder source/test hash drift stops before reconstruction.
 6. Structural source/test/checkpoint hash drift stops before reconstruction.
-7. Proposal or accepted V3 pilot-manifest hash drift stops before reconstruction.
+7. Proposal or accepted V3 artifact-manifest/build-result hash drift stops before reconstruction.
 8. Malformed, missing, reordered, extra, or duplicate private input file stops.
 9. Current public parser reconstructs every bounded export exactly once.
 10. Coverage evidence and calendar entries preserve exact accepted tuple order.
 11. Exact dataset config and runtime tzdata reconcile.
 12. Public dataset builder is called exactly once.
 13. Non-`VALID` dataset status blocks structural derivation.
-14. Dataset manifest, counts, reasons, segments, and identities match accepted V3 evidence.
+14. Dataset manifest, counts, reasons, ordered segments, and identities match the Section 6 binding.
 15. OOS bar count is zero and frozen OOS outcome remains unopened.
 16. Structural builder exact keyword-only signature/default is locked.
 17. Structural validator exact keyword-only signature/default is locked.
@@ -472,10 +609,11 @@ logical cases.
 This documentation task rolls back by deleting only this uncommitted proposal. After commit,
 rollback requires a bounded revert commit; history rewriting is forbidden.
 
-A future V3 pilot rebuild rolls back only its newly reserved private rebuild root. A future
-structural run rolls back only its new V3 structural root or quarantined temporary output. Neither
-operation may delete, modify, or reuse the accepted V2 root, immutable acquisition artifacts,
-calendar evidence, or any accepted V3 predecessor.
+The accepted V3 pilot root is immutable. Any separately authorized future reconstruction may roll
+back only its new task-specific temporary or output root. A future structural run rolls back only
+its new V3 structural root or quarantined temporary output. Neither operation may delete, modify,
+or reuse the accepted V2 root, immutable acquisition artifacts, calendar evidence, or any accepted
+V3 predecessor.
 
 Private rollback never changes Git-tracked source and never creates a training or integration path.
 
@@ -483,14 +621,18 @@ Private rollback never changes Git-tracked source and never creates a training o
 
 Structural private execution requires all of the following before a new explicit run authorization:
 
-1. a separate V3 pilot rebuild proposal is independently accepted and committed;
-2. the V3 pilot rebuild is explicitly authorized, executed, independently audited, and accepted;
-3. a new immutable V3 dataset ID, manifest hash, counts, reasons, segment IDs, and dependency hashes
-   are recorded;
-4. this proposal is corrected to bind those exact accepted V3 values and independently re-audited;
-5. the exact private V3 structural output scope remains absent;
-6. source, test, proposal, checkpoint, API, timezone, and private-input bytes remain unchanged;
-7. explicit private-run authority is granted for only that exact bound evidence.
+1. the separate V3 pilot rebuild proposal is independently accepted and committed: satisfied;
+2. the V3 pilot rebuild is explicitly authorized, executed, independently audited, and accepted:
+   satisfied;
+3. the immutable V3 dataset ID, artifact hashes, counts, reasons, ordered segment IDs, and dependency
+   hashes are recorded: satisfied by Section 6;
+4. this proposal binds those exact accepted V3 values and passes independent re-audit: required by
+   this documentation task before commit;
+5. the exact private V3 structural output scope remains absent: satisfied at this baseline;
+6. source, tests, checkpoint, APIs, timezone runtime, and private-input bytes remain unchanged:
+   must be rechecked immediately before execution;
+7. explicit private-run authority is granted for only that exact bound evidence: not granted by this
+   proposal and remains the sole authorization gate after documentation acceptance.
 
 Stop immediately on V2/V3 identity reuse, dependency drift, private input mutation, manifest
 mismatch, runtime tzdata mismatch, non-`VALID` dataset, OOS contact, cross-segment state, silent sort,
@@ -504,20 +646,18 @@ deterministic plumbing against one post-hoc, non-promotable pilot.
 
 ## 24. Final Decision and Next Single Task
 
-The exact future structural private-run contract is now specified, but present readiness is
-`BLOCKED_PENDING_V3_PILOT_REBUILD`. Executing against the stored V2 pilot would correctly return
-`INVALID` under the current structural validator and would violate builder-version identity
-separation if bypassed.
+The exact V3 structural private-run contract is specified and the accepted V3 pilot prerequisite is
+satisfied. After this corrected one-file proposal passes independent audit and is committed, present
+readiness is `READY_FOR_EXPLICIT_V3_STRUCTURAL_PRIVATE_RUN_AUTHORIZATION`.
 
-The next single task is documentation-only creation and independent audit of exactly:
+The next single task after documentation acceptance is an exact private run limited to:
 
-`docs/gc_futures_phase_a_pilot_v3_split_session_rebuild_change_proposal.md`
+`private_data/sierra_chart/gc_2026_phase_a_structural_seed_evidence_v3/`
 
-That proposal must bind the immutable V2 source/coverage/calendar inputs, current V3 builder/API and
-hashes, a new non-overwriting private V3 output root, exact reconstruction and comparison rules,
-expected identity rebasing, validation matrix, rollback, quarantine, and STOP conditions. It must
-not perform the rebuild, modify source/tests, access OOS outcomes, begin structural execution,
-training, integration, stage, commit, or push without later exact authority.
+That future task must perform the Section 9 reconstruction and Section 10 structural build/validation
+once each, publish only the exact five Section 15 artifacts atomically, independently re-audit them,
+and stop. It must not invoke candidate evidence, feature/label generation, training, OOS outcomes,
+strategy evaluation, integration, stage, commit, or push.
 
-This proposal itself authorizes only its documentation acceptance workflow. The global code freeze
-remains active.
+This proposal itself authorizes only its one-file documentation acceptance workflow. The private run
+still requires separate exact execution authority, and the global code freeze remains active.
