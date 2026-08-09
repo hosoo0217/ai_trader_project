@@ -24,6 +24,7 @@ from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
 
 
 GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+_GC_DATASET_SOURCE_COVERAGE_IDENTITY_VERSION = "GC-DATASET-BUILDER-V2"
 GC_DATASET_INSTRUMENT = "GC"
 GC_DATASET_TIMEFRAME = "5M"
 GC_DATASET_SOURCE_TIMEZONE = "Asia/Tokyo"
@@ -445,7 +446,12 @@ def make_gc_dataset_id(
 
     try:
         kind = _normalize_identity_kind(identity_kind)
-        common = {"version": GC_DATASET_BUILDER_VERSION, "identity_kind": kind}
+        identity_version = (
+            _GC_DATASET_SOURCE_COVERAGE_IDENTITY_VERSION
+            if kind in {"SOURCE", "COVERAGE"}
+            else GC_DATASET_BUILDER_VERSION
+        )
+        common = {"version": identity_version, "identity_kind": kind}
         if kind == "SOURCE":
             _require_none(config, "config")
             _require_none(source_id, "source_id")

@@ -2,11 +2,16 @@
 
 ## 1. Checkpoint Identity
 
-- Checkpoint ID: `GC-FUTURES-SPLIT-SESSION-CALENDAR-CHECKPOINT-2026-08-08`.
-- Governing proposal:
+- Checkpoint ID:
+  `GC-FUTURES-SPLIT-SESSION-CALENDAR-IDENTITY-CORRECTION-2026-08-09`.
+- Original governing proposal:
   `docs/gc_futures_split_session_calendar_change_proposal.md`.
-- Governing proposal SHA-256:
+- Original governing proposal SHA-256:
   `8E1DC59F84C9699BD57C5397667AEC630C5182CF11D6CB667DFEB3CDBA73445D`.
+- Identity-correction governing proposal:
+  `docs/gc_futures_phase_a_pilot_v3_split_session_rebuild_change_proposal.md`.
+- Identity-correction proposal SHA-256:
+  `FEF0D8E96C37B261ACF2B252B59FE7F6ACD9B635E1C9A4656117509DCD73E0AD`.
 - Governing proposal structure: exact `24` numbered sections and `48`
   sequential logical cases.
 - Builder version: `GC-DATASET-BUILDER-V3-SPLIT-SESSION`.
@@ -35,7 +40,7 @@ The implementation adds these frozen public value objects without mutating the
 committed single-session calendar type:
 
 - `GCDatasetSessionInterval(start_timestamp, end_timestamp)`;
-- `GCSplitSessionCalendarEntry(trade_date, status, intervals,
+- `GCSplitSessionCalendarEntry(calendar_version, trade_date, intervals,
   source_artifact_ids, source_artifact_sha256s)`.
 
 Every interval endpoint is timezone-aware, normalized to UTC, and strictly
@@ -93,6 +98,15 @@ segment rules remain unchanged.
 
 ## 8. Deterministic Identity Binding
 
+The bounded correction preserves the accepted V2 identity-version payload for
+`SOURCE` and `COVERAGE` only. Their exact six pilot vectors (three source and
+three coverage identities for GCG26, GCJ26, and GCM26) are locked by public
+`make_gc_dataset_id()` tests. `SEGMENT` and `DATASET` remain bound to
+`GC-DATASET-BUILDER-V3-SPLIT-SESSION`; exact synthetic anchor tests prove that
+their V3 identities did not drift during the correction. The private identity
+version selector is not exported and does not alter the public builder version,
+signature, dataclasses, or 23-name export surface.
+
 The DATASET and manifest digest bind:
 
 - calendar representation kind (`SINGLE_SESSION` or `SPLIT_SESSION`);
@@ -149,6 +163,8 @@ Coverage includes:
 - completion, required-slot coverage, conservation, and roll eligibility;
 - calendar-kind and provenance identity sensitivity and normalized hash
   equivalence;
+- accepted GCG26/GCJ26/GCM26 V2 SOURCE/COVERAGE vectors under the V3 builder,
+  plus unchanged V3 SEGMENT/DATASET anchors;
 - malformed chronology, atomic cutoff, prior-evidence preservation, complete
   prefix invariance, historical mutation ineligibility, exact API, frozen
   dataclasses, constants, version, and exports.
@@ -159,18 +175,27 @@ Final focused evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_dataset_builder.py`
-- result: `239 passed in 1.04s`;
+- result: `245 passed in 1.00s`;
 - exact logical cases: `48`;
-- prior V2 focused baseline: `218 passed`;
-- net new collected executions: `21`.
+- pre-correction split-session checkpoint: `239 passed`;
+- identity-correction executions added inside Cases 41 and 42: `6`.
+
+Test-first defect evidence:
+
+- before the source edit, the six accepted V2 SOURCE/COVERAGE vectors failed
+  while both V3 SEGMENT/DATASET anchors passed: `6 failed, 2 passed in 1.01s`;
+- after the source edit, the same targeted selection passed:
+  `8 passed in 0.51s`.
 
 Final full-regression evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-- result: `2156 passed in 12.90s`;
-- prior V2 full baseline: `2079 passed`;
-- net new collected executions: `77`.
+- result: `2276 passed in 13.19s`;
+- prior split-session checkpoint: `2156 passed`;
+- the higher repository-wide total includes later committed suites as well as
+  the six new identity-vector executions; no attribution beyond the exact
+  focused delta is claimed.
 
 Both commands ran after the final source correction. `git diff --check` passed
 for the source and test changes.
@@ -179,14 +204,14 @@ for the source and test changes.
 
 - `analysis/gc_dataset_builder.py`
   - SHA-256:
-    `DEBD341B3E8CDE3F27E1FAD5DE048E1EF1735F3B4694BC9574A3244255660121`
-  - bytes: `105200`
-  - physical lines: `2710`
+    `117F66DA8F2E88C8B17C9DAEF5857A8557193B62A49001BB6B27FC67DC2EDB47`
+  - bytes: `105447`
+  - physical lines: `2716`
 - `tests/test_gc_dataset_builder.py`
   - SHA-256:
-    `4D179ED76198DA44263535FA497B2E2B8D67F2FAFEA4C3F8A6DC63A32F267974`
-  - bytes: `91450`
-  - physical lines: `2513`
+    `73FD71A685E173907FE05BC6D18CD0F89CC4BEF42BD0DC4ED962A4856E364F80`
+  - bytes: `96557`
+  - physical lines: `2656`
 - `docs/gc_futures_split_session_calendar_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded;
   - byte and physical-line counts are reported by the final external audit.
@@ -219,9 +244,9 @@ Final checkpoint state:
 - `EXACT_AUTHORIZED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=239`
+- `FOCUSED_TESTS_COLLECTED=245`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=2156`
+- `FULL_REGRESSION_COLLECTED=2276`
 - `PRIVATE_DATA_BUILD_PERFORMED=False`
 - `TRAINING_PERFORMED=False`
 - `INTEGRATION_PERFORMED=False`

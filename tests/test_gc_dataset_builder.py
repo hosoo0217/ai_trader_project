@@ -66,6 +66,102 @@ D3 = date(2026, 1, 8)
 D4 = date(2026, 1, 9)
 D5 = date(2026, 1, 12)
 
+_ACCEPTED_V2_PILOT_IDENTITY_VECTORS = (
+    {
+        "source_name": (
+            "GCG26_COMEX_5m_20260218_20260330_"
+            "NON_PROMOTABLE_ENGINEERING_PILOT.txt"
+        ),
+        "source_sha256": (
+            "27552a778abf2fb158d7107eff9232396c9aae5e489a55b50259923c379be839"
+        ),
+        "contract": "GCG26-COMEX",
+        "capture_timestamp": datetime.fromisoformat(
+            "2026-08-03T11:29:40.822000+00:00"
+        ),
+        "coverage_start_timestamp": datetime.fromisoformat(
+            "2026-02-17T23:00:00+00:00"
+        ),
+        "coverage_end_timestamp": datetime.fromisoformat(
+            "2026-02-25T11:45:00+00:00"
+        ),
+        "acquisition_completed_timestamp": datetime.fromisoformat(
+            "2026-08-03T11:27:13.925000+00:00"
+        ),
+        "acquisition_evidence_sha256": (
+            "19ffa3b0c8459455d6f7d546770e802b5fb902a7c1fcfa47128640f62be584e0"
+        ),
+        "source_id": (
+            "1a8c876a57852d07c9bcd068c36c0c2244057ca13cc9e737d0909962e7c2cac1"
+        ),
+        "coverage_id": (
+            "c0a728eec42ca9cc692e3776ce83e95e99884ce3bfaad84d96adda6ef4505290"
+        ),
+    },
+    {
+        "source_name": (
+            "GCJ26_COMEX_5m_20260218_20260330_"
+            "NON_PROMOTABLE_ENGINEERING_PILOT.txt"
+        ),
+        "source_sha256": (
+            "6e0419af7e85bf5c31a5f79aa36adeed1a9b1d8bf3123cbb8dda7af1313eed3a"
+        ),
+        "contract": "GCJ26-COMEX",
+        "capture_timestamp": datetime.fromisoformat(
+            "2026-08-03T10:56:37.481000+00:00"
+        ),
+        "coverage_start_timestamp": datetime.fromisoformat(
+            "2026-02-17T23:00:00+00:00"
+        ),
+        "coverage_end_timestamp": datetime.fromisoformat(
+            "2026-03-30T21:00:00+00:00"
+        ),
+        "acquisition_completed_timestamp": datetime.fromisoformat(
+            "2026-08-03T10:51:36.388000+00:00"
+        ),
+        "acquisition_evidence_sha256": (
+            "19ffa3b0c8459455d6f7d546770e802b5fb902a7c1fcfa47128640f62be584e0"
+        ),
+        "source_id": (
+            "863aaff9e97cd8448a3edb008639e00be4bd0e35bcb72af8e9ed3a083a661a5e"
+        ),
+        "coverage_id": (
+            "35092c5d8e97251a6cf2afa323ae8195cfb4ba9675b51c8cd784c3ce75bb92c6"
+        ),
+    },
+    {
+        "source_name": (
+            "GCM26_COMEX_5m_20260218_20260330_"
+            "NON_PROMOTABLE_ENGINEERING_PILOT.txt"
+        ),
+        "source_sha256": (
+            "30abdcbc2f41498ef36c734ea28780b62e7338882543d41a6fddb33472036f3d"
+        ),
+        "contract": "GCM26-COMEX",
+        "capture_timestamp": datetime.fromisoformat(
+            "2026-08-03T16:19:49.186000+00:00"
+        ),
+        "coverage_start_timestamp": datetime.fromisoformat(
+            "2026-02-17T23:00:00+00:00"
+        ),
+        "coverage_end_timestamp": datetime.fromisoformat(
+            "2026-03-30T21:00:00+00:00"
+        ),
+        "acquisition_completed_timestamp": datetime.fromisoformat(
+            "2026-08-03T16:16:27.882000+00:00"
+        ),
+        "acquisition_evidence_sha256": (
+            "6689ce0a8387a64174756b3d0f44b8d7cbcd6ebf3dfc7c0a5550c2af173e49ff"
+        ),
+        "source_id": (
+            "84a5b8e5599c6dce1bf06599c6cdefad7d27118a13ea86b856c1c9427d6c8918"
+        ),
+        "coverage_id": (
+            "1030b2cb66bf3154deeed18528d94f8fc5ba7357563dc9c6e00fe50c25eba205"
+        ),
+    },
+)
+
 
 def _bounds(
     trade_date: date,
@@ -1799,6 +1895,22 @@ def test_case_41_source_identity_is_v2_separated() -> None:
     assert v2 != v1
 
 
+@pytest.mark.parametrize("vector", _ACCEPTED_V2_PILOT_IDENTITY_VECTORS)
+def test_case_41_v3_preserves_accepted_v2_source_identity_vectors(
+    vector: dict[str, object],
+) -> None:
+    assert make_gc_dataset_id(
+        identity_kind="SOURCE",
+        source_name=vector["source_name"],
+        source_sha256=vector["source_sha256"],
+        contract=vector["contract"],
+        role=GCSourceRole.DEVELOPMENT,
+        capture_timestamp=vector["capture_timestamp"],
+        source_timezone="Asia/Tokyo",
+        timeframe="5M",
+    ) == vector["source_id"]
+
+
 # Case 42
 def test_case_42_manifest_conservation_and_evidence_digest() -> None:
     result = _build()
@@ -1930,6 +2042,31 @@ def test_case_42_coverage_identity_recomputes_source_and_binds_payload() -> None
         _coverage_id(coverage_start_timestamp=closing)
 
 
+@pytest.mark.parametrize("vector", _ACCEPTED_V2_PILOT_IDENTITY_VECTORS)
+def test_case_42_v3_preserves_accepted_v2_coverage_identity_vectors(
+    vector: dict[str, object],
+) -> None:
+    assert make_gc_dataset_id(
+        identity_kind="COVERAGE",
+        source_id=vector["source_id"],
+        source_name=vector["source_name"],
+        source_sha256=vector["source_sha256"],
+        contract=vector["contract"],
+        role=GCSourceRole.DEVELOPMENT,
+        capture_timestamp=vector["capture_timestamp"],
+        source_timezone="Asia/Tokyo",
+        timeframe="5M",
+        coverage_start_timestamp=vector["coverage_start_timestamp"],
+        coverage_end_timestamp=vector["coverage_end_timestamp"],
+        acquisition_completed_timestamp=vector[
+            "acquisition_completed_timestamp"
+        ],
+        acquisition_evidence_sha256=vector[
+            "acquisition_evidence_sha256"
+        ],
+    ) == vector["coverage_id"]
+
+
 # Case 43
 def test_case_43_source_identity_schema_and_sensitivity() -> None:
     export = _export()
@@ -2032,6 +2169,9 @@ def test_case_43_source_identity_forbids_non_source_fields(
 
 # Case 44
 def test_case_44_segment_identity_binds_gap_and_forbidden_fields() -> None:
+    assert _segment_id() == (
+        "a16b6df9b3650b83cb8621878bb696694cf7f27221e52bc1ff09ea0bf68157b2"
+    )
     assert _segment_id(preceding_missing_bar_count=1) != _segment_id()
     with pytest.raises((TypeError, ValueError)):
         _segment_id(calendar_digest=HASH_C)
@@ -2109,6 +2249,9 @@ def test_case_44_segment_identity_is_sensitive_to_every_payload_axis(
 
 # Case 45
 def test_case_45_dataset_identity_schema_and_sensitivity() -> None:
+    assert _dataset_id() == (
+        "8846dcb65451269afc1b4b46d13bd0f7e65ee05dbe63ce7c0cd3dff2496f384b"
+    )
     assert _dataset_id(calendar_digest="e" * 64) != _dataset_id()
     assert _dataset_id(roll_trade_dates=(D2,)) != _dataset_id()
     with pytest.raises((TypeError, ValueError)):
