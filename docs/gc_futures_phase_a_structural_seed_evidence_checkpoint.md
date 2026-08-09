@@ -9,6 +9,12 @@
   `42b45fc9d983798d994753edddf2acf1a8ed3bb8`.
 - Governing proposal SHA-256:
   `04DEF7C51D884CC64B9C3B89AD3A41492AAE53371B0DE937B7AAAEE4633E6A1E`.
+- Governing real-data semantic correction proposal:
+  `docs/gc_futures_phase_a_structural_seed_real_data_semantic_correction_proposal.md`.
+- Governing correction proposal commit:
+  `1caff67f204413e60ced53c7da68331e5f1593fe`.
+- Governing correction proposal SHA-256:
+  `242FE2084F1271E9A647AA389AEE4193AB5B50041B907EC8C010419E0441F0BC`.
 - Cross-audited downstream proposal SHA-256:
   `A0E35BF5A7F4EC451DF7898223FA0467C3FA36AA2F775008C0FB7C4D62F38941`.
 - Structural-seed version: `GC-STRUCTURAL-SEED-V1`.
@@ -36,10 +42,11 @@ Pre-existing untracked paths outside this task remained untouched.
 ## 3. Locked Dependency Evidence
 
 The implementation uses only the accepted immutable public dependency surface.
-The final dependency hashes match the proposal exactly:
+The final dependency hashes are unchanged from the governing correction
+proposal's implementation baseline commit:
 
 - `analysis/gc_dataset_builder.py`:
-  `DEBD341B3E8CDE3F27E1FAD5DE048E1EF1735F3B4694BC9574A3244255660121`;
+  `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843`;
 - `analysis/gc_feature_label_builder.py`:
   `7B13C40802BB4FA24063041CA1D32817D3654F0F20A2A1928639F45CC75B3153`;
 - `smc/smc_v2_primitives.py`:
@@ -56,26 +63,22 @@ training, network, and filesystem-output imports are absent.
 
 ## 4. Test-First Correction Evidence
 
-The existing untracked implementation was audited against the corrected
-proposal before promotion. The first focused baseline produced
-`61 passed, 1 failed`: Case 30 still expected a fabricated raw structural
-`AMBIGUOUS` result even though the corrected proposal makes that branch
-unreachable.
+The accepted implementation was re-audited against the governing real-data
+semantic correction proposal. Cases 25, 26, and 30 were changed first, within
+the existing exact 48-case matrix, to reproduce all three accepted V3 failure
+classes without copying private rows into fixtures:
 
-The test was corrected first to require:
+- a reversal group that crosses only non-protected same-side swings;
+- a reversal group containing the exact protected swing plus another swing that
+  the generic price-extreme selector would prefer;
+- an initial break before two-sided protected context exists.
 
-- pathological raw bars resolve to `UNKNOWN` or `INVALID`, never a synthetic
-  candidate-selection ambiguity;
-- upstream `GCDatasetBuildStatus.AMBIGUOUS` still maps exactly to
-  `DATASET_AMBIGUOUS`;
-- the private `_StructuralAmbiguous` branch and obsolete
-  `OPPOSING_STRUCTURE_EVENTS` token are absent;
-- strictly later complete-segment extension preserves foreign swing/event/link
-  semantics while dataset-bound source digest, displacement identity, and seed
-  identity deterministically rebind.
-
-That test failed RED against the stale source. The source was then corrected
-inside the exact scope, after which the focused suite passed.
+The first focused RED run produced `7 failed, 59 passed`: all new assertions
+failed against the stale selection/retirement order while every unaffected test
+passed. The source was then corrected inside the exact scope. Follow-up
+parameterization locked bullish and bearish mirrors, protected-swing precedence,
+non-event consumption, absence of retroactive relabeling, and a genuinely new
+strictly later eligible BOS. The final focused suite passed all `69` executions.
 
 ## 5. Immutable Dataset and Segment Boundary
 
@@ -97,10 +100,18 @@ and one mirrored Equal Liquidity/Dealing Range swing pair using the public Equal
 Liquidity SWING identity.
 
 Only confirmed strictly prior swings can be broken. Bullish and bearish
-close-through require the exact one-tick rule. Crossed levels retire atomically;
-BOS/CHOCH selection is deterministic and fail-closed when protected state is
-unavailable. Public Dealing Range EVENT identities are recomputed from exact
-singleton provenance and the selected broken swing.
+close-through require the exact one-tick rule. A first break without strictly
+prior opposite-side protected context is a consumed pre-eligibility non-event.
+It cannot be retroactively relabeled, while a genuinely new strictly later
+eligible break can still become BOS.
+
+First and same-direction BOS retain deterministic price-extreme plus recency
+selection. An opposing break becomes CHOCH only when its crossed tuple contains
+the exact active protected swing; a non-protected-only tuple is consumed as a
+non-event, while protected-plus-other selects the protected swing regardless of
+price, recency, or hash preference. Crossed levels retire only after the complete
+group is classified. Public Dealing Range EVENT identities are recomputed from
+exact singleton provenance and the selected broken swing.
 
 Raw derivation has no reachable independent `AMBIGUOUS` branch. Contradictory
 opposing raw breaks are invalid evidence; upstream dataset ambiguity remains a
@@ -171,16 +182,18 @@ not prefix-equivalent.
 The focused module covers exact sequential logical Cases 1 through 48. There
 are `51` named test functions because Cases 42, 44, and 47 contain separately
 named locked subcases; parameterization expands total collected executions to
-`62` without changing the exact 48 logical-case set.
+`69` without changing the exact 48 logical-case set.
 
 Coverage includes immutable inputs, segment order, cross-segment prohibition,
 both swing sides, prominence ties, public swing/event identities, one-tick
-breaks, retirement, BOS/CHOCH state, raw ambiguity prohibition, upstream
-ambiguity pass-through, bullish/bearish FVGs, near misses, source suffix binding,
-opaque displacement, digest sensitivity, exhaustive identity schemas, exact
-API/defaults/exports, frozen dataclasses, status precedence, nested exception
-containment, repeatability, dataset-bound rebasing, and downstream
-segment-qualification compatibility.
+breaks, atomic retirement, pre-eligibility non-events, protected-only reversal
+eligibility, protected-plus-other precedence, bullish/bearish mirror behavior,
+BOS/CHOCH state, raw ambiguity prohibition, upstream ambiguity pass-through,
+bullish/bearish FVGs, near misses, source suffix binding, opaque displacement,
+digest sensitivity, exhaustive identity schemas, exact API/defaults/exports,
+frozen dataclasses, status precedence, nested exception containment,
+repeatability, dataset-bound rebasing, and downstream segment-qualification
+compatibility.
 
 ## 12. Focused and Full Regression Evidence
 
@@ -188,35 +201,30 @@ Final focused evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_structural_seed_evidence.py`;
-- result: `62 passed in 1.06s`;
+- result: `69 passed in 1.20s`;
 - exact logical cases: `48`;
-- collected focused executions: `62`.
-
-The first full-suite attempt reached test setup but the sandbox denied pytest's
-default shared temporary root. This was an environment-only setup failure, not
-a source or assertion failure. The suite was rerun with an isolated workspace
-temporary root and that temporary directory was removed immediately afterward.
+- collected focused executions: `69`.
 
 Final full-regression evidence:
 
 - command:
-  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp-structural-seed`;
-- result: `2218 passed in 13.73s`;
-- committed pre-task baseline: `2156 passed`;
-- net new collected executions: `62`.
+  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`;
+- result: `2283 passed in 13.92s`;
+- governing correction baseline collection: `2276`;
+- net new collected executions: `7`.
 
 ## 13. Artifact Evidence
 
 - `analysis/gc_structural_seed_evidence.py`
   - SHA-256:
-    `B799EE739ECE289A57680007D85566645EE1615B0E20F87C99A4278217AE9AAE`;
-  - bytes: `43375`;
-  - physical lines: `958`.
+    `17F74A8D856FB31CBC0B2602AC8B4466D66582B744282AB400BEA5F3110F31A7`;
+  - bytes: `44409`;
+  - physical lines: `979`.
 - `tests/test_gc_structural_seed_evidence.py`
   - SHA-256:
-    `CFD789AE272B621EC04CC463A5EE506C22B3221A3F18EA6C737999042420958E`;
-  - bytes: `29831`;
-  - physical lines: `625`.
+    `8444424B03749E6DEB89E586041151FEFAB63433AA5A32D8798CC2A429853D54`;
+  - bytes: `34092`;
+  - physical lines: `712`.
 - `docs/gc_futures_phase_a_structural_seed_evidence_checkpoint.md`
   - SHA-256: self-referential and intentionally not embedded;
   - byte and physical-line counts are reported by final external audit.
@@ -246,8 +254,8 @@ Final checkpoint state:
 - `IMPLEMENTATION_COMPLETE_FOR_AUDIT=True`;
 - `EXACT_AUTHORIZED_PATHS=3`;
 - `LOGICAL_CASES=48`;
-- `FOCUSED_TESTS=62`;
-- `FULL_REGRESSION_TESTS=2218`;
+- `FOCUSED_TESTS=69`;
+- `FULL_REGRESSION_TESTS=2283`;
 - `PRIVATE_RUN_PERFORMED=False`;
 - `TRAINING_STARTED=False`;
 - `INTEGRATION_STARTED=False`.

@@ -98,6 +98,41 @@ def _bullish_values() -> tuple[tuple[int, int, int, int], ...]:
     return tuple((b.open_tick, b.high_tick, b.low_tick, b.close_tick) for b in _bullish_bars_raw())
 
 
+def _mirror_values(
+    values: tuple[tuple[int, int, int, int], ...],
+) -> tuple[tuple[int, int, int, int], ...]:
+    return tuple((-open_tick, -low_tick, -high_tick, -close_tick) for open_tick, high_tick, low_tick, close_tick in values)
+
+
+def _real_data_shape_values(kind: str) -> tuple[tuple[int, int, int, int], ...]:
+    if kind == "NON_PROTECTED_ONLY":
+        return (
+            (100, 102, 99, 101), (101, 103, 100, 102), (102, 110, 101, 109),
+            (100, 105, 95, 101), (102, 106, 100, 104), (104, 106, 103, 105),
+            (105, 110, 104, 109), (111, 114, 109, 112), (112, 114, 110, 112),
+            (108, 111, 105, 108), (110, 113, 108, 110), (111, 114, 109, 111),
+            (109, 110, 103, 104), (100, 101, 93, 94),
+        )
+    if kind == "PROTECTED_PLUS_OTHER":
+        return (
+            (100, 102, 99, 101), (101, 103, 100, 102), (102, 110, 101, 109),
+            (100, 105, 95, 101), (102, 106, 100, 104), (104, 106, 103, 105),
+            (105, 110, 104, 109), (111, 114, 109, 112), (112, 114, 100, 112),
+            (98, 102, 90, 98), (100, 104, 96, 100), (102, 105, 97, 102),
+            (96, 100, 88, 89),
+        )
+    if kind == "PRE_ELIGIBILITY":
+        return (
+            (100, 102, 99, 101), (101, 103, 99, 102), (102, 110, 99, 109),
+            (100, 105, 99, 101), (102, 106, 99, 104), (104, 106, 99, 105),
+            (105, 110, 104, 109), (111, 114, 109, 112), (111, 114, 109, 112),
+            (108, 113, 105, 108), (110, 114, 108, 110), (111, 114, 109, 111),
+            (111, 114, 109, 112), (112, 115, 110, 113), (113, 120, 111, 119),
+            (114, 116, 112, 114), (113, 115, 111, 113), (121, 123, 119, 122),
+        )
+    raise AssertionError(f"unknown real-data shape: {kind}")
+
+
 def _bullish_bars_raw() -> tuple[GCChronologicalBar, ...]:
     values = (
         (100, 102, 99, 101), (101, 103, 100, 102), (102, 110, 101, 109),
@@ -361,24 +396,31 @@ def test_case_24_first_event_is_bos() -> None:
     assert _build().seed.structure_events[0].event_type is DealingRangeEventType.BOS  # type: ignore[union-attr]
 
 
-def test_case_25_reverse_requires_protected_swing() -> None:
-    seed = _build().seed
-    assert seed is not None
-    assert all(e.event_type in (DealingRangeEventType.BOS, DealingRangeEventType.CHOCH) for e in seed.structure_events)
-
-
-def test_case_26_missing_protected_state_is_unknown() -> None:
-    values = (
-        (100, 102, 99, 101), (101, 103, 99, 102), (102, 110, 99, 109),
-        (100, 105, 99, 101), (102, 106, 99, 104), (104, 106, 99, 105),
-        (105, 110, 104, 109), (111, 114, 109, 112),
-    )
+@pytest.mark.parametrize("mirror", (False, True), ids=("bullish-to-bearish", "bearish-to-bullish"))
+def test_case_25_non_protected_reversal_is_consumed_without_relabeling(mirror: bool) -> None:
+    values = _real_data_shape_values("NON_PROTECTED_ONLY")
+    if mirror:
+        values = _mirror_values(values)
     result = _build(tuple(_bar(i, value) for i, value in enumerate(values)))
-    assert result == GCStructuralSeedResult(
-        SMCV2PrimitiveStatus.UNKNOWN,
-        reasons=("STRUCTURE_UNKNOWN",),
-        blocking_reasons=("STRUCTURE_UNKNOWN",),
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.seed is not None
+    assert tuple(event.provenance.confirmation_index for event in result.seed.structure_events) == (7, 13)
+    assert tuple(event.event_type for event in result.seed.structure_events) == (
+        DealingRangeEventType.BOS,
+        DealingRangeEventType.CHOCH,
     )
+
+
+@pytest.mark.parametrize("mirror", (False, True), ids=("bullish", "bearish"))
+def test_case_26_initial_break_without_two_sided_context_is_consumed_non_event(mirror: bool) -> None:
+    values = _real_data_shape_values("PRE_ELIGIBILITY")
+    if mirror:
+        values = _mirror_values(values)
+    result = _build(tuple(_bar(i, value) for i, value in enumerate(values)))
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.seed is not None
+    assert tuple(event.provenance.confirmation_index for event in result.seed.structure_events) == (17,)
+    assert result.seed.structure_events[0].event_type is DealingRangeEventType.BOS
 
 
 def test_case_27_event_singleton_provenance() -> None:
@@ -399,17 +441,62 @@ def test_case_29_event_order_is_causal_not_hash_order() -> None:
     assert [e.provenance.confirmation_timestamp for e in events] == sorted(e.provenance.confirmation_timestamp for e in events)
 
 
-def test_case_30_raw_derivation_never_invents_ambiguity() -> None:
-    values = (
-        (80, 85, 75, 80), (82, 86, 76, 82), (85, 90, 80, 85),
-        (82, 86, 76, 82), (80, 85, 75, 80), (120, 125, 115, 120),
-        (121, 126, 116, 121), (118, 124, 110, 118), (121, 126, 116, 121),
-        (120, 125, 115, 120), (100, 120, 95, 100),
-    )
+@pytest.mark.parametrize(
+    ("kind", "mirror", "expected_indices", "expected_types"),
+    (
+        ("NON_PROTECTED_ONLY", False, (7, 13), (DealingRangeEventType.BOS, DealingRangeEventType.CHOCH)),
+        ("NON_PROTECTED_ONLY", True, (7, 13), (DealingRangeEventType.BOS, DealingRangeEventType.CHOCH)),
+        ("PROTECTED_PLUS_OTHER", False, (7, 12), (DealingRangeEventType.BOS, DealingRangeEventType.CHOCH)),
+        ("PROTECTED_PLUS_OTHER", True, (7, 12), (DealingRangeEventType.BOS, DealingRangeEventType.CHOCH)),
+        ("PRE_ELIGIBILITY", False, (17,), (DealingRangeEventType.BOS,)),
+        ("PRE_ELIGIBILITY", True, (17,), (DealingRangeEventType.BOS,)),
+    ),
+    ids=(
+        "19-non-protected-only-bullish",
+        "19-non-protected-only-bearish",
+        "3-protected-plus-other-bullish",
+        "3-protected-plus-other-bearish",
+        "6-pre-eligibility-bullish",
+        "6-pre-eligibility-bearish",
+    ),
+)
+def test_case_30_real_data_shapes_are_deterministic_not_unknown_or_ambiguous(
+    kind: str,
+    mirror: bool,
+    expected_indices: tuple[int, ...],
+    expected_types: tuple[DealingRangeEventType, ...],
+) -> None:
+    values = _real_data_shape_values(kind)
+    if mirror:
+        values = _mirror_values(values)
     result = _build(tuple(_bar(i, value) for i, value in enumerate(values)))
-    assert result.status is SMCV2PrimitiveStatus.UNKNOWN
-    assert result.reasons == result.blocking_reasons == ("STRUCTURE_UNKNOWN",)
-    assert result.seed is None
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.seed is not None
+    assert tuple(event.provenance.confirmation_index for event in result.seed.structure_events) == expected_indices
+    assert tuple(event.event_type for event in result.seed.structure_events) == expected_types
+
+    if kind == "PROTECTED_PLUS_OTHER":
+        first, reversal = result.seed.structure_events
+        protected_side = (
+            DealingRangeSwingSide.LOW
+            if first.direction is SMCV2Direction.BULLISH
+            else DealingRangeSwingSide.HIGH
+        )
+        protected = max(
+            (
+                swing
+                for swing in result.seed.dealing_range_swings
+                if swing.side is protected_side
+                and swing.provenance.confirmation_index < first.provenance.confirmation_index
+            ),
+            key=lambda swing: (
+                swing.provenance.confirmation_index,
+                swing.provenance.confirmation_timestamp,
+                swing.provenance.source_indices[0],
+                swing.swing_id,
+            ),
+        )
+        assert reversal.broken_swing_id == protected.swing_id
 
     upstream = GCDatasetBuildResult(
         GCDatasetBuildStatus.AMBIGUOUS,

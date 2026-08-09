@@ -679,22 +679,43 @@ def _discover_events_and_links(
             continue
         direction = SMCV2Direction.BULLISH if crossed_high else SMCV2Direction.BEARISH
         crossed = crossed_high if crossed_high else crossed_low
-        selected = _select_crossed(crossed, direction)
+        latest = _latest_protected(swings, direction, bar.index, bar.timestamp)
+        if active_direction is None:
+            if latest is None:
+                if direction is SMCV2Direction.BULLISH:
+                    retired_high.update(item.swing_id for item in crossed)
+                else:
+                    retired_low.update(item.swing_id for item in crossed)
+                continue
+            selected = _select_crossed(crossed, direction)
+            event_type = DealingRangeEventType.BOS
+        elif direction is active_direction:
+            if latest is None:
+                raise _StructuralUnknown("a required protected swing is not yet confirmed")
+            selected = _select_crossed(crossed, direction)
+            event_type = DealingRangeEventType.BOS
+        else:
+            if protected_swing is None:
+                raise _StructuralUnknown("an initialized direction has no active protected swing")
+            protected_matches = tuple(
+                item for item in crossed if item.swing_id == protected_swing.swing_id
+            )
+            if not protected_matches:
+                if direction is SMCV2Direction.BULLISH:
+                    retired_high.update(item.swing_id for item in crossed)
+                else:
+                    retired_low.update(item.swing_id for item in crossed)
+                continue
+            if len(protected_matches) != 1:
+                raise ValueError("duplicate active protected swing in crossed group")
+            if latest is None:
+                raise _StructuralUnknown("a required protected swing is not yet confirmed")
+            selected = protected_matches[0]
+            event_type = DealingRangeEventType.CHOCH
         if direction is SMCV2Direction.BULLISH:
             retired_high.update(item.swing_id for item in crossed)
         else:
             retired_low.update(item.swing_id for item in crossed)
-        latest = _latest_protected(swings, direction, bar.index, bar.timestamp)
-        if latest is None:
-            raise _StructuralUnknown("a required protected swing is not yet confirmed")
-        if active_direction is None:
-            event_type = DealingRangeEventType.BOS
-        elif direction is active_direction:
-            event_type = DealingRangeEventType.BOS
-        else:
-            if protected_swing is None or selected.swing_id != protected_swing.swing_id:
-                raise _StructuralUnknown("a reversal did not break the active protected swing")
-            event_type = DealingRangeEventType.CHOCH
         provenance = SMCV2EventProvenance(
             source_indices=(bar.index,),
             source_timestamps=(bar.timestamp,),
