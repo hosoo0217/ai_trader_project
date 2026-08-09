@@ -955,7 +955,7 @@ def test_case_06_absent_interval_never_emits_inferred_bar() -> None:
     assert sum(len(segment.bars) for segment in result.segments) == 1
     assert result.manifest is not None
     assert result.manifest.missing_bar_count == 1
-    assert result.manifest.attested_no_trade_interval_count == 0
+    assert result.manifest.attested_no_trade_interval_count == 1
 
 
 # Case 7
@@ -1538,7 +1538,7 @@ def test_case_25_attested_sparse_session_is_completed_without_synthetic_bar() ->
     assert ("GCG26-COMEX", D1, 5) in result.manifest.completed_session_volumes
     assert len(result.segments[0].bars) == 1
     assert result.manifest.missing_bar_count == 1
-    assert result.manifest.attested_no_trade_interval_count == 0
+    assert result.manifest.attested_no_trade_interval_count == 1
 
 
 # Case 26
@@ -1843,7 +1843,7 @@ def test_case_40_v2_manifest_binds_coverage_and_conserves_sparse_evidence() -> N
     assert manifest.version == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
     assert manifest.coverage_ids
     assert len(manifest.coverage_digest) == 64
-    assert manifest.attested_no_trade_interval_count == 0
+    assert manifest.attested_no_trade_interval_count == 1
     assert manifest.parsed_row_count == (
         manifest.eligible_row_count + manifest.excluded_row_count
     )

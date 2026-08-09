@@ -3,7 +3,7 @@
 ## 1. Checkpoint Identity
 
 - Checkpoint ID:
-  `GC-FUTURES-SPLIT-SESSION-CALENDAR-IDENTITY-CORRECTION-2026-08-09`.
+  `GC-FUTURES-SPLIT-SESSION-MANIFEST-COMPATIBILITY-CORRECTION-2026-08-09`.
 - Original governing proposal:
   `docs/gc_futures_split_session_calendar_change_proposal.md`.
 - Original governing proposal SHA-256:
@@ -85,6 +85,14 @@ interval must be covered. An incomplete split session cannot contribute
 completed-session roll-confirmation volume. Official gaps contribute zero
 volume and zero required slots; they never receive fabricated bars.
 
+The manifest's `attested_no_trade_interval_count` preserves the committed V2
+single-session acquisition evidence and extends it without reclassification:
+it is the exact sum of acquisition-attested missing slots and represented
+official gaps between ordered split-session intervals. Consequently, the
+accepted single-session pilot retains `73`, while a complete two-interval
+synthetic session with one represented official gap contributes exactly `1`.
+Neither component fabricates a bar or changes `missing_bar_count`.
+
 ## 7. Conservation and Roll Semantics
 
 Completed-session volume is the sum of covered canonical rows from all active
@@ -161,6 +169,8 @@ Coverage includes:
 - exact 2024/2025 authoritative split moments and official gaps;
 - positive/zero gap-row behavior and exact interval membership;
 - completion, required-slot coverage, conservation, and roll eligibility;
+- V2 single-session acquisition-gap count preservation plus additive represented
+  split-session official-gap evidence;
 - calendar-kind and provenance identity sensitivity and normalized hash
   equivalence;
 - accepted GCG26/GCJ26/GCM26 V2 SOURCE/COVERAGE vectors under the V3 builder,
@@ -175,7 +185,7 @@ Final focused evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_dataset_builder.py`
-- result: `245 passed in 1.00s`;
+- result: `245 passed in 0.91s`;
 - exact logical cases: `48`;
 - pre-correction split-session checkpoint: `239 passed`;
 - identity-correction executions added inside Cases 41 and 42: `6`.
@@ -186,12 +196,20 @@ Test-first defect evidence:
   while both V3 SEGMENT/DATASET anchors passed: `6 failed, 2 passed in 1.01s`;
 - after the source edit, the same targeted selection passed:
   `8 passed in 0.51s`.
+- the later private V3 prepublication audit exposed manifest drift: accepted V2
+  `attested_no_trade_interval_count=73` versus attempted V3 `0`; no V3 root was
+  published;
+- Cases 6, 25, and 40 were first changed to require preservation of their one
+  acquisition-attested missing slot and failed before the source correction:
+  `3 failed, 242 deselected in 0.75s`;
+- after the additive compatibility correction, Cases 6, 20, 25, and 40 passed:
+  `4 passed, 241 deselected in 0.50s`.
 
 Final full-regression evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-- result: `2276 passed in 13.19s`;
+- result: `2276 passed in 12.08s`;
 - prior split-session checkpoint: `2156 passed`;
 - the higher repository-wide total includes later committed suites as well as
   the six new identity-vector executions; no attribution beyond the exact
@@ -204,12 +222,12 @@ for the source and test changes.
 
 - `analysis/gc_dataset_builder.py`
   - SHA-256:
-    `117F66DA8F2E88C8B17C9DAEF5857A8557193B62A49001BB6B27FC67DC2EDB47`
-  - bytes: `105447`
+    `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843`
+  - bytes: `105463`
   - physical lines: `2716`
 - `tests/test_gc_dataset_builder.py`
   - SHA-256:
-    `73FD71A685E173907FE05BC6D18CD0F89CC4BEF42BD0DC4ED962A4856E364F80`
+    `3D470CC13BEDDB93B2212C9A7B97B4B1B9AAB3DABF208355534B5ADD9401B878`
   - bytes: `96557`
   - physical lines: `2656`
 - `docs/gc_futures_split_session_calendar_checkpoint.md`

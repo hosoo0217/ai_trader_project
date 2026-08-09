@@ -1054,7 +1054,7 @@ def _assemble(
         for trade_date, active in active_by_date.items()
         if config.initial_trade_date <= trade_date <= config.oos_end_trade_date
     )
-    attested_no_trade_count = _attested_official_gap_count(
+    attested_no_trade_count = missing_count + _attested_official_gap_count(
         tuple(selected), calendar_map
     )
     dev_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.DEVELOPMENT)
