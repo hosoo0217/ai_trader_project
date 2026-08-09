@@ -2,10 +2,10 @@
 
 ## 1. Proposal Record
 
-- Proposal ID: `GC-PHASE-A-STRUCTURAL-SEED-PRIVATE-RUN-PROPOSAL-V1`.
+- Proposal ID: `GC-PHASE-A-STRUCTURAL-SEED-PRIVATE-RUN-PROPOSAL-V2`.
 - Date: `2026-08-09`.
-- Baseline commit: `dba0322116b5c174bc5a318ea03747f39f0d9a07`.
-- Baseline subject: `fix(analysis): preserve GC no-trade attestation count`.
+- Baseline commit: `fe062693ee4e5a963d45163688fc5a870e842062`.
+- Baseline subject: `fix(analysis): correct GC structural seed semantics`.
 - Classification: documentation-only private-execution boundary and readiness record.
 - Current decision: `READY_FOR_EXPLICIT_V3_STRUCTURAL_PRIVATE_RUN_AUTHORIZATION`.
 
@@ -43,10 +43,10 @@ candidate evidence, feature/label generation, training, OOS access, integration,
 
 ## 3. Verified Repository Baseline
 
-At the corrected baseline:
+At the corrected implementation baseline, before this exact one-file documentation correction:
 
-- `HEAD`, local `origin/main`, and the pushed implementation commit equal
-  `dba0322116b5c174bc5a318ea03747f39f0d9a07`;
+- the accepted source baseline and its pushed remote commit equal
+  `fe062693ee4e5a963d45163688fc5a870e842062`;
 - the tracked worktree and index are clean;
 - three pre-existing untracked documentation files are outside this proposal and remain untouched;
 - the immutable historical V2 pilot root exists at
@@ -60,12 +60,13 @@ At the corrected baseline:
 - structural private execution, candidate private execution, feature/label execution, training,
   model fitting, OOS evaluation, strategy integration, and trading have not begun.
 
-Historical test evidence remains evidence only and is not rerun by this documentation task:
+Accepted test evidence remains evidence only and is not rerun by this documentation task:
 
-- structural seed: `62` focused executions, `2218` full regression executions, exact `48` logical
-  cases;
-- candidate evidence: `52` focused executions, `2270` full regression executions, exact `48`
-  logical cases.
+- corrected structural seed: `69` focused executions, `2283` full regression executions, exact
+  `48` logical cases;
+- candidate-evidence checkpoint: `52` focused executions, `2270` then-current full regression
+  executions, exact `48` logical cases. The current `2283`-test full-regression evidence includes
+  the later structural correction and does not relabel that historical candidate checkpoint.
 
 The corrected dataset-builder evidence is `245` focused passes and `2276` full-regression passes,
 with exact `48` logical cases. Those passing tests and the deterministic V3 rebuild prove bounded
@@ -247,10 +248,13 @@ a4890163aea0c355f8cb18654b3b1c3fb13bc12aca08c0c1049e96d06e83eaa3
 ```
 
 The V3 input binding records execution commit `02700c78afb74225c0e3a4b09e06bb8f7af60df9`
-and the exact corrected dependency bytes later committed and pushed by
-`dba0322116b5c174bc5a318ea03747f39f0d9a07`. This provenance distinction is explicit: acceptance
-depends on exact bytes and repeatability, while the later commit is the durable Git acceptance of
-those bytes. The V3 input also records predecessor structural-proposal SHA-256
+and the exact corrected dataset-builder dependency bytes later committed and pushed by
+`dba0322116b5c174bc5a318ea03747f39f0d9a07`. Structural selection semantics were subsequently
+corrected under proposal commit `1caff67f204413e60ced53c7da68331e5f1593fe` and implementation
+commit `fe062693ee4e5a963d45163688fc5a870e842062`; those commits do not mutate or relabel the accepted
+V3 dataset root. This provenance distinction is explicit: dataset acceptance depends on its exact
+builder bytes and repeatability, while structural private execution must bind the later corrected
+structural bytes separately. The V3 input also records predecessor structural-proposal SHA-256
 `6117863D6874B7DA34A81EECADCA68654BBFDE89D1A966299DB20BF3FDCEAD20`;
 this documentation-only readiness correction necessarily changes that proposal byte hash without
 mutating the already accepted V3 root. A future structural input binding must bind the corrected
@@ -294,9 +298,10 @@ Any future readiness revision or private execution must stop on drift from these
 | `smc/equal_liquidity.py` | `505FAB8F00FC4DDDE73042E5D9CA7764B023565CB6854398C054F9354012BF7B` |
 | `smc/dealing_range.py` | `A0178008AF94A9BBC8928AA917FB8C50179E6AAE413E34748DF624E183793E7A` |
 | `smc/fair_value_gap.py` | `AC8E9B8123AF6CA233C27CE2AC14A41F41EC87CE43E9807785C12D1619AFDBC1` |
-| `analysis/gc_structural_seed_evidence.py` | `B799EE739ECE289A57680007D85566645EE1615B0E20F87C99A4278217AE9AAE` |
-| `tests/test_gc_structural_seed_evidence.py` | `CFD789AE272B621EC04CC463A5EE506C22B3221A3F18EA6C737999042420958E` |
-| `docs/gc_futures_phase_a_structural_seed_evidence_checkpoint.md` | `75C0D52D58BF2C8168806893FF68B0F567F19401FFA0DABE3EC0DB8A970094E1` |
+| `analysis/gc_structural_seed_evidence.py` | `17F74A8D856FB31CBC0B2602AC8B4466D66582B744282AB400BEA5F3110F31A7` |
+| `tests/test_gc_structural_seed_evidence.py` | `8444424B03749E6DEB89E586041151FEFAB63433AA5A32D8798CC2A429853D54` |
+| `docs/gc_futures_phase_a_structural_seed_evidence_checkpoint.md` | `69F82FF403FBD8FB5A380441389341F977CB79D6BA2E4278F677490432AAEA66` |
+| `docs/gc_futures_phase_a_structural_seed_real_data_semantic_correction_proposal.md` | `242FE2084F1271E9A647AA389AEE4193AB5B50041B907EC8C010419E0441F0BC` |
 | `analysis/gc_candidate_evidence_builder.py` | `B0D361A1C0F19AEB6D49627D00599CBDF6E4A06E6F70C10F0A9A2EB467783A68` |
 | `tests/test_gc_candidate_evidence_builder.py` | `090668870F4AD4C49AB540D9E64D2E53BD07657D743FAE391C48CF73C5584116` |
 | `docs/gc_futures_phase_a_candidate_evidence_checkpoint.md` | `DA7F657FFB2D787E343E37E69571315D97128389F2594F007FEE9BD87574C5EC` |
