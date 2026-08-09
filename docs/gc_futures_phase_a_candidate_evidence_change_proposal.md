@@ -158,10 +158,15 @@ Any future implementation or run must stop on dependency drift from these audite
 | `smc/inducement.py` | `2D99147494A74CE30757441D7BCF044A7DD403FA25432C4B654916214099D172` |
 | `smc/kill_zones.py` | `6655415F82B85D42D20088676A12D4F3883B992CE17B67EAF784188E1CD27D21` |
 | `docs/gc_futures_feature_label_checkpoint.md` | `B4A49A80ED52B6B4E1636BC3342BA18F03A16859F16ACB0152086498598DFD48` |
-| `docs/gc_futures_phase_a_structural_seed_evidence_change_proposal.md` | `C1D2C5646080CADC281C39CC4C6E0506E4D091021B2BB80CC5B583ED320EF9D5` |
+| `docs/gc_futures_phase_a_structural_seed_evidence_change_proposal.md` | `04DEF7C51D884CC64B9C3B89AD3A41492AAE53371B0DE937B7AAAEE4633E6A1E` |
 
 Hash equality is necessary but not sufficient; exact public signatures, frozen dataclasses, enum
 values, detector versions, and identity builders must also pass the future tests.
+
+The structural-proposal hash is bound only in this downstream direction and identifies the
+independently re-audited corrected artifact. The structural proposal must not content-hash-bind this
+candidate proposal; introducing a mutual document hash dependency is a circular-identity STOP
+condition.
 
 ## 9. Lossless Bar Projection Contract
 

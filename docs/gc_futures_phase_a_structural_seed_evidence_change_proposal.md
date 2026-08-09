@@ -140,8 +140,11 @@ normalized timestamps. They are never treated as dataset-global indices. Hash
 lexical order, direction lexical order, or identity lexical order is never a
 chronology tie-break.
 
-No-silent-sort is mandatory. Caller-supplied tuples that do not already follow
-the locked segment-aware causal order are `INVALID`.
+No-silent-sort is mandatory. Dataset-aware build and validation operations
+reject caller-supplied tuples that do not already follow the locked
+segment-aware causal order. The standalone `SEED` identity builder applies the
+narrower supplied-order contract in Section 17 because it has no dataset-order
+input; it preserves that order and never certifies it as dataset-canonical.
 
 ## 7. Exact structural seed configuration
 
@@ -297,11 +300,18 @@ Per-segment order is exactly:
 event_type.value, event_id)`.
 
 Bullish and bearish selected event candidates are evaluated before atomic group
-promotion. A close can cross historically separated HIGH and LOW levels in the
-same group. If both opposing candidates remain valid after active
-direction/protected-swing reconciliation, the complete group is `AMBIGUOUS`;
-neither event is promoted and no later group is analyzed. Hash or direction
-lexical order must never select one side.
+promotion. Under the locked raw-OHLC derivation, close-break, retirement, and
+protected-swing rules, two opposing candidates cannot both remain canonical in
+one complete group. Before a close could satisfy both directional break
+conditions, a causally earlier confirmed level has already been selected and
+retired; unavailable protected state is `UNKNOWN`, and contradictory or
+malformed evidence is `INVALID`.
+
+V1 must not fabricate an opposing-event `AMBIGUOUS` branch or use hash or
+direction lexical order to manufacture a winner. `SMCV2PrimitiveStatus.AMBIGUOUS`
+remains part of the shared vocabulary, and an upstream
+`GCDatasetBuildStatus.AMBIGUOUS` still maps without downgrade, but canonical raw
+structural derivation itself emits no `AMBIGUOUS` result.
 
 ## 13. Qualifying Fair Value Gap formation
 
@@ -424,9 +434,18 @@ It forbids `segment_evidence_digests`.
 `segment_evidence_digests`. It forbids segment ID, direction, source moments,
 boundaries, and Structure Event ID.
 
+For `SEED`, the public identity builder validates pair shape, normalized
+segment IDs, 64-hex evidence digests, and duplicate segment IDs. The supplied
+tuple order is identity-bearing, is never silently sorted, and a reordering
+therefore produces a different deterministic ID. The builder cannot assert
+dataset-canonical segment order because its exact public signature contains no
+dataset or canonical segment-order argument. Dataset-aware build and validation
+operations must instead recompute the tuple in the accepted dataset's immutable
+segment order and reject any supplied seed whose tuple does not match it.
+
 Unknown kinds, missing required fields, supplied forbidden fields, booleans as
-integers, naive timestamps, non-UTC-equivalent normalization, malformed hashes,
-impossible geometry, duplicate segments, or noncanonical ordering raise only
+integers, naive timestamps, non-UTC-equivalent normalization, malformed pair
+shape or hashes, impossible geometry, or duplicate segments raise only
 `TypeError` or `ValueError`. Nested library exceptions must not leak.
 
 ## 18. Exact frozen public dataclasses
@@ -534,8 +553,9 @@ Final status precedence is exactly:
 
 - `INVALID`: malformed, contradictory, noncanonical, or unrecomputable supplied
   evidence; `seed is None`.
-- `AMBIGUOUS`: opposing valid event candidates survive in the same complete
-  effective group; `seed is None`.
+- `AMBIGUOUS`: a canonical upstream dataset already has
+  `GCDatasetBuildStatus.AMBIGUOUS`; raw V1 structural derivation has no reachable
+  independent `AMBIGUOUS` branch; `seed is None`.
 - `UNKNOWN`: required dataset or causal state cannot be established from the
   valid supplied prefix; `seed is None`.
 - `VALID`: at least one structural member exists and the complete seed validates.
@@ -559,7 +579,6 @@ Exact top-level reason tokens are:
 - `INVALID_CONFIG`;
 - `MISSING_STRUCTURAL_SEED`;
 - `STRUCTURE_UNKNOWN`;
-- `OPPOSING_STRUCTURE_EVENTS`;
 - `INVALID_STRUCTURAL_EVIDENCE`;
 - `NO_STRUCTURAL_EVIDENCE`;
 - `STRUCTURAL_EVIDENCE_VALID`.
@@ -570,9 +589,18 @@ identity input or public reason token.
 
 ## 21. No-look-ahead and prefix invariance
 
-For every complete canonical segment prefix, output evidence through that
-prefix must be byte-for-byte immutable when strictly later complete bars or
-segments are appended.
+For an identical immutable dataset, configuration, and seed version, repeated
+builds must return an object-equal, byte-exact result.
+
+Across a separately rebuilt dataset formed only by appending a strictly later
+complete canonical segment, previously selected foreign swing objects and
+Structure Events remain object-equal and byte-exact, and prior context-link
+formation moments, direction, boundaries, bound event, and membership remain
+semantically unchanged. Module-owned identities are dataset-bound, however:
+`dataset_id`, `source_bar_digest`, displacement IDs, affected segment evidence
+digests, and `seed_id` deterministically rebind and therefore are explicitly not
+required to be byte-equal across the two datasets. This identity rebasing is not
+retroactive detector enrichment.
 
 A swing discovered later is first-known at its confirmation bar and is appended
 at that causal moment; it does not rewrite the source-bar past. Events and FVG
@@ -580,10 +608,13 @@ links are first-known only at their exact confirmation/formation close. No
 future range, future FVG state, future candidate outcome, label, return, entry,
 exit, or PnL may influence seed membership or identity.
 
-Prefix comparison is eligible only at a complete effective-group and segment
-boundary. Same-effective append, partial segment, historical insertion,
-reordering, source repair, partition mutation, dataset-ID change, or seed-version
-change is not a valid prefix-invariance comparison and must fail closed.
+The cross-dataset semantic comparison is eligible only for a strictly later
+complete-segment append at a complete effective-group boundary. Appending bars
+inside an existing segment, same-effective append, partial segment, historical
+insertion, reordering, source repair, partition mutation, or seed-version change
+is not eligible. A dataset-ID change caused solely by the eligible later segment
+append invokes the explicit identity-rebinding rule above; every other identity
+or provenance mutation must fail closed.
 
 ## 22. Inline synthetic exact 48-case matrix
 
@@ -620,7 +651,7 @@ test count without changing the 48 logical cases.
 27. Event singleton provenance reconciles exactly to the confirmation bar.
 28. Event public identity, side-specific broken swing, and one-tick rule recompute.
 29. Event nondecreasing composite order rejects hash/direction-order substitution.
-30. Valid simultaneous opposing event candidates are atomic `AMBIGUOUS` without lexical selection.
+30. Canonical raw bars cannot produce simultaneous opposing valid events; pathological attempts resolve causally to one earlier event, `UNKNOWN`, or `INVALID`, never a synthetic structural `AMBIGUOUS`; upstream dataset `AMBIGUOUS` still passes through.
 31. Exact bullish two-tick three-candle FVG and 0.60 integer ratio qualify.
 32. Exact bearish two-tick three-candle FVG and 0.60 integer ratio qualify.
 33. One-tick gap, zero range, or below-0.60 middle body does not qualify.
@@ -632,21 +663,23 @@ test count without changing the 48 logical cases.
 39. DISPLACEMENT required/forbidden schema and geometry are exhaustive.
 40. Canonical source-bar digest changes on any ordered source/segment mutation.
 41. Segment evidence digest binds full nested members, including empty segments.
-42. SEED required/forbidden schema, segment order, and hash validation are exhaustive.
+42. SEED schema validation rejects malformed pairs, hashes, and duplicate segments; supplied order is identity-sensitive without silent sorting, while dataset-aware validation rejects mismatch from canonical segment order.
 43. Exact keyword-only names/defaults, enum values, version, and exports validate.
 44. Every public dataclass field, annotation, default, tuple type, and frozen state validates.
 45. Dataset `NONE` has no seed; valid empty evidence returns a bound empty seed; `VALID` requires a member.
 46. Status/reason precedence, atomic cutoff, nested containment, and no partial seed validate.
-47. Repeatability and complete-boundary strictly-later prefix invariance are byte-exact.
+47. Identical-input repeatability is byte-exact; a strictly later complete-segment rebuild preserves prior foreign facts and link semantics while dataset-bound displacement, digest, and seed identities deterministically rebind.
 48. Corrected per-segment downstream orchestration is compatible; any regression to once-per-dataset calls, global local-index ordering, or unqualified IDs is a STOP condition.
 
 ## 23. Promotion, rollback, and stop conditions
 
 Implementation promotion requires all of the following:
 
+- this corrected proposal independently passes semantic and structural
+  re-audit;
 - the corrected candidate-evidence proposal independently passes cross-audit
   for per-segment analyzer invocation, segment-aware aggregation, and one-way
-  structural-proposal hash binding;
+  structural-proposal hash binding to this corrected artifact;
 - only the exact three reserved implementation paths change;
 - the exact 48 logical cases reconcile with focused test collection;
 - focused and full regression suites pass with cache provider disabled;
@@ -670,22 +703,27 @@ Immediate STOP conditions include:
 - any scope expansion, dependency hash drift, external fixture, or integration wiring;
 - any contradiction between this contract and the corrected parent proposal.
 
+Because this correction changes the structural-proposal artifact hash, the
+downstream candidate-evidence proposal's one-way hash binding is stale until a
+separately authorized documentation-only correction and two-document cross-audit
+complete. Structural-seed implementation, staging, and promotion remain stopped
+until that chain is reconciled.
+
 ## 24. Final bounded conclusion and next single task
 
-The deterministic structural-seed contract and corrected downstream
-candidate-evidence orchestration are segment-compatible, but implementation is
-not yet authorized. The accepted dataset's local index reset requires the
-locked per-segment boundary and makes any once-per-dataset regression unsafe.
+The deterministic structural-seed contract now distinguishes immutable foreign
+detector facts from deterministic dataset-bound identity rebasing, removes an
+unreachable raw-event ambiguity branch, and assigns canonical segment-order
+validation to the dataset-aware operations that possess that evidence.
+Implementation resumption and promotion are not authorized.
 
-The next and only authorized task is an independent documentation-only
-cross-audit of exactly:
-
-- `docs/gc_futures_phase_a_structural_seed_evidence_change_proposal.md`;
-- `docs/gc_futures_phase_a_candidate_evidence_change_proposal.md`.
-
-That audit must prove segment partitioning, analyzer invocation, aggregation,
-foreign-ID recurrence, no-silent-sort behavior, status cutoff, identities,
-exact matrices, reserved scopes, one-way document hash binding, and downstream
-STOP boundaries. PASS may authorize staging only those exact documentation
-files. It must not begin Python, tests, private execution, training, OOS access,
-integration, commit, or push. The global code freeze remains active.
+The next and only authorized task is an independent documentation-only semantic
+and structural re-audit of exactly
+`docs/gc_futures_phase_a_structural_seed_evidence_change_proposal.md`. It must
+verify all 24 sections, the unchanged public API, the exact sequential 48-case
+matrix, ordering, status, identity, no-look-ahead, rebasing, rollback, and STOP
+contracts. PASS may authorize a separate documentation-only correction of the
+candidate-evidence proposal's one-way structural hash followed by the required
+two-document cross-audit; it does not authorize staging or implementation. No
+Python, tests, private execution, training, OOS access, integration, commit, or
+push may begin. The global code freeze remains active.
