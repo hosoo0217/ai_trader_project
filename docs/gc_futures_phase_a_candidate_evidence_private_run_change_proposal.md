@@ -2,12 +2,12 @@
 
 ## 1. Proposal Record
 
-- Proposal ID: `GC-PHASE-A-CANDIDATE-EVIDENCE-PRIVATE-RUN-PROPOSAL-V1`.
-- Date: `2026-08-11`.
-- Baseline commit: `a061742f0f92512207f9411ca57772960411faf9`.
-- Baseline subject: `docs: correct GC structural private-run binding`.
+- Proposal ID: `GC-PHASE-A-CANDIDATE-EVIDENCE-PRIVATE-RUN-PROPOSAL-V2`.
+- Date: `2026-08-12`.
+- Baseline commit: `b57d4c671d2589e2028d4a31eaf56a60f637eb2b`.
+- Baseline subject: `fix(analysis): filter Candidate Evidence dependencies`.
 - Classification: documentation-only private-execution boundary and readiness record.
-- Current decision: `READY_FOR_EXPLICIT_V3_CANDIDATE_PRIVATE_RUN_AUTHORIZATION`.
+- Current decision: `READY_FOR_EXPLICIT_V3_CANDIDATE_PRIVATE_RERUN_AUTHORIZATION`.
 
 This record defines the only admissible future path from the accepted immutable Phase-A V3 GC
 dataset and its accepted immutable V3 structural seed to private Candidate Evidence. It does not
@@ -18,8 +18,18 @@ risk, execution, or trading authority.
 
 The required public dataset, structural-seed, and Candidate Evidence implementations are committed.
 The accepted V3 dataset and accepted V3 structural-seed private roots are present, Git-ignored,
-non-promotable, and independently validated. The exact V3 Candidate Evidence output root remains
-absent.
+non-promotable, and independently validated. The first separately authorized Candidate Evidence
+run failed closed after one of `54` segments, returned `UNKNOWN`, created zero candidates, and
+published no output. The exact V3 Candidate Evidence output root therefore remains absent.
+
+That failed-closed evidence exposed three bounded dependency-contract defects. Dealing Range now
+preserves canonical terminal same-lineage history, Inducement treats a range terminated before
+confirmation as an ineligible sequence rather than malformed evidence, and Candidate Evidence
+passes only external ranges and displacement-linked FVGs with their matching histories into
+Inducement. The three corrections are committed respectively at
+`507b46e436501c4e4b00b17d9b9acf817992158a`,
+`4064483840426e67e44847200f679e0f9028279b`, and
+`b57d4c671d2589e2028d4a31eaf56a60f637eb2b`.
 
 The readiness chain is exact and one-way:
 
@@ -30,8 +40,8 @@ The readiness chain is exact and one-way:
 3. committed Candidate Evidence version `GC-CANDIDATE-EVIDENCE-V1`;
 4. future private Candidate Evidence output under a new non-overwriting `_v3` root.
 
-Current verification evidence is `121` focused passes across the structural and candidate modules
-and `2283` full-regression passes. These tests and the accepted engineering artifacts prove bounded
+Current verification evidence is `122` focused passes across the structural and candidate modules
+and `2294` full-regression passes. These tests and the accepted engineering artifacts prove bounded
 deterministic plumbing only. They do not establish an edge, model quality, profitability,
 generalization, production readiness, or permission to train.
 
@@ -39,8 +49,9 @@ generalization, production readiness, or permission to train.
 
 At this proposal baseline:
 
-- `HEAD` and local `origin/main` equal
-  `a061742f0f92512207f9411ca57772960411faf9`;
+- `HEAD` equals `b57d4c671d2589e2028d4a31eaf56a60f637eb2b` and local
+  `origin/main` remains `507b46e436501c4e4b00b17d9b9acf817992158a` pending one
+  separately authorized push of the reviewed local correction chain;
 - the tracked worktree and index are clean;
 - exactly three pre-existing untracked documentation files are outside this task and remain
   untouched;
@@ -55,7 +66,7 @@ At this proposal baseline:
 
 The focused verification command covered
 `tests/test_gc_candidate_evidence_builder.py` and
-`tests/test_gc_structural_seed_evidence.py` and passed `121` tests. The full command passed `2283`
+`tests/test_gc_structural_seed_evidence.py` and passed `122` tests. The full command passed `2294`
 tests. Both used `-p no:cacheprovider`; neither accessed private data or changed Git state.
 
 ## 4. Exact Documentation-Only Scope
@@ -197,16 +208,16 @@ Any future readiness revision or private execution must stop on drift from these
 | `tests/test_gc_structural_seed_evidence.py` | `8444424B03749E6DEB89E586041151FEFAB63433AA5A32D8798CC2A429853D54` |
 | `docs/gc_futures_phase_a_structural_seed_evidence_checkpoint.md` | `69F82FF403FBD8FB5A380441389341F977CB79D6BA2E4278F677490432AAEA66` |
 | `docs/gc_futures_phase_a_structural_seed_private_run_change_proposal.md` | `9B6C8E55754FC1488719031070858F74E0CB681D26C5B65AA929735C773945F5` |
-| `analysis/gc_candidate_evidence_builder.py` | `B0D361A1C0F19AEB6D49627D00599CBDF6E4A06E6F70C10F0A9A2EB467783A68` |
-| `tests/test_gc_candidate_evidence_builder.py` | `090668870F4AD4C49AB540D9E64D2E53BD07657D743FAE391C48CF73C5584116` |
-| `docs/gc_futures_phase_a_candidate_evidence_checkpoint.md` | `DA7F657FFB2D787E343E37E69571315D97128389F2594F007FEE9BD87574C5EC` |
+| `analysis/gc_candidate_evidence_builder.py` | `0599B1C32DA89FB17CDE1F5441273B34EDDCF18AB6077986319CBA16B8B9022F` |
+| `tests/test_gc_candidate_evidence_builder.py` | `F5B9F03E8CD4BA049C706619918BE542FEEE8BC27A84B853120A63E1A490D22F` |
+| `docs/gc_futures_phase_a_candidate_evidence_checkpoint.md` | `7DBA87A6D19734450A4AE70B978005763D6C1B90C7EB58721D9B413FFC857ADB` |
 | `docs/gc_futures_phase_a_candidate_evidence_change_proposal.md` | `A0E35BF5A7F4EC451DF7898223FA0467C3FA36AA2F775008C0FB7C4D62F38941` |
 | `smc/smc_v2_primitives.py` | `091EDFEA9A05E128EED573932C3C98D261E463E828B82C15B28B87FF56A464FD` |
 | `smc/equal_liquidity.py` | `505FAB8F00FC4DDDE73042E5D9CA7764B023565CB6854398C054F9354012BF7B` |
-| `smc/dealing_range.py` | `A0178008AF94A9BBC8928AA917FB8C50179E6AAE413E34748DF624E183793E7A` |
+| `smc/dealing_range.py` | `F2D6754A7456D39C6BCC5EE312024F8C538CFDBD43474BC76957D44B62EBCE0E` |
 | `smc/liquidity_map.py` | `592F79275A2945328969D727946B88361676F0568C0A5A2D0010CE0F9C3F2321` |
 | `smc/fair_value_gap.py` | `AC8E9B8123AF6CA233C27CE2AC14A41F41EC87CE43E9807785C12D1619AFDBC1` |
-| `smc/inducement.py` | `2D99147494A74CE30757441D7BCF044A7DD403FA25432C4B654916214099D172` |
+| `smc/inducement.py` | `D1A3E99A83BB9B6003B8B6682229B9E43F0DE4DDE9A1D02B705D12CF98B7443A` |
 | `smc/kill_zones.py` | `6655415F82B85D42D20088676A12D4F3883B992CE17B67EAF784188E1CD27D21` |
 
 Hash equality is necessary but not sufficient. Exact signatures, frozen dataclasses, enum values,
@@ -372,10 +383,16 @@ incomplete segment coverage is a failed run. A failed run publishes no accepted 
 ## 14. Candidate Assembly and No-Look-Ahead Boundary
 
 Candidates are reference-only assemblies of already validated same-segment detector outputs. The
-builder may not recompute, mutate, enrich, repair, or reinterpret a detector result. Exact
+builder may not recompute, mutate, enrich, repair, or reinterpret a detector result. Before the
+Inducement call it passes only canonical `EXTERNAL` Dealing Range snapshots and only FVGs with a
+non-null formation-time `displacement_id`, together with exactly the transition and snapshot
+histories belonging to those eligible FVG IDs. Internal ranges, unlinked FVGs, and their histories
+remain valid upstream diagnostic evidence but are not admissible Inducement dependencies. Exact
 eligibility requires the accepted Inducement, range/map context, internal liquidity pool, external
 target, Structure Event, causally linked FVG with complete history, exact confirmation bar, and
-verified `NEW_YORK_AM` Kill Zone context.
+verified `NEW_YORK_AM` Kill Zone context. A canonical external range that terminates at or before
+confirmation makes only that sequence ineligible and promotes no candidate; malformed range
+identity or history remains fail-closed `INVALID` evidence.
 
 Candidate order is exact dataset segment ordinal followed by exact public Inducement tuple order.
 Local bar indices may repeat across segments and never form a dataset-global chronology. Hash,
@@ -502,7 +519,8 @@ Parameterization may expand collected executions without changing the `48` logic
 2. Missing accepted V3 structural root stops before private execution.
 3. Existing final Candidate Evidence V3 root stops without overwrite.
 4. V2 dataset, V2 seed, or V2 output-root substitution is rejected.
-5. Dataset, structural, candidate, detector, test, checkpoint, or proposal hash drift stops.
+5. Dataset, structural, candidate, detector, test, checkpoint, or proposal hash drift stops,
+   including drift from the three exact correction commits bound by this V2 proposal.
 6. Missing, extra, duplicate, reordered, or malformed private input file stops.
 7. Runtime tzdata/version/zone mismatch stops before reconstruction.
 8. Exact three source exports parse once each and preserve accepted order.
@@ -525,11 +543,14 @@ Parameterization may expand collected executions without changing the `48` logic
 25. Dealing Range is called second with exact swings/events and local observations.
 26. Liquidity Map is called third with exact upstream canonical results.
 27. Fair Value Gap is called fourth with exact candles and context links.
-28. Inducement is called fifth with complete same-segment dependency histories.
+28. Inducement is called fifth with only external ranges and displacement-linked FVGs plus their
+    complete matching same-segment histories.
 29. Kill Zone is called sixth with exact bounded calendar entries.
 30. All six analyzers complete atomically before the next segment begins.
 31. Cross-segment state, lookback, seed matching, or output reuse is rejected.
-32. Candidate reference roles, event/FVG suffix binding, and confirmation moment reconcile.
+32. Candidate reference roles, event/FVG suffix binding, and confirmation moment reconcile;
+    terminal-before-confirmation external range evidence makes the sequence ineligible without
+    candidate promotion.
 33. Exact verified `NEW_YORK_AM` OPEN/EARLY_CLOSE context is required.
 34. Candidate order is segment ordinal then public Inducement tuple ordinal.
 35. Same local index in different segments remains independently segment-qualified.
@@ -552,7 +573,7 @@ Parameterization may expand collected executions without changing the `48` logic
 
 The future private validation report must independently verify:
 
-- exact Section 6, 7, 8, and 9 hashes and identities;
+- exact Section 6, 7, 8, and 9 hashes, correction commits, and identities;
 - exact public signatures, constants, frozen fields, enum values, and exports;
 - exact reconstruction and public call counts;
 - object-equal dataset and structural evidence;
@@ -591,11 +612,11 @@ non-promotable engineering result and would authorize only a separate downstream
 
 ## 24. Final Decision and Next Single Task
 
-The exact V3 Candidate Evidence private-run contract is specified. The accepted V3 dataset,
-accepted V3 structural seed, required calendar, committed candidate implementation, and regression
-evidence satisfy the technical prerequisites. After this one-file proposal passes independent
-audit and is committed, readiness is
-`READY_FOR_EXPLICIT_V3_CANDIDATE_PRIVATE_RUN_AUTHORIZATION`.
+The corrected exact V3 Candidate Evidence private-rerun contract is specified. The accepted V3
+dataset, accepted V3 structural seed, required calendar, committed dependency corrections, and
+regression evidence satisfy the technical prerequisites. After this one-file proposal passes
+independent audit and is committed, readiness is
+`READY_FOR_EXPLICIT_V3_CANDIDATE_PRIVATE_RERUN_AUTHORIZATION`.
 
 The next single task after documentation acceptance is a private run limited to:
 
