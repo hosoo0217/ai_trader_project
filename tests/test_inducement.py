@@ -1673,6 +1673,64 @@ def test_22_external_target_must_remain_beyond_reclaimed_close() -> None:
     assert _analyze(observations=tuple(observations)).status is SMCV2PrimitiveStatus.NONE
 
 
+def test_22b_range_termination_before_confirmation_makes_sequence_ineligible() -> None:
+    fixture = _fixture()
+    active = fixture["dealing_range_snapshots"][0]  # type: ignore[index]
+    transition_id = make_dealing_range_id(
+        identity_kind="TRANSITION",
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        direction=active.direction,
+        source_indices=(6,),
+        lineage_id=active.lineage_id,
+        transition_from_state=DealingRangeState.ACTIVE,
+        transition_to_state=DealingRangeState.INVALIDATED,
+        transition_index=6,
+        transition_timestamp=_time(6),
+        transition_reason="OBSERVATION_CLOSE_THROUGH_INVALIDATION",
+    )
+    terminal_transition = DealingRangeTransition(
+        transition_id=transition_id,
+        lineage_id=active.lineage_id or "",
+        from_state=DealingRangeState.ACTIVE,
+        to_state=DealingRangeState.INVALIDATED,
+        index=6,
+        timestamp=_time(6),
+        reason="OBSERVATION_CLOSE_THROUGH_INVALIDATION",
+        related_event_id=None,
+        replacement_lineage_id=None,
+    )
+    transition_ids = (*active.transition_ids, transition_id)
+    terminal_id = make_dealing_range_id(
+        identity_kind="SNAPSHOT",
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        direction=active.direction,
+        source_indices=active.source_indices,
+        swing_ids=active.source_swing_ids,
+        boundaries=SMCV2TickRange(active.low_tick, active.high_tick),
+        lineage_id=active.lineage_id,
+        construction_event_id=active.construction_event_id,
+        range_kind=active.kind,
+        state=DealingRangeState.INVALIDATED,
+        transition_ids=transition_ids,
+        replacement_lineage_id=None,
+    )
+    terminal = replace(
+        active,
+        snapshot_id=terminal_id,
+        state=DealingRangeState.INVALIDATED,
+        transitions=(*active.transitions, terminal_transition),
+        transition_ids=transition_ids,
+    )
+
+    result = _analyze(dealing_range_snapshots=(active, terminal))
+
+    assert result.status is SMCV2PrimitiveStatus.NONE
+    assert result.inducements == ()
+    assert result.snapshots == ()
+
+
 def test_23_nearest_external_target_selection_is_deterministic() -> None:
     fixture = _fixture()
     snapshot = fixture["liquidity_map_snapshots"][-1]  # type: ignore[index]

@@ -725,7 +725,10 @@ def _analyze_valid(
             gap = matched_gaps[0]
             _validate_event_gap_binding(event, gap)
             _validate_gap_formation_history(gap, gap_transitions, gap_snapshots)
-            _validate_retention(sweep, observation, ranges, maps, pools)
+            try:
+                _validate_retention(sweep, observation, ranges, maps, pools)
+            except _NoCandidate:
+                continue
             chosen = event, gap, offset
             break
         if chosen is None:
@@ -1878,7 +1881,7 @@ def _validate_retention(
         )
     ]
     if later_ranges and later_ranges[-1].state is not DealingRangeState.ACTIVE:
-        raise ValueError("active external range terminated before confirmation")
+        raise _NoCandidate("active external range terminated before confirmation")
     later_maps = [
         item
         for item in maps

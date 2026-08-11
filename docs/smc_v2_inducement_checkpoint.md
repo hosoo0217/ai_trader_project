@@ -78,15 +78,27 @@ signatures, `__all__`, logical-case count, or collected-test total.
 
 The corrected final focused result is:
 
-- `159 passed in 1.06s`
+- `160 passed in 1.08s`
 - exactly `48` sequential logical cases
-- `111` additional collected tests from locked parameterization
+- `112` additional collected tests from locked parameterization
 
 The corrected final full regression result is:
 
-- `1669 passed in 11.07s`
+- `2294 passed in 12.54s`
 
 Every focused and full run used `-p no:cacheprovider`.
+
+A later private Candidate Evidence structural run exposed one final semantic
+boundary defect without writing private output: a canonical external range
+lineage that terminated at or before the candidate confirmation moment raised
+`ValueError`, was misclassified as malformed evidence, and entered recursive
+prior-evidence recovery. A new public `analyze_inducements()` Case 22 execution
+first failed with `INVALID` and reason `active external range terminated before
+confirmation`. The minimal correction classifies only that exact condition as
+candidate ineligibility, promotes no Inducement or snapshot, and leaves all
+malformed range/history and other retention contradictions fail closed. The
+single regression is now green, the focused suite is `160 passed`, and the
+current full repository regression is `2294 passed`.
 
 ## 4. Locked Public Surface Implemented
 
@@ -160,8 +172,10 @@ Bullish sequences require an internal sell-side `LOW` pool and a buy-side
 external target. Bearish sequences mirror those roles. The external target must
 remain strictly beyond the reclaimed close. Nearest target selection is
 deterministic and uses classification ID only as the locked final tie-break.
-Range termination, map removal, or terminal external-pool target evidence before
-confirmation fails closed.
+Canonical same-lineage range termination at or before confirmation makes that
+sequence ineligible and promotes no evidence; it is not malformed dependency
+evidence. Map removal or terminal external-pool target evidence before
+confirmation remains fail closed.
 
 Equal Liquidity membership, band, snapshot identity, immutable prefix revision,
 and lifecycle histories are validated. A qualifying observation without the
@@ -282,22 +296,24 @@ It performs no pandas, CSV, broker, Sierra, external API, file, network,
 private-data, configuration, strategy, scoring, confidence, target-hit, entry,
 exit, PnL, trade, execution, package-registration, or integration work.
 
-The committed Kill-zone checkpoint baseline contained `1510` passing tests. The
-corrected isolated Inducement suite adds `159` collected tests, producing `1669`
-passing tests without changing existing behavior.
+The original standalone checkpoint followed the committed Kill-zone baseline
+and produced `1669` passing tests at that historical point. The current
+correction leaves the exact logical matrix at `48`, collects `160` focused
+Inducement tests, and passes the expanded repository regression at `2294`
+tests without changing the public API or integration surface.
 
 ## 13. Artifact Evidence
 
 - `smc/inducement.py`
   - SHA-256:
-    `2D99147494A74CE30757441D7BCF044A7DD403FA25432C4B654916214099D172`
-  - bytes: `87891`
-  - physical lines: `2065`
+    `D1A3E99A83BB9B6003B8B6682229B9E43F0DE4DDE9A1D02B705D12CF98B7443A`
+  - bytes: `87972`
+  - physical lines: `2068`
 - `tests/test_inducement.py`
   - SHA-256:
-    `9D696F7E2EA3B579A0C62C6DF53D3222609CD516621B966D73D4B693699DBAB2`
-  - bytes: `59798`
-  - physical lines: `1778`
+    `9DE879EB1E6DD5455E4CCC9C6B1CE32F6FA30F78C23E39793697FE0D2F686EB8`
+  - bytes: `61952`
+  - physical lines: `1836`
 - `docs/smc_v2_inducement_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded
   - bytes and physical lines are reported by the final scope audit
@@ -326,9 +342,9 @@ Final checkpoint state:
 - `EXACT_CHANGED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=159`
+- `FOCUSED_TESTS_COLLECTED=160`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=1669`
+- `FULL_REGRESSION_COLLECTED=2294`
 - `EXTERNAL_FIXTURE_CREATED=False`
 - `DEPENDENCY_FILES_CHANGED=False`
 - `REQUIREMENTS_CHANGED=False`
