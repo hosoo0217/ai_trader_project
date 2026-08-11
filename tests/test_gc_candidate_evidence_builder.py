@@ -528,6 +528,84 @@ def test_cases_07_22_23_bar_projection_and_calendar_slices_are_segment_local(
         )
 
 
+def test_cases_21_22_inducement_receives_only_eligible_dependency_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, dataset, calendars, seed, candidate = _patch_valid_candidate_pipeline(
+        monkeypatch
+    )
+    internal_range = replace(
+        candidate.active_range,
+        kind=candidate_module.DealingRangeKind.INTERNAL,
+    )
+    unqualified_gap_id = "d" * 64
+    unqualified_gap = replace(
+        candidate.fair_value_gap,
+        gap_id=unqualified_gap_id,
+        displacement_id=None,
+    )
+    unqualified_transitions = tuple(
+        replace(
+            item,
+            transition_id=f"{position + 1:064x}",
+            gap_id=unqualified_gap_id,
+        )
+        for position, item in enumerate(candidate.fair_value_gap_transitions)
+    )
+    unqualified_snapshots = tuple(
+        replace(
+            item,
+            snapshot_id=f"{position + 101:064x}",
+            gap_id=unqualified_gap_id,
+            transition_ids=tuple(
+                transition.transition_id
+                for transition in unqualified_transitions[: position + 1]
+            ),
+        )
+        for position, item in enumerate(candidate.fair_value_gap_snapshots)
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_dealing_ranges",
+        lambda **_kwargs: DealingRangeResult(
+            SMCV2PrimitiveStatus.VALID,
+            (internal_range, candidate.active_range),
+            ("VALID",),
+        ),
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_fair_value_gaps",
+        lambda **_kwargs: FairValueGapResult(
+            SMCV2PrimitiveStatus.VALID,
+            (unqualified_gap, candidate.fair_value_gap),
+            unqualified_transitions + candidate.fair_value_gap_transitions,
+            unqualified_snapshots + candidate.fair_value_gap_snapshots,
+            ("VALID",),
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def inducements(**kwargs):
+        captured.update(kwargs)
+        return _none_result(InducementResult)
+
+    monkeypatch.setattr(candidate_module, "analyze_inducements", inducements)
+    result = build_gc_candidate_evidence(
+        dataset_config=config,
+        dataset=dataset,
+        calendar_entries=calendars,
+        structural_seed=seed,
+    )
+    assert result.status is SMCV2PrimitiveStatus.NONE
+    assert captured["dealing_range_snapshots"] == (candidate.active_range,)
+    assert captured["fair_value_gaps"] == (candidate.fair_value_gap,)
+    assert captured["fair_value_gap_transitions"] == (
+        candidate.fair_value_gap_transitions
+    )
+    assert captured["fair_value_gap_snapshots"] == candidate.fair_value_gap_snapshots
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     (

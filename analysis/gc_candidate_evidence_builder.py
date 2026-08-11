@@ -1014,16 +1014,37 @@ def build_gc_candidate_evidence(
             )
             if blocked is not None:
                 return blocked
+            inducement_ranges = tuple(
+                item
+                for item in range_result.ranges
+                if item.kind is DealingRangeKind.EXTERNAL
+            )
+            inducement_gaps = tuple(
+                item
+                for item in fvg_result.gaps
+                if item.displacement_id is not None
+            )
+            inducement_gap_ids = frozenset(item.gap_id for item in inducement_gaps)
+            inducement_gap_transitions = tuple(
+                item
+                for item in fvg_result.transitions
+                if item.gap_id in inducement_gap_ids
+            )
+            inducement_gap_snapshots = tuple(
+                item
+                for item in fvg_result.snapshots
+                if item.gap_id in inducement_gap_ids
+            )
             inducement_result = analyze_inducements(
                 instrument=instrument,
                 timeframe=timeframe,
-                dealing_range_snapshots=range_result.ranges,
+                dealing_range_snapshots=inducement_ranges,
                 liquidity_map_snapshots=liquidity_result.snapshots,
                 equal_liquidity_pools=equal_result.pools,
                 structure_events=events,
-                fair_value_gaps=fvg_result.gaps,
-                fair_value_gap_transitions=fvg_result.transitions,
-                fair_value_gap_snapshots=fvg_result.snapshots,
+                fair_value_gaps=inducement_gaps,
+                fair_value_gap_transitions=inducement_gap_transitions,
+                fair_value_gap_snapshots=inducement_gap_snapshots,
                 observations=inducement_observations,
             )
             blocked = _blocked_detector_result(
