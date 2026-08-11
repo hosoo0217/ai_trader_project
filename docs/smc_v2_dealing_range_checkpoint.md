@@ -7,13 +7,17 @@
   `SMC-V2-DEALING-RANGE-FREEZE-LIFT-DECISION-2026-07-19`.
 - Implementation parent commit:
   `a709c3c069725ef80bf1cbe836565e84c063097e`.
+- Candidate-evidence compatibility correction parent HEAD:
+  `a9efd9098169883e3a629b59993fbe634f9d033a`.
+- Terminal-context correction proposal commit:
+  `6dd388473ad9730bcb83d76916da4b2da715db80`.
 - Task classification: bounded standalone diagnostic implementation.
 - Integration status: `NOT_STARTED`.
 - Global code-freeze status outside the exact task: `ACTIVE`.
 
 ## 2. Exact Authorized Scope
 
-Exactly these three newly created paths are in scope:
+Exactly these three paths are in the bounded correction scope:
 
 - `smc/dealing_range.py`
 - `tests/test_dealing_range.py`
@@ -22,8 +26,8 @@ Exactly these three newly created paths are in scope:
 The optional `tests/fixtures/dealing_range_cases.json` path remains absent.
 All fixtures are obviously synthetic and inline in the dedicated test module.
 
-No existing Python, test, fixture, configuration, package export, documentation,
-runtime, strategy, risk, or execution path changed.
+No fixture, configuration, package export, runtime, strategy, risk, execution,
+candidate-builder, dataset-builder, or dependency-module path changed.
 
 ## 3. Test-First Evidence
 
@@ -44,6 +48,33 @@ The latest correction remained test-first: new Case-33 parameterized public-API
 tests for missing and malformed later required event fields were added first,
 then chronological per-event validation flow was updated to preserve immutable
 prior evidence while rejecting the failing index as `INVALID`.
+
+The 2026-08-11 candidate-evidence compatibility correction was also test-first.
+Cases 25 and 27 were first expanded through public `analyze_dealing_ranges()`
+coverage to require that a transition-less same-direction target extension:
+
+- retains the original construction event and construction index,
+- retains the exact original `source_swing_ids` and `source_indices`,
+- retains the original transition history and protected swing, and
+- records the later extension event only as the new snapshot's
+  `first_known_provenance`.
+
+The first red phase failed both cases because the extension replaced the
+construction event and appended the newly broken swing. After the construction
+event correction, a second red phase still failed both cases because the source
+tuple was extended. Removing both mutations produced a targeted green result of
+`2 passed in 0.55s`.
+
+The 2026-08-12 terminal-context correction was test-first. Cases 31 and 32
+were expanded, without adding a logical case number, to cover both directional
+mirrors of a strictly later opposite CHOCH after observation-only invalidation,
+same-direction CHOCH rejection, multiple invalidation/reversal cycles, lone
+CHOCH `UNKNOWN`, and non-later malformed effective-time rejection. The first
+public-API run failed both mirror cases because the analyzer returned `UNKNOWN`
+with `initial CHOCH lacks prior external range context`. After retaining only
+the latest same-call terminal `INVALIDATED` range as non-output context, all
+nine new subcases passed. No public signature, identity payload, enum, version,
+or locked reason token changed.
 
 ## 4. Locked Public Surface Implemented
 
@@ -151,8 +182,10 @@ serialized as `YYYY-MM-DDTHH:MM:SS.ffffffZ`.
 ## 9. Extension, Replacement, and Reverse CHOCH
 
 Same-direction BOS can extend only the external target while preserving the
-protected boundary and lineage. A non-extending event emits no duplicate
-snapshot.
+protected boundary, lineage, original construction event/index, original source
+swing/index tuples, and transition history. The later event is represented by
+the extension snapshot's first-known provenance and does not rewrite formation
+history. A non-extending event emits no duplicate snapshot.
 
 A confirmed eligible pullback plus a later BOS emits the old lineage as
 `SUPERSEDED` before creating the linked replacement lineage. Pullback alone does
@@ -163,6 +196,18 @@ Observation and CHOCH evidence coalesce into exactly one old-lineage
 `INVALIDATED` transition before a new reverse range is constructed. If new-range
 context is incomplete, the old terminal snapshot remains and the result is
 `UNKNOWN` without a partial new range.
+
+An observation-only invalidation now retains the causally latest terminal
+external range as same-call validation context only. A strictly later,
+opposite-direction CHOCH may construct a new independent `ACTIVE` lineage from
+that context; the old terminal snapshots and transitions remain byte-for-byte
+unchanged and no cross-lineage transition is introduced. Same-direction CHOCH
+still returns exact `INVALID` reason `same-direction event must be BOS`, while a
+lone CHOCH without same-input terminal context still returns exact `UNKNOWN`
+reason `initial CHOCH lacks prior external range context`. Same-index reverse
+processing is unchanged. A successful new construction clears stale terminal
+context, and a later invalidation replaces it, so multiple cycles use only the
+causally latest terminal direction.
 
 ## 10. Nested Internal Ranges
 
@@ -175,7 +220,7 @@ the external range.
 ## 11. Exact Logical Test Matrix Reconciliation
 
 The dedicated module contains exactly `36` distinctly numbered logical cases.
-Parameterization expands them to `55` collected focused tests.
+Parameterization expands them to `64` collected focused tests.
 
 Coverage includes:
 
@@ -186,6 +231,14 @@ Coverage includes:
 - all five identity kinds and all four reason tokens,
 - normalization and UTC timestamp identity,
 - extension, replacement, observation invalidation, and reverse CHOCH,
+- Case-31/32 public-API proof for both directional mirrors that a strictly later
+  opposite CHOCH can use retained terminal context without mutating prior
+  evidence, same-direction CHOCH fails closed without promotion, multiple
+  cycles use only the latest terminal direction, lone CHOCH remains `UNKNOWN`,
+  and non-later malformed time evidence is `INVALID`,
+- Case-25 and Case-27 public-API proof that same-lineage target extension keeps
+  construction and source provenance immutable while the later snapshot uses
+  the extension moment as its first-known provenance,
 - same-index composite ordering and atomic ambiguity behavior,
 - later-index malformed structure-event failure returning `INVALID` while
   preserving strictly earlier immutable snapshots and promoting nothing from the
@@ -214,13 +267,19 @@ Focused command:
 
 `venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_dealing_range.py`
 
-Focused result: `55 passed in 0.48s`.
+Focused result: `64 passed in 0.47s`.
+
+Candidate-boundary focused command:
+
+`venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_dealing_range.py tests/test_liquidity_map.py tests/test_gc_candidate_evidence_builder.py`
+
+Candidate-boundary focused result: `174 passed in 0.97s`.
 
 Full regression command:
 
 `venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
 
-Full regression result: `1061 passed in 9.20s`.
+Full regression result: `2294 passed in 12.93s`.
 
 ## 13. Locked Artifact Identities
 
@@ -229,15 +288,15 @@ computed via newline-aware `ReadAllLines` counting (not `Measure-Object -Line`
 nonblank counting).
 
 - `smc/dealing_range.py`
-  - bytes: `69385`
-  - physical lines: `1806`
+  - bytes: `70268`
+  - physical lines: `1825`
   - SHA-256:
-    `A0178008AF94A9BBC8928AA917FB8C50179E6AAE413E34748DF624E183793E7A`
+    `F2D6754A7456D39C6BCC5EE312024F8C538CFDBD43474BC76957D44B62EBCE0E`
 - `tests/test_dealing_range.py`
-  - bytes: `43101`
-  - physical lines: `1242`
+  - bytes: `50853`
+  - physical lines: `1454`
   - SHA-256:
-    `A6DD0C03BEA9C6091F8E9EAC267930187C99B8F80C386EC52E2A0D91110B36CF`
+    `B68E75CEE48C56EF91438E5CB87B758E158C15135DCFBB9DF5AC39BA6CE2AB7F`
 
 ## 14. Isolation and Safety Evidence
 
@@ -245,19 +304,38 @@ nonblank counting).
 - No package export or registration was added.
 - No pandas, current structure analyzer, network, file I/O, or configuration
   dependency was added.
-- No private, candidate, OOS, account, credential, or generated evidence was
-  read or copied.
+- The accepted private dataset and structural-seed roots were read only for the
+  authorized V3 candidate-evidence audit. No raw record was copied into this
+  checkpoint, no OOS partition was accessed, and no candidate output or
+  temporary output root was published.
 - No strategy, signal, confidence, risk, execution, or progression behavior
   changed.
-- No staging, commit, or push was performed.
+- The proposal commit was pushed before implementation. At checkpoint capture,
+  the exact implementation paths had not yet been staged or committed; no
+  implementation push was performed or authorized.
 - Paper and live progression remain unauthorized.
 
 ## 15. Completion and Next Gate
 
-The bounded implementation is complete only as a standalone diagnostic
-candidate pending independent final code, test, scope, hash, and diff audit.
+The bounded compatibility correction clears both previously observed
+Dealing-Range-to-Liquidity-Map semantic blockers. A read-only in-memory sweep of
+all `54` accepted private segments produced `897` ranges with:
 
-Rollback before commit remains limited to the exact three new paths and requires
+- construction-transition mismatch blockers: `0`,
+- source-prefix blockers: `0`,
+- range statuses: `VALID=14`, `UNKNOWN=7`, `INVALID=10`, `NONE=23`, and
+- downstream Liquidity Map statuses: `VALID=31`, `NONE=23`, with no remaining
+  Liquidity Map invalid reason.
+
+This does not promote the exact V3 Candidate Evidence run to PASS. The exact
+public reconstruction reached accepted dataset build, structural build, and
+external structural validation in `1.425s`, but the candidate builder did not
+finish within the fixed `1800.5s` runtime bound. It published neither a final
+output root nor a temporary output root. Performance diagnosis or correction in
+the candidate builder requires a separate bounded scope and remains a stop
+condition for this task.
+
+Rollback before commit remains limited to the exact three paths and requires
 explicit instruction before destructive removal. Any need for another path,
 fixture, shared-primitives amendment, integration, or failing regression is a
 stop condition rather than authorization to expand scope.
@@ -267,9 +345,14 @@ stop condition rather than authorization to expand scope.
 - `LOCKED_36_CASE_MATRIX_PASS=True`
 - `FOCUSED_TESTS_PASS=True`
 - `FULL_REGRESSION_PASS=True`
+- `PRIVATE_54_SEGMENT_SEMANTIC_SWEEP_PASS=True`
+- `PRIVATE_EXACT_CANDIDATE_RUN_PASS=False`
+- `PRIVATE_EXACT_CANDIDATE_RUN_STOP=RUNTIME_BOUND_EXCEEDED`
+- `PRIVATE_CANDIDATE_OUTPUT_PUBLISHED=False`
+- `PRIVATE_RERUN_PERFORMED=False`
 - `OPTIONAL_FIXTURE_CREATED=False`
 - `INTEGRATION_PERFORMED=False`
-- `STAGING_AUTHORIZED=False`
-- `COMMIT_AUTHORIZED=False`
+- `STAGING_AUTHORIZED=True`
+- `COMMIT_AUTHORIZED=True`
 - `PUSH_AUTHORIZED=False`
 - `GLOBAL_CODE_FREEZE_ACTIVE_OUTSIDE_TASK=True`

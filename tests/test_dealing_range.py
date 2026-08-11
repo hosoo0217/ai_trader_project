@@ -745,13 +745,21 @@ def _bullish_extension(
 
 
 def test_25_same_direction_bos_extends_target_and_preserves_lineage() -> None:
-    result = _analyze(*_bullish_extension())
+    swings, observations, events = _bullish_extension()
+    result = _analyze(swings, observations, events)
     external = _external(result)
 
     assert len(external) == 2
     assert external[0].lineage_id == external[1].lineage_id
     assert external[0].protected_swing_id == external[1].protected_swing_id
     assert (external[0].high_tick, external[1].high_tick) == (112, 116)
+    assert external[1].source_swing_ids == external[0].source_swing_ids
+    assert external[1].source_indices == external[0].source_indices
+    assert external[0].construction_event_id == events[0].event_id
+    assert external[1].construction_event_id == events[0].event_id
+    assert external[1].transitions[0].related_event_id == events[0].event_id
+    assert external[1].first_known_provenance == events[1].provenance
+    assert external[1].construction_event_id != events[1].event_id
 
 
 def test_26_non_extending_bos_does_not_duplicate_snapshot() -> None:
@@ -764,8 +772,13 @@ def test_27_later_extension_preserves_every_prior_snapshot() -> None:
     swings, observations, events = _bullish_extension()
     baseline = _analyze(swings[:2], observations[:11], events[:1])
     extended = _analyze(swings, observations, events)
+    external = _external(extended)
 
     assert extended.ranges[: len(baseline.ranges)] == baseline.ranges
+    assert external[1].source_swing_ids == external[0].source_swing_ids
+    assert external[1].source_indices == external[0].source_indices
+    assert external[1].construction_event_id == external[0].construction_event_id
+    assert external[1].transitions == external[0].transitions
 
 
 def _replacement_scenario() -> tuple[
@@ -858,6 +871,53 @@ def _reverse_scenario(*, omit: frozenset[int] = frozenset()) -> tuple[
     return swings + (new_protected,), observations, events + (reverse,)
 
 
+def _later_choch_after_terminal(
+    *,
+    initial_direction: SMCV2Direction,
+    later_direction: SMCV2Direction,
+) -> tuple[
+    tuple[DealingRangeSwing, ...],
+    tuple[DealingRangeObservation, ...],
+    tuple[DealingRangeStructureEvent, ...],
+]:
+    if initial_direction is SMCV2Direction.BULLISH:
+        invalidating = (100, 89, 89)
+        factory = _bullish_base
+    else:
+        invalidating = (111, 100, 111)
+        factory = _bearish_base
+
+    if later_direction is SMCV2Direction.BEARISH:
+        broken = _swing(DealingRangeSwingSide.LOW, 12, 94)
+        protected = _swing(DealingRangeSwingSide.HIGH, 13, 108)
+        later_rows = {
+            12: (100, 94, 97),
+            13: (108, 98, 104),
+            18: (100, 92, 93),
+        }
+    else:
+        broken = _swing(DealingRangeSwingSide.HIGH, 12, 106)
+        protected = _swing(DealingRangeSwingSide.LOW, 13, 92)
+        later_rows = {
+            12: (106, 96, 103),
+            13: (102, 92, 96),
+            18: (108, 100, 107),
+        }
+
+    swings, observations, events = factory(
+        end=18,
+        extra_overrides={11: invalidating, **later_rows},
+    )
+    later = _event(
+        later_direction,
+        DealingRangeEventType.CHOCH,
+        broken,
+        displacement_start=16,
+        confirmation_index=18,
+    )
+    return swings + (broken, protected), observations, events + (later,)
+
+
 def test_31_reverse_choch_invalidates_once_before_new_range() -> None:
     result = _analyze(*_reverse_scenario())
     external = _external(result)
@@ -870,12 +930,164 @@ def test_31_reverse_choch_invalidates_once_before_new_range() -> None:
     assert external[-1].state is DealingRangeState.ACTIVE
 
 
+@pytest.mark.parametrize(
+    "initial_direction,later_direction",
+    [
+        (SMCV2Direction.BULLISH, SMCV2Direction.BEARISH),
+        (SMCV2Direction.BEARISH, SMCV2Direction.BULLISH),
+    ],
+)
+def test_31_strictly_later_opposite_choch_uses_terminal_context_without_mutation(
+    initial_direction: SMCV2Direction,
+    later_direction: SMCV2Direction,
+) -> None:
+    swings, observations, events = _later_choch_after_terminal(
+        initial_direction=initial_direction,
+        later_direction=later_direction,
+    )
+    prefix = _analyze(swings[:2], observations[:12], events[:1])
+    result = _analyze(swings, observations, events)
+    external = _external(result)
+    old_terminal = _external(prefix)[-1]
+    new_active = external[-1]
+
+    assert prefix.status is SMCV2PrimitiveStatus.VALID
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.ranges[: len(prefix.ranges)] == prefix.ranges
+    assert external[-2] == old_terminal
+    assert old_terminal.state is DealingRangeState.INVALIDATED
+    assert new_active.direction is later_direction
+    assert new_active.state is DealingRangeState.ACTIVE
+    assert new_active.lineage_id != old_terminal.lineage_id
+    assert new_active.replacement_lineage_id is None
+    assert new_active.first_known_provenance == events[-1].provenance
+    assert new_active.transitions[0].from_state is None
+    assert new_active.transitions[0].to_state is DealingRangeState.ACTIVE
+    assert new_active.transitions[0].index == events[-1].provenance.confirmation_index
+    assert new_active.transitions[0].timestamp == events[-1].provenance.confirmation_timestamp
+    assert new_active.transitions[0].related_event_id == events[-1].event_id
+
+
+@pytest.mark.parametrize(
+    "direction",
+    [SMCV2Direction.BULLISH, SMCV2Direction.BEARISH],
+)
+def test_31_same_direction_choch_after_terminal_is_invalid_without_promotion(
+    direction: SMCV2Direction,
+) -> None:
+    swings, observations, events = _later_choch_after_terminal(
+        initial_direction=direction,
+        later_direction=direction,
+    )
+    prefix = _analyze(swings[:2], observations[:12], events[:1])
+    result = _analyze(swings, observations, events)
+
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert result.blocking_reasons == ("same-direction event must be BOS",)
+    assert result.ranges == prefix.ranges
+
+
+def test_31_multiple_terminal_cycles_use_only_latest_direction() -> None:
+    first_broken = _swing(DealingRangeSwingSide.LOW, 12, 94)
+    first_protected = _swing(DealingRangeSwingSide.HIGH, 13, 108)
+    second_broken = _swing(DealingRangeSwingSide.HIGH, 20, 110)
+    second_protected = _swing(DealingRangeSwingSide.LOW, 21, 90)
+    swings, observations, events = _bullish_base(
+        end=26,
+        extra_overrides={
+            11: (100, 89, 89),
+            12: (100, 94, 97),
+            13: (108, 98, 104),
+            18: (100, 92, 93),
+            19: (109, 100, 109),
+            20: (110, 100, 105),
+            21: (100, 90, 95),
+            26: (112, 100, 111),
+        },
+    )
+    bearish = _event(
+        SMCV2Direction.BEARISH,
+        DealingRangeEventType.CHOCH,
+        first_broken,
+        displacement_start=16,
+        confirmation_index=18,
+    )
+    bullish = _event(
+        SMCV2Direction.BULLISH,
+        DealingRangeEventType.CHOCH,
+        second_broken,
+        displacement_start=24,
+        confirmation_index=26,
+    )
+    result = _analyze(
+        swings + (first_broken, first_protected, second_broken, second_protected),
+        observations,
+        events + (bearish, bullish),
+    )
+    external = _external(result)
+
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert [item.direction for item in external if item.state is DealingRangeState.INVALIDATED] == [
+        SMCV2Direction.BULLISH,
+        SMCV2Direction.BEARISH,
+    ]
+    assert external[-1].direction is SMCV2Direction.BULLISH
+    assert external[-1].state is DealingRangeState.ACTIVE
+
+
 def test_32_reverse_missing_new_context_preserves_old_terminal_snapshot() -> None:
     result = _analyze(*_reverse_scenario(omit=frozenset({13})))
 
     assert result.status is SMCV2PrimitiveStatus.UNKNOWN
     assert _external(result)[-1].state is DealingRangeState.INVALIDATED
     assert all(item.direction is SMCV2Direction.BULLISH for item in _external(result))
+
+
+@pytest.mark.parametrize(
+    "direction",
+    [SMCV2Direction.BULLISH, SMCV2Direction.BEARISH],
+)
+def test_32_lone_choch_without_same_input_terminal_context_remains_unknown(
+    direction: SMCV2Direction,
+) -> None:
+    opposite = (
+        SMCV2Direction.BEARISH
+        if direction is SMCV2Direction.BULLISH
+        else SMCV2Direction.BULLISH
+    )
+    swings, observations, events = _later_choch_after_terminal(
+        initial_direction=opposite,
+        later_direction=direction,
+    )
+    result = _analyze(swings[2:], observations, events[1:])
+
+    assert result.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert result.ranges == ()
+    assert result.blocking_reasons == ("initial CHOCH lacks prior external range context",)
+
+
+@pytest.mark.parametrize("minute", [11, 10])
+def test_32_non_later_choch_timestamp_is_invalid_and_preserves_terminal_prefix(
+    minute: int,
+) -> None:
+    swings, observations, events = _later_choch_after_terminal(
+        initial_direction=SMCV2Direction.BULLISH,
+        later_direction=SMCV2Direction.BEARISH,
+    )
+    prefix = _analyze(swings[:2], observations[:12], events[:1])
+    malformed_provenance = _malformed_provenance(
+        events[-1].provenance,
+        "confirmation_timestamp",
+        T0 + timedelta(minutes=minute),
+    )
+    result = _analyze(
+        swings,
+        observations,
+        events[:-1] + (replace(events[-1], provenance=malformed_provenance),),
+    )
+
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert result.ranges == prefix.ranges
 
 
 def test_33_same_index_ordering_duplicate_direction_and_opposition_are_atomic() -> None:

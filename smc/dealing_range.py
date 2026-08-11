@@ -513,6 +513,7 @@ def _analyze_valid_inputs(
 ) -> tuple[SMCV2PrimitiveStatus | None, list[DealingRangeSnapshot], str]:
     snapshots: list[DealingRangeSnapshot] = []
     active: _ActiveRange | None = None
+    terminal_context: _ActiveRange | None = None
     previous_event_key: tuple[object, ...] | None = None
     seen_event_ids: set[str] = set()
     swings_by_confirmation: dict[int, tuple[DealingRangeSwing, ...]] = {}
@@ -545,7 +546,11 @@ def _analyze_valid_inputs(
                         raise ValueError("duplicate event_id")
                     seen_event_ids.add(candidate.event_id)
                     previous_event_key = key
-                    _validate_event_state_relationship(candidate, active=active)
+                    _validate_event_state_relationship(
+                        candidate,
+                        active=active,
+                        terminal_context=terminal_context,
+                    )
                 _validate_event_group(event_group)
             event = event_group[0] if len(event_group) == 1 else None
             observation = observations_by_index.get(index)
@@ -563,6 +568,7 @@ def _analyze_valid_inputs(
                             instrument=instrument,
                             timeframe=timeframe,
                         )
+                        terminal_context = None
                         _emit_internal_ranges(
                             index,
                             active=active,
@@ -572,6 +578,7 @@ def _analyze_valid_inputs(
                             timeframe=timeframe,
                         )
                         continue
+                    terminal_context = active
                     active = _invalidate_from_observation(
                         active,
                         observation,
@@ -591,6 +598,7 @@ def _analyze_valid_inputs(
                         instrument=instrument,
                         timeframe=timeframe,
                     )
+                    terminal_context = None
                 elif event.direction is active.direction:
                     active = _process_same_direction_event(
                         active,
@@ -756,7 +764,6 @@ def _process_same_direction_event(
         _source_index(active.protected_swing),
         event.provenance.confirmation_index,
     )
-    broken = _find_swing(swings, event.broken_swing_id)
     changed = False
     if active.direction is SMCV2Direction.BULLISH:
         target = max(row.high_tick for row in rows)
@@ -770,9 +777,6 @@ def _process_same_direction_event(
             changed = True
     if not changed:
         return active
-    active.source_swings = _chronological_swings(active.source_swings + (broken,))
-    active.construction_event_id = event.event_id
-    active.construction_index = event.provenance.confirmation_index
     snapshots.append(_external_snapshot(
         active,
         state=DealingRangeState.ACTIVE,
@@ -1369,10 +1373,25 @@ def _validate_event_state_relationship(
     event: DealingRangeStructureEvent,
     *,
     active: _ActiveRange | None,
+    terminal_context: _ActiveRange | None,
 ) -> None:
     if active is None:
         if event.event_type is DealingRangeEventType.CHOCH:
-            raise _UnknownAnalysis("initial CHOCH lacks prior external range context")
+            if terminal_context is None:
+                raise _UnknownAnalysis("initial CHOCH lacks prior external range context")
+            terminal = terminal_context.transitions[-1]
+            if terminal.to_state is not DealingRangeState.INVALIDATED:
+                raise _InvalidAnalysis("retained terminal context must be INVALIDATED")
+            if event.direction is terminal_context.direction:
+                raise _InvalidAnalysis("same-direction event must be BOS")
+            if (
+                event.provenance.confirmation_index <= terminal.index
+                or normalize_utc_timestamp(event.provenance.confirmation_timestamp)
+                <= normalize_utc_timestamp(terminal.timestamp)
+            ):
+                raise _InvalidAnalysis(
+                    "terminal context must strictly precede reverse CHOCH",
+                )
         return
     if event.direction is active.direction:
         if event.event_type is not DealingRangeEventType.BOS:
