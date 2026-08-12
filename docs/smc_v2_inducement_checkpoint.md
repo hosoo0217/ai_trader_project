@@ -14,7 +14,7 @@
 
 ## 2. Exact Authorized Scope
 
-Exactly these three newly created paths are in scope:
+Exactly these three task paths are in scope:
 
 - `smc/inducement.py`
 - `tests/test_inducement.py`
@@ -78,13 +78,13 @@ signatures, `__all__`, logical-case count, or collected-test total.
 
 The corrected final focused result is:
 
-- `160 passed in 1.08s`
+- `162 passed in 0.86s`
 - exactly `48` sequential logical cases
-- `112` additional collected tests from locked parameterization
+- `114` additional collected tests from locked parameterization
 
 The corrected final full regression result is:
 
-- `2294 passed in 12.54s`
+- `2296 passed in 12.53s`
 
 Every focused and full run used `-p no:cacheprovider`.
 
@@ -98,7 +98,22 @@ confirmation`. The minimal correction classifies only that exact condition as
 candidate ineligibility, promotes no Inducement or snapshot, and leaves all
 malformed range/history and other retention contradictions fail closed. The
 single regression is now green, the focused suite is `160 passed`, and the
-current full repository regression is `2294 passed`.
+full repository regression at that checkpoint was `2294 passed`.
+
+The subsequent long-timeout structural rerun produced no private output and
+exposed two final fail-closed interoperability defects. First, malformed
+dependency validation entered recursive prior-evidence recovery instead of
+returning one bounded `INVALID` result. A new public Case 46 execution failed
+before correction and now proves that nested recovery cannot re-enter itself,
+leaks no exception, and promotes no failing-group evidence. Second, canonical
+Equal Liquidity output containing two independently formed lineages and a later
+membership-only revision was rejected because the immutable founders'
+first-known provenance was incorrectly reused as the revision's effective
+moment. A new public Case 10 execution failed before correction and now accepts
+the canonical upstream order while rejecting a demonstrably misordered tuple.
+The correction uses only the new member's safe confirmation-index lower bound;
+it does not invent an unavailable confirmation timestamp. Final focused and
+full results are respectively `162 passed` and `2296 passed`.
 
 ## 4. Locked Public Surface Implemented
 
@@ -180,6 +195,12 @@ confirmation remains fail closed.
 Equal Liquidity membership, band, snapshot identity, immutable prefix revision,
 and lifecycle histories are validated. A qualifying observation without the
 required `ACTIVE -> SWEPT` lifecycle event is contradictory `INVALID` evidence.
+Membership-only revisions retain canonical upstream tuple order when the later
+member's exact confirmation timestamp is not present in `EqualLiquidityPool`.
+Their last source index supplies the committed confirmation-delay lower bound;
+all formation and lifecycle effective moments that remain exactly recomputable
+continue to enforce nondecreasing causal order. A demonstrably impossible
+interleaving is `INVALID`, while unavailable provenance is never fabricated.
 
 ## 7. Sweep and Confirmation Semantics
 
@@ -298,22 +319,22 @@ exit, PnL, trade, execution, package-registration, or integration work.
 
 The original standalone checkpoint followed the committed Kill-zone baseline
 and produced `1669` passing tests at that historical point. The current
-correction leaves the exact logical matrix at `48`, collects `160` focused
-Inducement tests, and passes the expanded repository regression at `2294`
+correction leaves the exact logical matrix at `48`, collects `162` focused
+Inducement tests, and passes the expanded repository regression at `2296`
 tests without changing the public API or integration surface.
 
 ## 13. Artifact Evidence
 
 - `smc/inducement.py`
   - SHA-256:
-    `D1A3E99A83BB9B6003B8B6682229B9E43F0DE4DDE9A1D02B705D12CF98B7443A`
-  - bytes: `87972`
-  - physical lines: `2068`
+    `8CD573FABA49FC7510C7C07EEC0501612600A9BDC375C0160215CBDB241819DF`
+  - bytes: `89585`
+  - physical lines: `2101`
 - `tests/test_inducement.py`
   - SHA-256:
-    `9DE879EB1E6DD5455E4CCC9C6B1CE32F6FA30F78C23E39793697FE0D2F686EB8`
-  - bytes: `61952`
-  - physical lines: `1836`
+    `3F1462C641AF13820AFF16667503A2BC9472323321EE963A882C89C5AA76E2F8`
+  - bytes: `65450`
+  - physical lines: `1946`
 - `docs/smc_v2_inducement_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded
   - bytes and physical lines are reported by the final scope audit
@@ -328,23 +349,24 @@ progression, live progression, tuning, or runtime use. Promotion requires an
 independent exact-scope code/test/checkpoint audit and a separate explicit
 staging instruction.
 
-Before commit, rollback is deletion of exactly the three untracked task
-artifacts and requires explicit authorization. After commit, rollback must use a
-bounded revert rather than history rewriting. Stop immediately on dependency
+Before local commit, rollback is restoration of exactly these three task paths
+to the parent commit and requires explicit authorization. After commit,
+rollback must use a bounded revert rather than history rewriting. Stop
+immediately on dependency
 drift, scope expansion, public API mismatch, causal-binding uncertainty,
 identity nondeterminism, uncontained exception, ambiguous ordering, focused/full
 regression failure, or integration request outside a separately approved
 freeze-lift decision.
 
-Final checkpoint state:
+Final pre-staging checkpoint state:
 
 - `IMPLEMENTATION_COMPLETE_FOR_AUDIT=True`
 - `EXACT_CHANGED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=160`
+- `FOCUSED_TESTS_COLLECTED=162`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=2294`
+- `FULL_REGRESSION_COLLECTED=2296`
 - `EXTERNAL_FIXTURE_CREATED=False`
 - `DEPENDENCY_FILES_CHANGED=False`
 - `REQUIREMENTS_CHANGED=False`

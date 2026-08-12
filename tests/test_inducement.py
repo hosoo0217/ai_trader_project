@@ -24,6 +24,8 @@ from smc.dealing_range import (
 from smc.equal_liquidity import (
     EqualLiquidityPool,
     EqualLiquiditySide,
+    EqualLiquiditySwing,
+    analyze_equal_liquidity,
     make_equal_liquidity_id,
 )
 from smc.fair_value_gap import (
@@ -120,6 +122,30 @@ def _swing(
         price_tick=price_tick,
         provenance=_provenance((source_index,), confirmation_index),
         swing_id=_hash(f"swing:{side.value}:{source_index}:{price_tick}"),
+    )
+
+
+def _equal_swing(
+    side: EqualLiquiditySide,
+    source_index: int,
+    price_tick: int,
+    confirmation_index: int,
+) -> EqualLiquiditySwing:
+    swing_id = make_equal_liquidity_id(
+        identity_kind="SWING",
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        side=side,
+        source_indices=(source_index,),
+        reference_tick=price_tick,
+        lower_tick=price_tick,
+        upper_tick=price_tick,
+    )
+    return EqualLiquiditySwing(
+        side=side,
+        price_tick=price_tick,
+        provenance=_provenance((source_index,), confirmation_index),
+        swing_id=swing_id,
     )
 
 
@@ -898,6 +924,55 @@ def test_10_pool_lifecycle_source_and_effective_moment_fail_closed() -> None:
         assert _analyze(equal_liquidity_pools=(changed,)).status is SMCV2PrimitiveStatus.INVALID
 
 
+def test_10_canonical_interleaved_pool_membership_revision_is_accepted() -> None:
+    equal_result = analyze_equal_liquidity(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        swings=(
+            _equal_swing(EqualLiquiditySide.HIGH, 0, 100, 2),
+            _equal_swing(EqualLiquiditySide.HIGH, 3, 100, 5),
+            _equal_swing(EqualLiquiditySide.LOW, 6, 90, 8),
+            _equal_swing(EqualLiquiditySide.LOW, 9, 90, 11),
+            _equal_swing(EqualLiquiditySide.HIGH, 12, 100, 14),
+        ),
+        observations=(),
+    )
+    assert equal_result.status is SMCV2PrimitiveStatus.VALID
+    assert tuple(len(pool.source_indices) for pool in equal_result.pools) == (2, 2, 3)
+
+    result = analyze_inducements(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        dealing_range_snapshots=(),
+        liquidity_map_snapshots=(),
+        equal_liquidity_pools=equal_result.pools,
+        structure_events=(),
+        fair_value_gaps=(),
+        fair_value_gap_transitions=(),
+        fair_value_gap_snapshots=(),
+        observations=(),
+    )
+    assert result.status is SMCV2PrimitiveStatus.NONE
+
+    misordered = (
+        equal_result.pools[0],
+        equal_result.pools[2],
+        equal_result.pools[1],
+    )
+    assert analyze_inducements(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        dealing_range_snapshots=(),
+        liquidity_map_snapshots=(),
+        equal_liquidity_pools=misordered,
+        structure_events=(),
+        fair_value_gaps=(),
+        fair_value_gap_transitions=(),
+        fair_value_gap_snapshots=(),
+        observations=(),
+    ).status is SMCV2PrimitiveStatus.INVALID
+
+
 def test_41b_complete_empty_inputs_are_none() -> None:
     result = analyze_inducements(
         instrument=INSTRUMENT,
@@ -1381,6 +1456,41 @@ def test_47b_same_effective_append_is_not_silently_repaired() -> None:
     observations = _fixture()["observations"]
     duplicate = replace(observations[-1], close_tick=observations[-1].close_tick - 1)  # type: ignore[index]
     assert _analyze(observations=(*observations, duplicate)).status is SMCV2PrimitiveStatus.INVALID  # type: ignore[arg-type]
+
+
+def test_46_malformed_dependency_recovery_does_not_reenter_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import smc.inducement as module
+
+    original = module._recover_prior_evidence
+    recovery_active = False
+    recovery_calls = 0
+
+    def guarded_recovery(**kwargs: object) -> InducementResult | None:
+        nonlocal recovery_active, recovery_calls
+        if recovery_active:
+            raise AssertionError("prior-evidence recovery re-entered itself")
+        recovery_calls += 1
+        recovery_active = True
+        try:
+            return original(**kwargs)
+        finally:
+            recovery_active = False
+
+    monkeypatch.setattr(module, "_recover_prior_evidence", guarded_recovery)
+    fixture = _fixture()
+    map_snapshot = fixture["liquidity_map_snapshots"][0]  # type: ignore[index]
+    malformed = replace(
+        map_snapshot,
+        active_range_snapshot_id=_hash("different-range-revision"),
+    )
+
+    result = _analyze(liquidity_map_snapshots=(malformed,))
+
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert result.inducements == result.snapshots == ()
+    assert recovery_calls == 1
 
 
 @pytest.mark.parametrize(

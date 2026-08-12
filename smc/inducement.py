@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -50,6 +51,10 @@ from smc.smc_v2_primitives import (
 INDUCEMENT_DETECTOR_VERSION = "SMC-V2-INDUCEMENT-1"
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
+_RECOVERING_PRIOR_EVIDENCE: ContextVar[bool] = ContextVar(
+    "inducement_recovering_prior_evidence",
+    default=False,
+)
 _FORMATION_REASON = "FORMATION_CONFIRMED"
 _FVG_REASON_BY_STATE = {
     FairValueGapState.TOUCHED: "WICK_TOUCH",
@@ -451,18 +456,20 @@ def analyze_inducements(
         )
         return result
     except (AttributeError, TypeError, ValueError, OverflowError) as exc:
-        recovered = _recover_prior_evidence(
-            instrument=instrument,
-            timeframe=timeframe,
-            dealing_range_snapshots=dealing_range_snapshots,
-            liquidity_map_snapshots=liquidity_map_snapshots,
-            equal_liquidity_pools=equal_liquidity_pools,
-            structure_events=structure_events,
-            fair_value_gaps=fair_value_gaps,
-            fair_value_gap_transitions=fair_value_gap_transitions,
-            fair_value_gap_snapshots=fair_value_gap_snapshots,
-            observations=observations,
-        )
+        recovered = None
+        if not _RECOVERING_PRIOR_EVIDENCE.get():
+            recovered = _recover_prior_evidence(
+                instrument=instrument,
+                timeframe=timeframe,
+                dealing_range_snapshots=dealing_range_snapshots,
+                liquidity_map_snapshots=liquidity_map_snapshots,
+                equal_liquidity_pools=equal_liquidity_pools,
+                structure_events=structure_events,
+                fair_value_gaps=fair_value_gaps,
+                fair_value_gap_transitions=fair_value_gap_transitions,
+                fair_value_gap_snapshots=fair_value_gap_snapshots,
+                observations=observations,
+            )
         if recovered is not None and recovered.inducements:
             return InducementResult(
                 status=SMCV2PrimitiveStatus.INVALID,
@@ -528,18 +535,22 @@ def _recover_prior_evidence(
             reduced[name] = tuple(kept)
         if not changed:
             continue
-        result = analyze_inducements(
-            instrument=instrument,
-            timeframe=timeframe,
-            dealing_range_snapshots=reduced["dealing_range_snapshots"],  # type: ignore[arg-type]
-            liquidity_map_snapshots=reduced["liquidity_map_snapshots"],  # type: ignore[arg-type]
-            equal_liquidity_pools=reduced["equal_liquidity_pools"],  # type: ignore[arg-type]
-            structure_events=reduced["structure_events"],  # type: ignore[arg-type]
-            fair_value_gaps=reduced["fair_value_gaps"],  # type: ignore[arg-type]
-            fair_value_gap_transitions=reduced["fair_value_gap_transitions"],  # type: ignore[arg-type]
-            fair_value_gap_snapshots=reduced["fair_value_gap_snapshots"],  # type: ignore[arg-type]
-            observations=reduced["observations"],  # type: ignore[arg-type]
-        )
+        token = _RECOVERING_PRIOR_EVIDENCE.set(True)
+        try:
+            result = analyze_inducements(
+                instrument=instrument,
+                timeframe=timeframe,
+                dealing_range_snapshots=reduced["dealing_range_snapshots"],  # type: ignore[arg-type]
+                liquidity_map_snapshots=reduced["liquidity_map_snapshots"],  # type: ignore[arg-type]
+                equal_liquidity_pools=reduced["equal_liquidity_pools"],  # type: ignore[arg-type]
+                structure_events=reduced["structure_events"],  # type: ignore[arg-type]
+                fair_value_gaps=reduced["fair_value_gaps"],  # type: ignore[arg-type]
+                fair_value_gap_transitions=reduced["fair_value_gap_transitions"],  # type: ignore[arg-type]
+                fair_value_gap_snapshots=reduced["fair_value_gap_snapshots"],  # type: ignore[arg-type]
+                observations=reduced["observations"],  # type: ignore[arg-type]
+            )
+        finally:
+            _RECOVERING_PRIOR_EVIDENCE.reset(token)
         if result.status in (
             SMCV2PrimitiveStatus.VALID,
             SMCV2PrimitiveStatus.AMBIGUOUS,
@@ -1045,7 +1056,8 @@ def _validate_pools(
     timeframe: str,
 ) -> tuple[EqualLiquidityPool, ...]:
     prior_by_lineage: dict[str, EqualLiquidityPool] = {}
-    previous_moment: tuple[int, datetime] | None = None
+    previous_recomputable_moment: tuple[int, datetime] | None = None
+    previous_minimum_index = -1
     for value in values:
         if type(value) is not EqualLiquidityPool:
             raise ValueError("equal_liquidity_pools contain a malformed element")
@@ -1083,6 +1095,7 @@ def _validate_pools(
         if expected != value.snapshot_id:
             raise ValueError("pool snapshot identity mismatch")
         prior = prior_by_lineage.get(value.lineage_id)
+        membership_only_revision = False
         if prior is not None:
             if value.member_swing_ids[: len(prior.member_swing_ids)] != prior.member_swing_ids:
                 raise ValueError("pool member history is not a prefix extension")
@@ -1090,12 +1103,32 @@ def _validate_pools(
                 raise ValueError("pool source history is not a prefix extension")
             if value.lifecycle_events[: len(prior.lifecycle_events)] != prior.lifecycle_events:
                 raise ValueError("pool lifecycle history is not a prefix extension")
+            membership_only_revision = (
+                len(value.member_swing_ids) > len(prior.member_swing_ids)
+                and value.lifecycle_events == prior.lifecycle_events
+            )
         prior_by_lineage[value.lineage_id] = value
+        if membership_only_revision:
+            # EqualLiquidityPool preserves the founders' first-known provenance
+            # and does not expose a later member's confirmation moment.  The
+            # exact effective timestamp of this canonical revision therefore
+            # cannot be recomputed here.  Its confirmed-swing contract still
+            # supplies a safe index lower bound, while tuple position preserves
+            # the unavailable upstream timestamp order without inventing it.
+            previous_minimum_index = max(
+                previous_minimum_index,
+                value.source_indices[-1] + 2,
+            )
+            continue
         effective = _pool_effective_moment(value)
         current = (effective.index, effective.timestamp)
-        if previous_moment is not None and current < previous_moment:
+        if effective.index < previous_minimum_index or (
+            previous_recomputable_moment is not None
+            and current < previous_recomputable_moment
+        ):
             raise ValueError("pool revisions are not in causal order")
-        previous_moment = current
+        previous_minimum_index = max(previous_minimum_index, effective.index)
+        previous_recomputable_moment = current
     return values
 
 
