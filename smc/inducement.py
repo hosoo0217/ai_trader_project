@@ -1950,10 +1950,21 @@ def _validate_retention(
 
 
 def _range_effective_moment(value: DealingRangeSnapshot) -> _Moment:
+    first_known = _provenance_moment(
+        value.first_known_provenance,
+        "range provenance",
+    )
     if value.transitions:
         final = value.transitions[-1]
-        return _Moment(final.index, _timestamp(final.timestamp, "range transition timestamp"))
-    return _provenance_moment(value.first_known_provenance, "range provenance")
+        transition = _Moment(
+            final.index,
+            _timestamp(final.timestamp, "range transition timestamp"),
+        )
+        return max(
+            (first_known, transition),
+            key=lambda item: (item.index, item.timestamp),
+        )
+    return first_known
 
 
 def _pool_effective_moment(value: EqualLiquidityPool) -> _Moment:

@@ -76,13 +76,13 @@ Case 44 failed before correction. Renaming that helper to a private name made
 the public-surface assertion pass without changing the analyzer or builder
 signatures, `__all__`, logical-case count, or collected-test total.
 
-The corrected final focused result is:
+The prior corrected focused result was:
 
 - `162 passed in 0.86s`
 - exactly `48` sequential logical cases
 - `114` additional collected tests from locked parameterization
 
-The corrected final full regression result is:
+The prior corrected full regression result was:
 
 - `2296 passed in 12.53s`
 
@@ -114,6 +114,32 @@ the canonical upstream order while rejecting a demonstrably misordered tuple.
 The correction uses only the new member's safe confirmation-index lower bound;
 it does not invent an unavailable confirmation timestamp. Final focused and
 full results are respectively `162 passed` and `2296 passed`.
+
+A later V3 Candidate Evidence private run then exposed a no-look-ahead defect
+without publishing private output. A same-lineage ACTIVE Dealing Range boundary
+revision retained its original construction transition, so the Inducement
+analyzer backdated the later revision to construction and selected it before
+its own first-known moment. The resulting range/map revision mismatch made the
+failing segment `INVALID`. A new public Case 7 execution reproduced that exact
+failure first: `1 failed, 162 deselected in 2.25s`, with reason `map snapshot
+does not bind the selected range revision`. The minimal correction defines a
+range revision's effective moment as the causal maximum of its immutable
+first-known provenance and final lifecycle transition. The targeted regression
+and existing final-transition chronology coverage then passed together, while
+the public API, identity payloads, status precedence, exact logical matrix,
+atomic promotion, and prefix invariance remained unchanged.
+
+The current final focused result is:
+
+- `163 passed in 0.86s`
+- exactly `48` sequential logical cases
+- `115` additional collected tests from locked parameterization
+
+The current final full regression result is:
+
+- `2297 passed in 12.47s`
+
+Every current focused and full run used `-p no:cacheprovider`.
 
 ## 4. Locked Public Surface Implemented
 
@@ -153,7 +179,8 @@ leaking nested dependency exceptions.
 
 Canonical Dealing Range validation requires exact nested
 `DealingRangeTransition` objects, an exact `Decimal` integer/half-tick midpoint,
-and nondecreasing snapshot order by the final transition effective moment.
+and nondecreasing snapshot order by the causal maximum of revision first-known
+provenance and final transition effective moment.
 Every Liquidity Map classification must carry the same range lineage as its
 containing map snapshot; a locally contradictory lineage cannot hide behind an
 otherwise recomputable classification hash.
@@ -319,22 +346,22 @@ exit, PnL, trade, execution, package-registration, or integration work.
 
 The original standalone checkpoint followed the committed Kill-zone baseline
 and produced `1669` passing tests at that historical point. The current
-correction leaves the exact logical matrix at `48`, collects `162` focused
-Inducement tests, and passes the expanded repository regression at `2296`
-tests without changing the public API or integration surface.
+no-look-ahead correction leaves the exact logical matrix at `48`, collects
+`163` focused Inducement tests, and passes the expanded repository regression
+at `2297` tests without changing the public API or integration surface.
 
 ## 13. Artifact Evidence
 
 - `smc/inducement.py`
   - SHA-256:
-    `8CD573FABA49FC7510C7C07EEC0501612600A9BDC375C0160215CBDB241819DF`
-  - bytes: `89585`
-  - physical lines: `2101`
+    `A7B7E4499AA29E4077CD93537A2967364EA6925A65138B4C88027F9C9B04261B`
+  - bytes: `89807`
+  - physical lines: `2112`
 - `tests/test_inducement.py`
   - SHA-256:
-    `3F1462C641AF13820AFF16667503A2BC9472323321EE963A882C89C5AA76E2F8`
-  - bytes: `65450`
-  - physical lines: `1946`
+    `9E9188ACFFB562AD01E968652240081312A837A66B9198E1A2BAA504726D25BB`
+  - bytes: `66824`
+  - physical lines: `1982`
 - `docs/smc_v2_inducement_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded
   - bytes and physical lines are reported by the final scope audit
@@ -344,10 +371,10 @@ tabs or trailing whitespace.
 
 ## 14. Promotion, Rollback, Stop, and Freeze State
 
-This checkpoint does not authorize integration, staging, commit, push, paper
-progression, live progression, tuning, or runtime use. Promotion requires an
-independent exact-scope code/test/checkpoint audit and a separate explicit
-staging instruction.
+The current bounded autonomous correction authorizes exact-path staging and one
+local commit only after an independent exact-scope code/test/checkpoint audit.
+It does not authorize push, private Candidate rerun, training, feature/label or
+OOS access, integration, paper/live progression, tuning, or runtime use.
 
 Before local commit, rollback is restoration of exactly these three task paths
 to the parent commit and requires explicit authorization. After commit,
@@ -364,9 +391,9 @@ Final pre-staging checkpoint state:
 - `EXACT_CHANGED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=162`
+- `FOCUSED_TESTS_COLLECTED=163`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=2296`
+- `FULL_REGRESSION_COLLECTED=2297`
 - `EXTERNAL_FIXTURE_CREATED=False`
 - `DEPENDENCY_FILES_CHANGED=False`
 - `REQUIREMENTS_CHANGED=False`

@@ -645,6 +645,42 @@ def test_07_canonical_map_snapshot_is_bound_pre_group() -> None:
     ][-1].snapshot_id  # type: ignore[index]
 
 
+def test_07b_later_same_lineage_range_revision_is_not_backdated() -> None:
+    fixture = _fixture()
+    active = fixture["dealing_range_snapshots"][0]  # type: ignore[index]
+    revised_boundaries = SMCV2TickRange(active.low_tick - 1, active.high_tick)
+    revised_snapshot_id = make_dealing_range_id(
+        identity_kind="SNAPSHOT",
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        direction=active.direction,
+        source_indices=active.source_indices,
+        swing_ids=active.source_swing_ids,
+        boundaries=revised_boundaries,
+        lineage_id=active.lineage_id,
+        construction_event_id=active.construction_event_id,
+        range_kind=active.kind,
+        state=active.state,
+        transition_ids=active.transition_ids,
+        replacement_lineage_id=active.replacement_lineage_id,
+    )
+    later_revision = replace(
+        active,
+        snapshot_id=revised_snapshot_id,
+        low_tick=revised_boundaries.lower_tick,
+        midpoint_tick=Decimal(
+            revised_boundaries.lower_tick + revised_boundaries.upper_tick
+        )
+        / Decimal(2),
+        first_known_provenance=_provenance((8,), 8),
+    )
+
+    result = _analyze(dealing_range_snapshots=(active, later_revision))
+
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.inducements[0].active_range_snapshot_id == active.snapshot_id
+
+
 def test_20_internal_pool_must_be_strictly_inside_range() -> None:
     fixture = _fixture()
     pools = fixture["equal_liquidity_pools"]
