@@ -2,10 +2,10 @@
 
 ## 1. Proposal Record
 
-- Proposal ID: `GC-PHASE-A-CANDIDATE-EVIDENCE-PRIVATE-RUN-PROPOSAL-V3`.
+- Proposal ID: `GC-PHASE-A-CANDIDATE-EVIDENCE-PRIVATE-RUN-PROPOSAL-V4`.
 - Date: `2026-08-12`.
-- Baseline commit: `7ecc1d3d298dc9729dd083e3e1a599bb4f3fa324`.
-- Baseline subject: `fix(smc): correct Inducement dependency validation`.
+- Baseline commit: `d9a4d488fdaa4e4e6e17b77f75c56f9d2f61c7cc`.
+- Baseline subject: `fix(smc): preserve Inducement range causality`.
 - Classification: documentation-only private-execution boundary and readiness record.
 - Current decision: `READY_FOR_EXPLICIT_V3_CANDIDATE_PRIVATE_RERUN_AUTHORIZATION`.
 
@@ -36,6 +36,13 @@ is not present in the immutable pool. The four correction commits are
 `b57d4c671d2589e2028d4a31eaf56a60f637eb2b`, followed by
 `7ecc1d3d298dc9729dd083e3e1a599bb4f3fa324` for the final two Inducement corrections.
 
+A later bounded diagnosis reproduced the remaining range/map mismatch without publishing private
+output. A same-lineage ACTIVE Dealing Range boundary revision retained its original construction
+transition, allowing the revision to be selected before its own immutable first-known provenance.
+Inducement now defines each range revision's effective moment as the causal maximum of that
+first-known provenance and its final lifecycle transition. The fifth correction commit is
+`d9a4d488fdaa4e4e6e17b77f75c56f9d2f61c7cc`.
+
 The readiness chain is exact and one-way:
 
 1. accepted V3 dataset ID
@@ -45,8 +52,8 @@ The readiness chain is exact and one-way:
 3. committed Candidate Evidence version `GC-CANDIDATE-EVIDENCE-V1`;
 4. future private Candidate Evidence output under a new non-overwriting `_v3` root.
 
-Current verification evidence is `284` focused passes across the structural, candidate, and
-Inducement modules and `2296` full-regression passes. These tests and the accepted engineering artifacts prove bounded
+Current verification evidence is `285` focused passes in `1.46s` across the structural, candidate,
+and Inducement modules and `2297` full-regression passes in `11.79s`. These tests and the accepted engineering artifacts prove bounded
 deterministic plumbing only. They do not establish an edge, model quality, profitability,
 generalization, production readiness, or permission to train.
 
@@ -54,8 +61,9 @@ generalization, production readiness, or permission to train.
 
 At this proposal baseline:
 
-- `HEAD`, local `origin/main`, and live remote `main` equal
-  `7ecc1d3d298dc9729dd083e3e1a599bb4f3fa324`;
+- `HEAD` equals `d9a4d488fdaa4e4e6e17b77f75c56f9d2f61c7cc`; local `origin/main` and live
+  remote `main` remain `7ecc1d3d298dc9729dd083e3e1a599bb4f3fa324` pending a separately authorized
+  export of the reviewed local commit chain;
 - the tracked worktree and index are clean;
 - exactly three pre-existing untracked documentation files are outside this task and remain
   untouched;
@@ -70,9 +78,9 @@ At this proposal baseline:
 
 The focused verification command covered
 `tests/test_gc_candidate_evidence_builder.py` and
-`tests/test_gc_structural_seed_evidence.py` plus `tests/test_inducement.py` and passed `284` tests.
-The full command passed `2296`
-tests. Both used `-p no:cacheprovider`; neither accessed private data or changed Git state.
+`tests/test_gc_structural_seed_evidence.py` plus `tests/test_inducement.py` and passed `285` tests in
+`1.46s`. The full command passed `2297` tests in `11.79s`.
+Both used `-p no:cacheprovider`; neither accessed private data or changed Git state.
 
 ## 4. Exact Documentation-Only Scope
 
@@ -222,9 +230,9 @@ Any future readiness revision or private execution must stop on drift from these
 | `smc/dealing_range.py` | `F2D6754A7456D39C6BCC5EE312024F8C538CFDBD43474BC76957D44B62EBCE0E` |
 | `smc/liquidity_map.py` | `592F79275A2945328969D727946B88361676F0568C0A5A2D0010CE0F9C3F2321` |
 | `smc/fair_value_gap.py` | `AC8E9B8123AF6CA233C27CE2AC14A41F41EC87CE43E9807785C12D1619AFDBC1` |
-| `smc/inducement.py` | `8CD573FABA49FC7510C7C07EEC0501612600A9BDC375C0160215CBDB241819DF` |
-| `tests/test_inducement.py` | `3F1462C641AF13820AFF16667503A2BC9472323321EE963A882C89C5AA76E2F8` |
-| `docs/smc_v2_inducement_checkpoint.md` | `C30FAEA99A80ADC0B2DC615F535339C07EF5E7EC4A44C3344AB25DC94CA88AB6` |
+| `smc/inducement.py` | `A7B7E4499AA29E4077CD93537A2967364EA6925A65138B4C88027F9C9B04261B` |
+| `tests/test_inducement.py` | `9E9188ACFFB562AD01E968652240081312A837A66B9198E1A2BAA504726D25BB` |
+| `docs/smc_v2_inducement_checkpoint.md` | `961DEC27FE3F03E28CD3ECF99A3ADC804625058871DD8B4732AE32C55D4A080A` |
 | `smc/kill_zones.py` | `6655415F82B85D42D20088676A12D4F3883B992CE17B67EAF784188E1CD27D21` |
 
 Hash equality is necessary but not sufficient. Exact signatures, frozen dataclasses, enum values,
@@ -533,7 +541,7 @@ Parameterization may expand collected executions without changing the `48` logic
 3. Existing final Candidate Evidence V3 root stops without overwrite.
 4. V2 dataset, V2 seed, or V2 output-root substitution is rejected.
 5. Dataset, structural, candidate, detector, test, checkpoint, or proposal hash drift stops,
-   including drift from the four exact correction commits bound by this V3 proposal.
+   including drift from the five exact correction commits bound by this V4 proposal.
 6. Missing, extra, duplicate, reordered, or malformed private input file stops.
 7. Runtime tzdata/version/zone mismatch stops before reconstruction.
 8. Exact three source exports parse once each and preserve accepted order.
@@ -626,7 +634,7 @@ non-promotable engineering result and would authorize only a separate downstream
 
 ## 24. Final Decision and Next Single Task
 
-The final-rebound exact V3 Candidate Evidence private-rerun contract is specified. The accepted V3
+The final-rebound exact V4 Candidate Evidence private-rerun contract is specified. The accepted V3
 dataset, accepted V3 structural seed, required calendar, committed dependency corrections, and
 regression evidence satisfy the technical prerequisites. After this one-file proposal passes
 independent audit and is committed, readiness is
