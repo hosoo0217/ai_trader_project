@@ -1747,8 +1747,6 @@ def _latest_range_before(
     latest = eligible[-1]
     if latest.state is not DealingRangeState.ACTIVE:
         raise _NoCandidate("latest external range is not ACTIVE")
-    if not (latest.low_tick < pool.lower_tick <= pool.upper_tick < latest.high_tick):
-        raise ValueError("internal pool is not strictly inside active range")
     return latest
 
 
@@ -1793,6 +1791,13 @@ def _latest_map_before(
         if not internal:
             raise _NoCandidate("internal pool classification is missing")
         raise ValueError("internal pool classification is ambiguous")
+    if not (
+        active_range.low_tick
+        < pool.lower_tick
+        <= pool.upper_tick
+        < active_range.high_tick
+    ):
+        raise ValueError("internal pool is not strictly inside active range")
     targets = tuple(
         item
         for item in snapshot.classifications

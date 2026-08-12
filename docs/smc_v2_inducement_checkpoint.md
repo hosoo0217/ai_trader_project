@@ -131,13 +131,25 @@ atomic promotion, and prefix invariance remained unchanged.
 
 The current final focused result is:
 
-- `163 passed in 0.86s`
+- `164 passed in 0.81s`
 - exactly `48` sequential logical cases
-- `115` additional collected tests from locked parameterization
+- `116` additional collected tests from locked parameterization
 
 The current final full regression result is:
 
-- `2297 passed in 12.47s`
+- `2298 passed in 11.70s`
+
+A subsequent immutable Candidate Evidence attempt published no private output
+but exposed one further candidate-filtering defect. An independently canonical
+Equal Liquidity pool outside the active range was rejected before the latest
+Liquidity Map proved whether that lineage was classified as an internal
+candidate. Existing Case 20 was extended first with an unclassified
+outside-range lineage; the RED result was `INVALID` with reason
+`internal pool is not strictly inside active range`. The minimal correction
+performs range-geometry reconciliation only after exactly one internal
+classification selects that pool. Classified out-of-range candidates remain
+fail-closed, while unrelated canonical pools can no longer invalidate a valid
+independent sequence.
 
 Every current focused and full run used `-p no:cacheprovider`.
 
@@ -206,9 +218,11 @@ required foreign dependency collection is actually missing.
 
 Only the latest canonical `EXTERNAL` `ACTIVE` Dealing Range at or before the
 sweep is eligible. The latest canonical pre-group Liquidity Map snapshot must
-bind that exact range lineage and snapshot. The selected internal classification
-must reference the exact Equal Liquidity pool lineage and be strictly inside the
-range.
+bind that exact range lineage and snapshot. Geometry is reconciled only after
+exactly one internal classification selects the pool: that classification must
+reference the exact Equal Liquidity pool lineage and be strictly inside the
+range. A canonical but unclassified pool outside the range is unrelated
+evidence and cannot invalidate an independently valid sequence.
 
 Bullish sequences require an internal sell-side `LOW` pool and a buy-side
 external target. Bearish sequences mirror those roles. The external target must
@@ -346,22 +360,23 @@ exit, PnL, trade, execution, package-registration, or integration work.
 
 The original standalone checkpoint followed the committed Kill-zone baseline
 and produced `1669` passing tests at that historical point. The current
-no-look-ahead correction leaves the exact logical matrix at `48`, collects
-`163` focused Inducement tests, and passes the expanded repository regression
-at `2297` tests without changing the public API or integration surface.
+no-look-ahead and candidate-filtering corrections leave the exact logical
+matrix at `48`, collect `164` focused Inducement tests, and pass the expanded
+repository regression at `2298` tests without changing the public API or
+integration surface.
 
 ## 13. Artifact Evidence
 
 - `smc/inducement.py`
   - SHA-256:
-    `A7B7E4499AA29E4077CD93537A2967364EA6925A65138B4C88027F9C9B04261B`
-  - bytes: `89807`
-  - physical lines: `2112`
+    `57DA49BE7C99DF9385610749446566323865676817FF8C44D8F8D3868C8C633F`
+  - bytes: `89857`
+  - physical lines: `2117`
 - `tests/test_inducement.py`
   - SHA-256:
-    `9E9188ACFFB562AD01E968652240081312A837A66B9198E1A2BAA504726D25BB`
-  - bytes: `66824`
-  - physical lines: `1982`
+    `129B5751BFB00E78AC4B8D4C71811A35AFB2D55EDEB356A668FC098F5201D850`
+  - bytes: `67951`
+  - physical lines: `2018`
 - `docs/smc_v2_inducement_checkpoint.md`
   - SHA-256: self-referential and therefore intentionally not embedded
   - bytes and physical lines are reported by the final scope audit
@@ -391,9 +406,9 @@ Final pre-staging checkpoint state:
 - `EXACT_CHANGED_PATHS=3`
 - `LOGICAL_CASES=48`
 - `FOCUSED_TESTS_PASS=True`
-- `FOCUSED_TESTS_COLLECTED=163`
+- `FOCUSED_TESTS_COLLECTED=164`
 - `FULL_REGRESSION_PASS=True`
-- `FULL_REGRESSION_COLLECTED=2297`
+- `FULL_REGRESSION_COLLECTED=2298`
 - `EXTERNAL_FIXTURE_CREATED=False`
 - `DEPENDENCY_FILES_CHANGED=False`
 - `REQUIREMENTS_CHANGED=False`

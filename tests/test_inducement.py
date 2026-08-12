@@ -236,13 +236,16 @@ def _range_snapshot(
 
 def _pool(
     direction: SMCV2Direction,
+    *,
+    reference_tick: int | None = None,
 ) -> tuple[tuple[DealingRangeSwing, ...], EqualLiquidityPool, EqualLiquidityPool]:
     side = (
         EqualLiquiditySide.LOW
         if direction is SMCV2Direction.BULLISH
         else EqualLiquiditySide.HIGH
     )
-    reference_tick = 100 if direction is SMCV2Direction.BULLISH else 110
+    if reference_tick is None:
+        reference_tick = 100 if direction is SMCV2Direction.BULLISH else 110
     dealing_side = (
         DealingRangeSwingSide.LOW
         if side is EqualLiquiditySide.LOW
@@ -687,6 +690,39 @@ def test_20_internal_pool_must_be_strictly_inside_range() -> None:
     changed = tuple(replace(pool, lower_tick=90) for pool in pools)  # type: ignore[arg-type]
     result = _analyze(equal_liquidity_pools=changed)
     assert result.status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_20_unclassified_out_of_range_pool_is_not_a_candidate() -> None:
+    fixture = _fixture()
+    _, extra_active, extra_swept = _pool(
+        SMCV2Direction.BULLISH,
+        reference_tick=80,
+    )
+    pools = tuple(
+        sorted(
+            (
+                *fixture["equal_liquidity_pools"],  # type: ignore[arg-type]
+                extra_active,
+                extra_swept,
+            ),
+            key=lambda item: (
+                item.lifecycle_events[-1].index,
+                item.lifecycle_events[-1].timestamp,
+                item.lineage_id,
+            ),
+        )
+    )
+    observations = list(fixture["observations"])  # type: ignore[arg-type]
+    observations[5] = replace(observations[5], low_tick=77)
+
+    result = _analyze(
+        equal_liquidity_pools=pools,
+        observations=tuple(observations),
+    )
+
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert len(result.inducements) == len(result.snapshots) == 1
+    assert result.inducements[0].internal_pool_id != extra_active.lineage_id
 
 
 def test_11_structure_event_sources_reconcile_to_observations() -> None:
