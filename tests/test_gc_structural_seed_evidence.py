@@ -34,7 +34,9 @@ from analysis.gc_structural_seed_evidence import (
 from core.gc_chronological_backtest import GCChronologicalBar
 from smc.dealing_range import (
     DealingRangeEventType,
+    DealingRangeObservation,
     DealingRangeSwingSide,
+    analyze_dealing_ranges,
     make_dealing_range_id,
 )
 from smc.equal_liquidity import EqualLiquiditySide, make_equal_liquidity_id
@@ -710,3 +712,90 @@ def test_case_48_segment_local_output_is_downstream_compatible() -> None:
 
     source = inspect.getsource(__import__("analysis.gc_structural_seed_evidence", fromlist=["*"]))
     assert "smc.market_structure" not in source and "smc.bos_choch" not in source
+
+    values = (
+        (100, 102, 99, 101),
+        (101, 103, 100, 102),
+        (102, 110, 101, 109),
+        (100, 105, 95, 101),
+        (102, 106, 100, 104),
+        (104, 106, 103, 105),
+        (105, 110, 104, 109),
+        (111, 114, 109, 112),
+        (113, 120, 108, 118),
+        (118, 119, 90, 100),
+        (102, 115, 96, 110),
+        (110, 116, 100, 115),
+        (116, 122, 110, 121),
+        (100, 105, 88, 89),
+    )
+    bars = tuple(_bar(index, value) for index, value in enumerate(values))
+    corrected = _build(bars)
+    assert corrected.status is SMCV2PrimitiveStatus.VALID
+    assert corrected.seed is not None
+    first_protected = next(
+        swing
+        for swing in corrected.seed.dealing_range_swings
+        if swing.side is DealingRangeSwingSide.LOW
+        and swing.provenance.source_indices == (3,)
+    )
+    assert corrected.seed.structure_events[-1].broken_swing_id == first_protected.swing_id
+
+    downstream = analyze_dealing_ranges(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        swings=corrected.seed.dealing_range_swings,
+        structure_events=corrected.seed.structure_events,
+        observations=tuple(
+            DealingRangeObservation(
+                bar.index,
+                bar.timestamp,
+                bar.high_tick,
+                bar.low_tick,
+                bar.close_tick,
+            )
+            for bar in bars
+        ),
+    )
+    assert downstream.status is SMCV2PrimitiveStatus.VALID
+
+    replacement_values = (
+        *values[:9],
+        (118, 119, 100, 105),
+        (105, 115, 101, 110),
+        (110, 116, 102, 115),
+        *values[12:],
+    )
+    replacement_bars = tuple(
+        _bar(index, value) for index, value in enumerate(replacement_values)
+    )
+    replacement = _build(replacement_bars)
+    assert replacement.status is SMCV2PrimitiveStatus.VALID
+    assert replacement.seed is not None
+    replacement_protected = next(
+        swing
+        for swing in replacement.seed.dealing_range_swings
+        if swing.side is DealingRangeSwingSide.LOW
+        and swing.provenance.source_indices == (9,)
+    )
+    assert (
+        replacement.seed.structure_events[-1].broken_swing_id
+        == replacement_protected.swing_id
+    )
+    replacement_downstream = analyze_dealing_ranges(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        swings=replacement.seed.dealing_range_swings,
+        structure_events=replacement.seed.structure_events,
+        observations=tuple(
+            DealingRangeObservation(
+                bar.index,
+                bar.timestamp,
+                bar.high_tick,
+                bar.low_tick,
+                bar.close_tick,
+            )
+            for bar in replacement_bars
+        ),
+    )
+    assert replacement_downstream.status is SMCV2PrimitiveStatus.VALID

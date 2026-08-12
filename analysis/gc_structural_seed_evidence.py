@@ -32,6 +32,7 @@ from analysis.gc_dataset_builder import (
     GCSegmentPartition,
     make_gc_dataset_id,
 )
+from core.gc_chronological_backtest import GCChronologicalBar
 from smc.dealing_range import (
     DealingRangeEventType,
     DealingRangeStructureEvent,
@@ -596,6 +597,76 @@ def _latest_protected(
     return max(eligible, key=_swing_key) if eligible else None
 
 
+def _source_index(swing: DealingRangeSwing) -> int:
+    return swing.provenance.source_indices[0]
+
+
+def _replacement_protected(
+    swings: tuple[DealingRangeSwing, ...],
+    *,
+    direction: SMCV2Direction,
+    construction_index: int,
+    event_index: int,
+    low_tick: int,
+    high_tick: int,
+) -> DealingRangeSwing | None:
+    required_side = (
+        DealingRangeSwingSide.LOW
+        if direction is SMCV2Direction.BULLISH
+        else DealingRangeSwingSide.HIGH
+    )
+    eligible = tuple(
+        swing
+        for swing in swings
+        if swing.side is required_side
+        and _source_index(swing) > construction_index
+        and swing.provenance.confirmation_index > construction_index
+        and swing.provenance.confirmation_index < event_index
+        and low_tick < swing.price_tick < high_tick
+    )
+    if not eligible:
+        return None
+    greatest_source = max(_source_index(swing) for swing in eligible)
+    latest = tuple(
+        swing for swing in eligible if _source_index(swing) == greatest_source
+    )
+    greatest_confirmation = max(
+        swing.provenance.confirmation_index for swing in latest
+    )
+    latest = tuple(
+        swing
+        for swing in latest
+        if swing.provenance.confirmation_index == greatest_confirmation
+    )
+    return min(latest, key=lambda swing: swing.swing_id)
+
+
+def _active_boundaries(
+    bars_by_index: dict[int, GCChronologicalBar],
+    *,
+    direction: SMCV2Direction,
+    protected_swing: DealingRangeSwing,
+    event_index: int,
+) -> tuple[int, int]:
+    start_index = _source_index(protected_swing)
+    rows = tuple(
+        bars_by_index[index]
+        for index in range(start_index, event_index + 1)
+        if index in bars_by_index
+    )
+    if len(rows) != event_index - start_index + 1:
+        raise ValueError("active range source interval is incomplete")
+    if direction is SMCV2Direction.BULLISH:
+        low_tick = protected_swing.price_tick
+        high_tick = max(row.high_tick for row in rows)
+    else:
+        low_tick = min(row.low_tick for row in rows)
+        high_tick = protected_swing.price_tick
+    if low_tick >= high_tick:
+        raise ValueError("active range must have positive width")
+    return low_tick, high_tick
+
+
 def _select_crossed(
     crossed: tuple[DealingRangeSwing, ...], direction: SMCV2Direction
 ) -> DealingRangeSwing:
@@ -648,6 +719,10 @@ def _discover_events_and_links(
     retired_low: set[str] = set()
     active_direction: SMCV2Direction | None = None
     protected_swing: DealingRangeSwing | None = None
+    active_construction_index: int | None = None
+    active_low_tick: int | None = None
+    active_high_tick: int | None = None
+    bars_by_index = {bar.index: bar for bar in segment.bars}
     for bar in segment.bars:
         confirmed = tuple(
             swing
@@ -689,11 +764,56 @@ def _discover_events_and_links(
                 continue
             selected = _select_crossed(crossed, direction)
             event_type = DealingRangeEventType.BOS
+            next_protected = latest
+            next_construction_index = bar.index
+            next_low_tick, next_high_tick = _active_boundaries(
+                bars_by_index,
+                direction=direction,
+                protected_swing=next_protected,
+                event_index=bar.index,
+            )
         elif direction is active_direction:
-            if latest is None:
-                raise _StructuralUnknown("a required protected swing is not yet confirmed")
+            if (
+                protected_swing is None
+                or active_construction_index is None
+                or active_low_tick is None
+                or active_high_tick is None
+            ):
+                raise _StructuralUnknown("initialized active range state is incomplete")
             selected = _select_crossed(crossed, direction)
             event_type = DealingRangeEventType.BOS
+            replacement = _replacement_protected(
+                swings,
+                direction=direction,
+                construction_index=active_construction_index,
+                event_index=bar.index,
+                low_tick=active_low_tick,
+                high_tick=active_high_tick,
+            )
+            if replacement is not None:
+                next_protected = replacement
+                next_construction_index = bar.index
+                next_low_tick, next_high_tick = _active_boundaries(
+                    bars_by_index,
+                    direction=direction,
+                    protected_swing=replacement,
+                    event_index=bar.index,
+                )
+            else:
+                next_protected = protected_swing
+                next_construction_index = active_construction_index
+                interval_low, interval_high = _active_boundaries(
+                    bars_by_index,
+                    direction=direction,
+                    protected_swing=protected_swing,
+                    event_index=bar.index,
+                )
+                if direction is SMCV2Direction.BULLISH:
+                    next_low_tick = active_low_tick
+                    next_high_tick = max(active_high_tick, interval_high)
+                else:
+                    next_low_tick = min(active_low_tick, interval_low)
+                    next_high_tick = active_high_tick
         else:
             if protected_swing is None:
                 raise _StructuralUnknown("an initialized direction has no active protected swing")
@@ -712,6 +832,14 @@ def _discover_events_and_links(
                 raise _StructuralUnknown("a required protected swing is not yet confirmed")
             selected = protected_matches[0]
             event_type = DealingRangeEventType.CHOCH
+            next_protected = latest
+            next_construction_index = bar.index
+            next_low_tick, next_high_tick = _active_boundaries(
+                bars_by_index,
+                direction=direction,
+                protected_swing=next_protected,
+                event_index=bar.index,
+            )
         if direction is SMCV2Direction.BULLISH:
             retired_high.update(item.swing_id for item in crossed)
         else:
@@ -736,7 +864,10 @@ def _discover_events_and_links(
         event = DealingRangeStructureEvent(direction, event_type, selected.swing_id, provenance, event_id)
         events.append(event)
         active_direction = direction
-        protected_swing = latest
+        protected_swing = next_protected
+        active_construction_index = next_construction_index
+        active_low_tick = next_low_tick
+        active_high_tick = next_high_tick
         boundaries = _fvg_boundaries(segment.bars, bar.index, direction)
         if boundaries is not None:
             source_indices = (bar.index - 2, bar.index - 1, bar.index)

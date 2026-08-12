@@ -15,6 +15,12 @@
   `1caff67f204413e60ced53c7da68331e5f1593fe`.
 - Governing correction proposal SHA-256:
   `242FE2084F1271E9A647AA389AEE4193AB5B50041B907EC8C010419E0441F0BC`.
+- Governing downstream-causality correction proposal:
+  `docs/gc_futures_phase_a_structural_seed_downstream_causality_correction_proposal.md`.
+- Governing downstream-causality proposal commit:
+  `e4ebc30693083f06213eaff38d16495529b84111`.
+- Governing downstream-causality proposal SHA-256:
+  `8136E82BD2A298BB90AD814B3C3C7233C28CCF8320DE85392CDC43A4A0B60789`.
 - Cross-audited downstream proposal SHA-256:
   `A0E35BF5A7F4EC451DF7898223FA0467C3FA36AA2F775008C0FB7C4D62F38941`.
 - Structural-seed version: `GC-STRUCTURAL-SEED-V1`.
@@ -80,6 +86,23 @@ parameterization locked bullish and bearish mirrors, protected-swing precedence,
 non-event consumption, absence of retroactive relabeling, and a genuinely new
 strictly later eligible BOS. The final focused suite passed all `69` executions.
 
+A later Candidate Evidence attempt published no private output but exposed a
+second downstream-causality defect. The generator promoted the newest confirmed
+opposite-side swing after every same-direction BOS even when that swing lay
+outside the active Dealing Range and could not qualify as its replacement. The
+later CHOCH therefore referenced a different protected swing from the public
+Dealing Range analyzer.
+
+Case 48 was extended first with an inline synthetic sequence. The RED run was
+`1 failed, 68 deselected in 0.63s`; the final event referenced the outside-range
+newer LOW instead of the active protected LOW. The minimal correction now tracks
+the private active construction index and boundaries, applies the public
+replacement eligibility/selection rule, retains and directionally extends the
+old range when no replacement qualifies, and reconstructs state on reversal.
+The same logical case also discriminates an in-range qualifying replacement and
+requires both emitted sequences to be accepted by public
+`analyze_dealing_ranges()`.
+
 ## 5. Immutable Dataset and Segment Boundary
 
 The analyzer accepts only caller-supplied frozen `GCDatasetBuildConfig` and
@@ -112,6 +135,13 @@ non-event, while protected-plus-other selects the protected swing regardless of
 price, recency, or hash preference. Crossed levels retire only after the complete
 group is classified. Public Dealing Range EVENT identities are recomputed from
 exact singleton provenance and the selected broken swing.
+
+Active protected state mirrors the public Dealing Range lifecycle. First BOS and
+reverse CHOCH construct from the latest eligible protected swing. Same-direction
+BOS replaces that swing only when the pullback source/confirmation is strictly
+after construction, strictly before the event, and strictly inside the active
+boundaries. Otherwise the protected swing and construction index remain fixed
+while only the directional target boundary may extend.
 
 Raw derivation has no reachable independent `AMBIGUOUS` branch. Contradictory
 opposing raw breaks are invalid evidence; upstream dataset ambiguity remains a
@@ -195,13 +225,18 @@ frozen dataclasses, status precedence, nested exception containment,
 repeatability, dataset-bound rebasing, and downstream segment-qualification
 compatibility.
 
+Case 48 additionally locks outside-range non-replacement, qualifying in-range
+replacement, correct later CHOCH protected identity, and direct public Dealing
+Range acceptance without increasing the exact logical-case or collected-test
+count.
+
 ## 12. Focused and Full Regression Evidence
 
 Final focused evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_structural_seed_evidence.py`;
-- result: `69 passed in 1.20s`;
+- result: `69 passed in 1.10s`;
 - exact logical cases: `48`;
 - collected focused executions: `69`.
 
@@ -209,22 +244,22 @@ Final full-regression evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`;
-- result: `2283 passed in 13.92s`;
-- governing correction baseline collection: `2276`;
-- net new collected executions: `7`.
+- result: `2298 passed in 11.79s`;
+- immediately preceding repository collection: `2297`;
+- net new collected executions from the paired Inducement correction: `1`.
 
 ## 13. Artifact Evidence
 
 - `analysis/gc_structural_seed_evidence.py`
   - SHA-256:
-    `17F74A8D856FB31CBC0B2602AC8B4466D66582B744282AB400BEA5F3110F31A7`;
-  - bytes: `44409`;
-  - physical lines: `979`.
+    `B60D7BE3203EB54D6DA7EF0DAC324FCECB0547CEDF08364F8A3881ADC48794A2`;
+  - bytes: `49283`;
+  - physical lines: `1110`.
 - `tests/test_gc_structural_seed_evidence.py`
   - SHA-256:
-    `8444424B03749E6DEB89E586041151FEFAB63433AA5A32D8798CC2A429853D54`;
-  - bytes: `34092`;
-  - physical lines: `712`.
+    `26AA31863AD07B71D0480F0789199D7791BD16FA736E6D2A86B060B928509B35`;
+  - bytes: `36977`;
+  - physical lines: `801`.
 - `docs/gc_futures_phase_a_structural_seed_evidence_checkpoint.md`
   - SHA-256: self-referential and intentionally not embedded;
   - byte and physical-line counts are reported by final external audit.
