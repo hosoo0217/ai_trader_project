@@ -194,13 +194,24 @@ evidence is `INVALID`.
 
 The reproduced result must be object-equal to `canonical_candidate_evidence`.
 Its optional manifest, ordered promoted segment results, candidate references,
-statuses, reasons, and blocking reasons must match byte-for-byte. The exact
-canonical control digest binds the complete canonical result, not only foreign
-IDs. It is the common identity-bearing control value even when the accepted
-result is `NONE` or `UNKNOWN` and therefore has no candidate manifest or bundle
-ID. A `VALID` control must carry its canonical manifest; a `NONE` or `UNKNOWN`
-control must not be rejected merely because its canonical public result has no
-manifest. Any object drift stops before boundary promotion.
+statuses, reasons, and blocking reasons must match byte-for-byte. A SHA-256
+digest of that complete object-equal result is mandatory validation evidence
+and is the `MANIFEST` identity's `canonical_control_digest`, even when the
+accepted result is `NONE` or `UNKNOWN` and therefore has no candidate manifest
+or bundle ID. A `VALID` control must carry its canonical manifest; a `NONE` or
+`UNKNOWN` control must not be rejected merely because its canonical public
+result has no manifest. Any object drift stops before boundary promotion.
+
+For point-in-time identities the same public field name has a narrower,
+identity-kind-specific meaning. A `BOUNDARY` binds the SHA-256 digest of the
+exact ordered canonical `segment_results` prefix through and including its
+source segment position. A `RECEIVING_GROUP` binds the corresponding exact
+ordered prefix through and including its receiving segment position. These
+prefixes are the complete canonical control evidence available at those
+effective moments; they are not a digest of a projection reconstructed from
+foreign IDs. The complete result remains mandatory for validation and is bound
+by the manifest. A strictly later append may therefore extend the complete
+control and manifest without rewriting an earlier point-in-time identity.
 
 The accepted negative control is specifically `UNKNOWN`, contains `113`
 strictly prior promoted complete segment results, contains `0` candidates, and
@@ -455,14 +466,18 @@ All IDs are lowercase SHA-256 over canonical typed JSON with sorted object
 keys, compact separators, UTC-normalized timestamps, canonical dates, ordered
 arrays, and no float coercion.
 
-Common required fields for all three kinds are normalized instrument,
+Common required field names for all three kinds are normalized instrument,
 timeframe, dataset ID, calendar version, the SHA-256 digest of the complete
 canonical split-session boundary-calendar tuple, the SHA-256 digest of the
 complete canonical Kill Zone control-calendar tuple, timezone-data version,
-seed ID, and the digest of the complete object-equal canonical candidate
-control result. The control digest is required even when the canonical result
-is `NONE` or `UNKNOWN` and legitimately has no manifest or bundle ID. Calendar
-digests preserve exact
+seed ID, and `canonical_control_digest`. The last field is required even when
+the canonical result is `NONE` or `UNKNOWN` and legitimately has no manifest or
+bundle ID, but its exact payload is identity-kind-specific: `BOUNDARY` uses the
+ordered canonical `segment_results` prefix through its source position;
+`RECEIVING_GROUP` uses the prefix through its receiving position; and
+`MANIFEST` uses the complete object-equal canonical candidate-control result.
+Every prefix member is the byte-exact canonical public segment result in
+accepted dataset order. Calendar digests preserve exact
 caller order and bind every normalized field; duplicate, reordered, inserted,
 removed, repaired, or provenance-mutated entries therefore change identity
 and are never silently normalized away.
@@ -482,7 +497,7 @@ decision/reasons/dependencies, and manifest arrays. Its boundary ID must
 recompute from the supplied input boundary.
 
 `MANIFEST` requires exact ordered boundary and receiving-group ID arrays in
-addition to the common canonical control digest. It forbids all
+addition to the complete object-equal canonical control digest. It forbids all
 boundary/group-specific fields. Every
 supplied ID must recompute from an exact public object and appear once in output
 order.
@@ -548,9 +563,15 @@ moment is reached. They cannot mutate the boundary or prior group.
 
 Prefix invariance applies only to a valid prefix ending on a complete boundary
 or receiving effective group and extended by strictly later complete evidence.
-Same-effective append, partial group, historical insertion, calendar repair,
-tuple reorder, source replacement, version mutation, boundary
-reclassification, or changed dataset/seed/control identity is prefix-ineligible.
+The earlier `BOUNDARY` or `RECEIVING_GROUP` identity-bearing control prefix must
+remain byte-exact. The later valid canonical rebuild and complete manifest
+digest may extend because the appended evidence is strictly later. Same-
+effective append, partial group, historical insertion, calendar repair, tuple
+reorder, source replacement, version mutation, boundary reclassification,
+changed dataset/seed identity, or mutation of an earlier identity-bearing
+control prefix is prefix-ineligible. A supplied complete control that differs
+from its exact rebuild is always `INVALID`; this is distinct from a valid
+strictly later canonical extension.
 
 Identical inputs produce object-equal results and byte-identical separately
 authorized serialization.
@@ -581,8 +602,8 @@ The future implementation gate contains exactly these numbered logical cases:
 1. Exact accepted dataset/config/manifest binding with zero OOS exposure passes.
 2. Missing dataset, either exact calendar stream, seed, or canonical control is `UNKNOWN` only after supplied counterparts validate.
 3. Malformed supplied counterpart outranks missing-context `UNKNOWN` as `INVALID`.
-4. Dataset, seed, complete canonical control result/digest, dependency version, either complete calendar digest, or tzdata identity drift is `INVALID`.
-5. Exact canonical candidate rebuild is object-equal and yields the locked complete control digest whether its optional manifest is present or absent.
+4. Dataset, seed, exact canonical rebuild, identity-kind control digest, dependency version, either complete calendar digest, or tzdata identity drift is `INVALID`.
+5. Exact canonical candidate rebuild is object-equal; the complete result digest is locked for `MANIFEST`, while point-in-time prefixes are locked for `BOUNDARY` and `RECEIVING_GROUP`, whether the optional candidate manifest is present or absent.
 6. Canonical status, reason, result, candidate, rejected-sequence, or ordering drift stops before boundary promotion.
 7. Exact adjacent dataset ordinals and strictly increasing segment moments pass.
 8. Non-adjacent, reordered, duplicated, missing, or replaced segment evidence is rejected without silent sort.
@@ -616,14 +637,14 @@ The future implementation gate contains exactly these numbered logical cases:
 36. Independent eligible/ineligible boundaries remain deterministic under repeated execution.
 37. Final precedence is `INVALID > AMBIGUOUS > UNKNOWN > VALID > NONE`.
 38. Determinably later invalid/ambiguous/unknown evidence preserves only byte-exact strictly prior complete evidence.
-39. `BOUNDARY` identity exhaustively validates every common/required/forbidden field, both calendar digests, and field sensitivity.
-40. `RECEIVING_GROUP` identity exhaustively validates boundary recomputation, effective moment, ordered references, and schemas.
-41. `MANIFEST` identity exhaustively validates both calendar digests, the common complete control digest, ordered unique boundary/group histories, and schemas.
+39. `BOUNDARY` identity exhaustively validates every common/required/forbidden field, both calendar digests, the exact source-position control prefix, and field sensitivity.
+40. `RECEIVING_GROUP` identity exhaustively validates boundary recomputation, effective moment, ordered references, the exact receiving-position control prefix, and schemas.
+41. `MANIFEST` identity exhaustively validates both calendar digests, the complete object-equal control digest, ordered unique boundary/group histories, and schemas.
 42. Malformed hashes, enums, dates, Decimals, bool indices, naive timestamps, calendar artifact provenance, nested references, histories, and exception containment fail closed.
 43. Analyzer and identity builder have exact keyword-only parameter names, annotations, kinds, and defaults.
 44. Every public dataclass has exact fields, annotations, defaults, and frozen state; enums, version, and exports are exact.
-45. Strictly later complete boundary/group append satisfies eligible prefix invariance and repeatability.
-46. Same-effective append, insertion, repair, reorder, source/calendar/version mutation, or boundary reclassification is prefix-ineligible.
+45. Strictly later complete boundary/group append preserves earlier point-in-time control prefixes and satisfies eligible prefix invariance and repeatability even though the complete manifest digest extends.
+46. Same-effective append, insertion, repair, reorder, source/calendar/version mutation, earlier control-prefix mutation, or boundary reclassification is prefix-ineligible.
 47. Exact assessed/eligible/ineligible/status/reason/closure/group reporting is deterministic and does not rank or promote evidence.
 48. Exact three-path scope, no private run/OOS/candidate/feature/label/model/training/integration/Git side effect, rollback, and STOP pass.
 
@@ -678,13 +699,17 @@ and the complete canonical digest of each stream is now identity-bearing. The
 implementation-readiness audit then corrected two additional material defects:
 the accepted canonical control is `UNKNOWN` with `113` promoted complete
 segment results, `0` candidates, and no candidate manifest, so the complete
-object-equal canonical control digest is now the required common identity value
-and no nonexistent candidate bundle ID is required; and that common control
-digest is no longer simultaneously forbidden by the `BOUNDARY` and
-`RECEIVING_GROUP` schemas. The final document has
+object-equal canonical control remains required and no nonexistent candidate
+bundle ID is required; and `canonical_control_digest` is no longer
+simultaneously forbidden by the `BOUNDARY` and `RECEIVING_GROUP` schemas. A
+final independent correction resolved the complete-control/prefix-invariance
+contradiction without changing the public field or API: point-in-time boundary
+and receiving-group identities bind their exact canonical control prefixes,
+while the manifest binds the complete object-equal control result. The final document has
 exactly `24` sequential numbered sections and exactly `48`
 sequential logical cases. All ten dependency hashes in Section 3 match the
-accepted bytes, and all three reserved implementation paths are absent.
+accepted bytes. All three reserved implementation paths were absent at formal
+proposal acceptance; their later existence does not expand the reserved scope.
 
 Fresh regression evidence on `2026-08-16`:
 
@@ -702,3 +727,10 @@ Section 22. This acceptance does not start implementation, private data, OOS,
 candidate, feature/label, training, integration, or remote publication.
 
 Global code freeze remains active.
+
+Documentation-correction re-audit on `2026-08-16` confirmed `24` sections,
+the exact `48`-case Section 21 matrix, all ten bound dependency hashes, and a
+clean cached diff-check. The current public workspace regression, including
+the still-uncommitted reserved implementation, passed `2346` tests in
+`14.44s` with an isolated pytest basetemp. This evidence grants no private-run,
+training, integration, or push authority.
