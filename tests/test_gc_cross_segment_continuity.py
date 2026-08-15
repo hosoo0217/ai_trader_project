@@ -33,9 +33,13 @@ from analysis.gc_dataset_builder import (
 from analysis.gc_structural_seed_evidence import GCCanonicalSeedEvidence
 from core.gc_chronological_backtest import GCChronologicalBar
 from smc.dealing_range import (
+    DealingRangeKind,
     DealingRangeEventType,
     DealingRangeResult,
+    DealingRangeSnapshot,
+    DealingRangeState,
     DealingRangeStructureEvent,
+    DealingRangeTransition,
 )
 from smc.equal_liquidity import EqualLiquidityResult
 from smc.fair_value_gap import FairValueGap, FairValueGapResult
@@ -45,7 +49,7 @@ from smc.kill_zones import (
     KillZoneResult,
     KillZoneSessionStatus,
 )
-from smc.liquidity_map import LiquidityMapResult
+from smc.liquidity_map import LiquidityMapResult, LiquidityMapSnapshot
 from smc.smc_v2_primitives import (
     SMCV2Direction,
     SMCV2EventProvenance,
@@ -466,9 +470,101 @@ def test_case_20_terminal_pool_not_represented_as_active() -> None:
     assert _boundary_id(dependency_references=(bad,)) != _boundary_id()
 
 
-def test_case_21_active_range_reference_is_supported() -> None:
+def test_case_21_active_range_reference_is_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     item = replace(_dependency(), detector_name="DEALING_RANGE", object_kind="RANGE")
     assert len(_boundary_id(dependency_references=(item,))) == 64
+    fixture = _fixture()
+    control = _extension_range_control(fixture)
+    result = _run(
+        monkeypatch,
+        fixture,
+        canonical_candidate_evidence=control,
+    )
+    source = fixture["source"]
+    assert isinstance(source, GCCanonicalContractSegment)
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    range_reference = next(
+        reference
+        for reference in result.boundaries[0].dependency_references
+        if reference.detector_name == "DEALING_RANGE"
+    )
+    assert range_reference.first_known_index == source.bars[2].index
+    assert range_reference.first_known_timestamp == source.bars[2].timestamp
+    assert range_reference.effective_index == source.bars[2].index
+    assert range_reference.effective_timestamp == source.bars[2].timestamp
+    assert range_reference.history_ids == (_h("range-construction-transition"),)
+
+
+def _extension_range_control(
+    fixture: dict[str, object],
+) -> GCCandidateEvidenceResult:
+    source = fixture["source"]
+    control = fixture["canonical_candidate_evidence"]
+    assert isinstance(source, GCCanonicalContractSegment)
+    assert isinstance(control, GCCandidateEvidenceResult)
+    construction = DealingRangeTransition(
+        _h("range-construction-transition"),
+        _h("range-lineage"),
+        None,
+        DealingRangeState.ACTIVE,
+        source.bars[1].index,
+        source.bars[1].timestamp,
+        "CONSTRUCTION_ACTIVE",
+        _h("range-construction-event"),
+        None,
+    )
+    first_known = SMCV2EventProvenance(
+        (source.bars[0].index, source.bars[1].index),
+        (source.bars[0].timestamp, source.bars[1].timestamp),
+        source.bars[2].index,
+        source.bars[2].timestamp,
+    )
+    snapshot = DealingRangeSnapshot(
+        DealingRangeKind.EXTERNAL,
+        SMCV2Direction.BULLISH,
+        _h("extended-range-snapshot"),
+        (_h("range-low-swing"), _h("range-high-swing")),
+        (source.bars[0].index, source.bars[1].index),
+        source.bars[0].low_tick,
+        source.bars[1].high_tick,
+        Decimal(source.bars[0].low_tick + source.bars[1].high_tick) / Decimal(2),
+        first_known,
+        _h("range-lineage"),
+        _h("range-low-swing"),
+        _h("range-construction-event"),
+        DealingRangeState.ACTIVE,
+        (construction,),
+        (construction.transition_id,),
+    )
+    liquidity_snapshot = LiquidityMapSnapshot(
+        _h("liquidity-map"),
+        _h("liquidity-map-snapshot"),
+        snapshot.lineage_id or "",
+        snapshot.snapshot_id,
+        source.bars[2].index,
+        source.bars[2].timestamp,
+        (),
+        (),
+        (),
+        (),
+    )
+    source_result = replace(
+        control.segment_results[0],
+        dealing_range_result=DealingRangeResult(
+            SMCV2PrimitiveStatus.VALID,
+            ranges=(snapshot,),
+        ),
+        liquidity_map_result=LiquidityMapResult(
+            SMCV2PrimitiveStatus.VALID,
+            snapshots=(liquidity_snapshot,),
+        ),
+    )
+    return replace(
+        control,
+        segment_results=(source_result, control.segment_results[1]),
+    )
 
 
 def test_case_22_terminal_range_state_is_identity_sensitive() -> None:

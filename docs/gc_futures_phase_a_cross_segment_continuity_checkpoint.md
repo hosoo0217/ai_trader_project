@@ -12,7 +12,9 @@
 - Implementation version: `GC-CROSS-SEGMENT-CONTINUITY-V1`.
 - Task classification: offline, reference-only continuity feasibility diagnostics.
 - Independent semantic audit status: `PASS`.
-- Private-data execution: `NOT_PERFORMED`.
+- Private-data execution: one separately authorized feasibility attempt was
+  performed and stopped atomically before publication; the corrected private
+  rerun is `NOT_PERFORMED` and remains separately gated.
 - OOS access, candidate/feature/label construction, model work, and training:
   `NOT_PERFORMED` and `NOT_AUTHORIZED`.
 - Strategy, risk, execution, trace, runtime, and integration authority:
@@ -92,6 +94,23 @@ defaults, dataclass fields, annotations, defaults, frozen state, enums, version,
 and exports are asserted directly. The strengthened suite remained GREEN, so no
 production correction was required.
 
+A later separately authorized private feasibility attempt stopped with
+`INVALID_BOUNDARY_EVIDENCE` before creating any final root, temporary runner,
+or promoted artifact. The exact failure was an ACTIVE same-lineage Dealing
+Range extension whose immutable construction transition preceded the
+snapshot's later first-known provenance. The continuity adapter had selected
+the last transition moment unconditionally, which backdated the carried
+reference before the canonical snapshot was knowable.
+
+Case 21 was strengthened test-first without increasing the exact 48 logical
+cases. The RED run reproduced the defect through the public analyzer as
+`1 failed, 47 passed`. The minimal source correction now defines the carried
+Dealing Range reference effective moment as the later of first-known
+provenance and the final transition moment. It preserves the exact ordered
+transition IDs and full object digest; it does not rewrite, infer, or enrich
+the foreign snapshot. The corrected focused and full suites are GREEN. No
+corrected private rerun, training, OOS access, or integration was performed.
+
 ## 5. Input and control-arm validation
 
 The analyzer accepts only the locked immutable dataset config/result, split
@@ -132,6 +151,12 @@ closure is rejected.
 The analyzer creates no lifecycle transition at a segment boundary and never
 recomputes, mutates, enriches, merges, replaces, or reactivates foreign
 detector evidence.
+
+For an ACTIVE Dealing Range extension, the immutable history can contain an
+older construction transition while the extension snapshot becomes knowable
+strictly later. Its carried effective moment is therefore the later of the
+snapshot first-known provenance and final transition moment. This forbids
+backdating while preserving the complete upstream lifecycle history.
 
 ## 8. Receiving-group causal binding
 
@@ -205,7 +230,8 @@ Cases 1 through 48 and exactly 48 collected executions. Coverage includes input
 binding, missing/malformed precedence, canonical rebuild equality, adjacent
 segment and calendar eligibility, roll/closed/early-close ineligibility,
 timezone normalization, dependency closure, terminal-state rejection, immutable
-foreign objects, receiving event/FVG reconciliation, suffix mismatch, atomic
+foreign objects, ACTIVE Dealing Range extension first-known causality,
+receiving event/FVG reconciliation, suffix mismatch, atomic
 cutoff and prior-evidence preservation, full status precedence, exhaustive
 common/required/forbidden schemas for all three identity kinds, field
 sensitivity, nested exception containment, exact public parameter names,
@@ -218,8 +244,8 @@ forbidden authority/import surface.
 Final focused evidence:
 
 - command:
-  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest_tmp_gc_continuity_focused tests/test_gc_cross_segment_continuity.py`;
-- result: `48 passed in 0.64s`;
+  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest_tmp_gc_continuity_green tests/test_gc_cross_segment_continuity.py`;
+- result: `48 passed in 0.59s`;
 - exact logical cases: `48`;
 - collected focused executions: `48`.
 
@@ -227,7 +253,7 @@ Final full public regression evidence:
 
 - command:
   `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest_tmp_gc_continuity_full_tests tests`;
-- result: `2346 passed in 15.05s`;
+- result: `2346 passed in 12.25s`;
 - preceding accepted baseline: `2298`;
 - net new executions: `48`.
 
@@ -238,21 +264,21 @@ public regression suite without reading private evidence. A diagnostic
 repository-root invocation confirmed the same private-directory ACL boundary
 and stopped during collection; it produced no assertion or product-code
 failure. Fresh isolated workspace `--basetemp` directories completed the
-accepted focused and full commands successfully and were removed after both
-runs.
+accepted focused and full commands successfully; their runtime-only contents
+are outside product scope and excluded from Git.
 
 ## 14. Artifact evidence
 
 - `analysis/gc_cross_segment_continuity.py`
   - SHA-256:
-    `1DC5E45FC79F11FBDC296A7028E299BA97F1CA2E93F20514DFCA5DC3B6AE28D7`;
-  - bytes: `57863`;
-  - physical lines: `1112`.
+    `F1AC1A1DF5A6C2E5012EAF2392E0CCF8E8F99A397C0B2999F283A411E5A1D411`;
+  - bytes: `58214`;
+  - physical lines: `1124`.
 - `tests/test_gc_cross_segment_continuity.py`
   - SHA-256:
-    `99FD371EED6941B1B431BFE5D3BBFEC95AB05D0E59D739E5BE18C536ABA99DD4`;
-  - bytes: `44669`;
-  - physical lines: `956`.
+    `BB3BB3B8C948A7F5903015FC3848F6747ADC4A102BC8822EBBAE39288A058A57`;
+  - bytes: `47925`;
+  - physical lines: `1052`.
 
 The checkpoint hash is intentionally computed only after its final bytes are
 fixed and is verified during cached/committed artifact audit.
@@ -278,11 +304,12 @@ look-ahead, partial-group promotion, or failed regression blocks promotion.
 
 ## 16. Final implementation decision
 
-The bounded synthetic implementation is `PASS` and is ready for exact three-path
-local staging and commit. Focused and full regressions are GREEN; the governing
-point-in-time identity contract, source, tests, and checkpoint are consistent;
-the final audit required only an in-scope test-coverage correction and no source
-correction.
+The bounded implementation is `PASS` and is ready for exact three-path local
+staging and commit. Focused and full regressions are GREEN; the governing
+point-in-time identity contract, source, tests, and checkpoint are consistent.
+A separately authorized private feasibility attempt exposed one in-scope
+continuity-adapter defect; Case 21 and the source were corrected test-first,
+while the corrected private rerun remains unperformed and separately gated.
 
 After local commit, STOP remains mandatory before push, private execution, OOS
 access, candidate/feature/label work, model or training work, package export,

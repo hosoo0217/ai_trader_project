@@ -722,10 +722,22 @@ def _dependency_references(
         provenance = snapshot.first_known_provenance
         source_digest = _source_digest(segment, provenance.source_indices, provenance.source_timestamps)
         effective_index = provenance.confirmation_index
-        effective_timestamp = provenance.confirmation_timestamp
+        effective_timestamp = _timestamp(
+            provenance.confirmation_timestamp,
+            "first-known timestamp",
+        )
         if snapshot.transitions:
-            effective_index = snapshot.transitions[-1].index
-            effective_timestamp = snapshot.transitions[-1].timestamp
+            transition = snapshot.transitions[-1]
+            transition_timestamp = _timestamp(
+                transition.timestamp,
+                "transition timestamp",
+            )
+            if (transition.index, transition_timestamp) > (
+                effective_index,
+                effective_timestamp,
+            ):
+                effective_index = transition.index
+                effective_timestamp = transition_timestamp
         if snapshot.transition_ids != tuple(item.transition_id for item in snapshot.transitions):
             raise ValueError("dealing-range transition history mismatch")
         references.append(
@@ -733,7 +745,7 @@ def _dependency_references(
                 "DEALING_RANGE", "RANGE", snapshot.snapshot_id,
                 segment_result.segment_ordinal, segment.segment_id,
                 provenance.confirmation_index, _timestamp(provenance.confirmation_timestamp, "first-known timestamp"),
-                effective_index, _timestamp(effective_timestamp, "effective timestamp"),
+                effective_index, effective_timestamp,
                 snapshot.state.value, snapshot.transition_ids, source_digest, _sha(snapshot),
             )
         )
