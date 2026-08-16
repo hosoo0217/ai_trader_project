@@ -3,13 +3,13 @@
 ## 1. Checkpoint identity
 
 - Checkpoint ID:
-  `GC-PHASE-B-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-CHECKPOINT-2026-08-16`.
+  `GC-PHASE-B-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-CHECKPOINT-2026-08-17`.
 - Governing proposal:
-  `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_feasibility_change_proposal.md`.
+  `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_private_run_correction_proposal.md`.
 - Governing proposal commit:
-  `83c7309bb532ca29bbfd2c3d27fb484a1dd53c45`.
+  `1031c330713193af4f7c7fbcea39c969dc0dbd17`.
 - Governing proposal SHA-256:
-  `EEC03B71A19FFF8EDC786FB1D20210F98F40FCB9314BCEE705FA0C6B93FDE2AD`.
+  `FEDBE60FFC5E984692EEDA41BAB5C131377E7578EC7E9EB56063D35B0A80883D`.
 - Implementation version:
   `GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1`.
 - Task classification: development-only, deterministic occurrence and
@@ -62,6 +62,18 @@ count.
 Independent implementation and test audit locked the following corrections
 inside the accepted contract:
 
+- canonical dataset bars remain complete input evidence, while the expected
+  observation stream is exactly the bar-open projection
+  `[07:00, 10:00) America/New_York`;
+- valid pre-NY-AM and post-NY-AM dataset bars require no observation, context,
+  or snapshot and cannot be relabeled as `NEW_YORK_AM`;
+- expected observations, contexts, and snapshots reconcile one-to-one in
+  canonical dataset order, with `07:00` included and `10:00` excluded;
+- missing, extra, duplicate, reordered, or non-NY-AM projection members fail
+  closed without rejecting the canonical non-NY-AM dataset bar itself;
+- a complete synthetic dependency preserves native `VALID` and `NONE`
+  statuses, while an incomplete retained projection is `UNKNOWN`, promotes no
+  manifest, and preserves complete prior range/candidate/outcome bytes;
 - all five public identity kinds use their uppercase kind prefix plus exact
   lowercase SHA-256, and foreign own-type IDs are validated by kind as well as
   hash shape;
@@ -96,10 +108,16 @@ five-minute observations. It performs no file discovery or detector rerun.
 Dataset identity, manifest, development partition, `GC`/`5M` scope,
 `Asia/Tokyo` source timezone, `America/New_York` exchange timezone, runtime
 tzdata version, exact `Decimal("0.1")` tick size, zero OOS contact, segment/bar
-chronology, calendar versions, calendar digests, observation-to-bar mapping,
+chronology, calendar versions, calendar digests, NY-AM observation-to-bar
+projection,
 and Kill-zone foreign identities fail closed. Evidence is visible only at its
 normalized first-known effective moment. No outcome bar can participate in
 formation, and no later bar can relabel an earlier nonqualifying sweep.
+
+Every canonical bar is validated before projection. Exactly one observation,
+one `NEW_YORK_AM` context, and one mirrored snapshot are expected only when the
+bar-open moment is within `[07:00, 10:00) America/New_York`. Non-NY-AM bars
+remain immutable dataset evidence and cannot enter formation or outcome logic.
 
 ## 6. Calendar and session semantics
 
@@ -194,16 +212,19 @@ dataset mutation, or partial history is prefix-ineligible.
 
 `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` contains exact
 sequential logical Cases 1 through 48. Parameterization yields 59 focused
-collected executions. The matrix covers input binding, missing/malformed
+collected executions. The corrected matrix covers full-session dataset input,
+exact NY-AM projection membership, one-to-one observation/context/snapshot
+reconciliation, retained-prefix dependency rejection, native complete
+dependency statuses, and the immutable private-run boundary. It also covers
+input binding, missing/malformed
 precedence, OOS rejection, immutable observation/calendar/context contracts,
 exact six-bar range, candidate boundaries and selection, mirrored geometry,
 formation exclusion, twelve-bar outcomes, ambiguity, incomplete horizons,
 final status precedence, atomic cutoff, immutable prior evidence, exhaustive
 identity schemas, ordered history, malformed nested values, exact
 keyword-only API/defaults, all frozen dataclass contracts, enums, exports,
-repeatability, UTC equivalence, prefix invariance, promotion thresholds,
-three-path scope, rollback, and forbidden private-run/training/integration
-authority.
+repeatability, UTC equivalence, prefix invariance, three-path scope, rollback,
+and forbidden private-run/training/integration authority.
 
 Logical case count: `48`; focused collected executions: `59`.
 
@@ -213,10 +234,10 @@ Commands were executed with pytest cache disabled:
 
 ```text
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py
-59 passed in 7.28s
+59 passed in 6.01s
 
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
-2453 passed in 29.11s
+2453 passed in 21.99s
 ```
 
 Repository-root discovery is not the accepted regression surface because
@@ -228,8 +249,8 @@ file was accessed or mutated.
 
 | Artifact | Bytes | Lines | SHA-256 |
 |---|---:|---:|---|
-| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `75,850` | `1,459` | `3F9E64C277A1F00453585EFD66371B81D10DDA14E73FDAFE111AD1A213CAC477` |
-| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `54,927` | `1,007` | `7F49D1015CC0F8D2DD469E428DB2A9D78FF3D95933FE4540B3FE8502ED43BDA9` |
+| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `76,319` | `1,469` | `270F9350C1CAAEB69DE87DD1079C876DAF0ADDF00C459F0CDDCE968BF208E39D` |
+| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `61,088` | `1,141` | `CAF35F41DBA99D4977A5E6827104A5BB961DA754408FA3CEC8156887AA4713FD` |
 
 The checkpoint is intentionally excluded from its own self-referential hash
 table. Its final hash, byte count, and line count must be captured by staging
@@ -241,6 +262,11 @@ This checkpoint promotes only the bounded implementation to a local commit
 after exact-scope staging, cached-content audit, hash verification, diff-check,
 and commit preflight. It does not promote a hypothesis, dataset, candidate
 table, experiment, feature/label build, model, strategy, or trade.
+
+The Phase B private run remains blocked. The immutable Candidate Evidence
+artifact still covers only `113` of `133` canonical segments; this correction
+does not construct, repair, overwrite, enrich, or publish the separately
+required complete Kill-zone dependency artifact.
 
 Before commit, rollback is deletion of exactly the three reserved paths. After
 commit, rollback is a bounded revert; history rewriting is forbidden. Preserve

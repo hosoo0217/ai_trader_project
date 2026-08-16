@@ -128,12 +128,13 @@ def _fixture(
     count: int = 22,
     collision: bool = False,
     target_event: bool = True,
+    full_session_edges: bool = False,
 ) -> dict[str, object]:
     opening = _utc(TRADE_DATE - timedelta(days=1), 18)
     session_close = _utc(TRADE_DATE, 17)
     first_open = _utc(TRADE_DATE, 7)
     prices = _prices(count, direction=direction, collision=collision)
-    bars = tuple(
+    analysis_bars = tuple(
         GCChronologicalBar(
             index,
             first_open + timedelta(minutes=5 * (index + 1)),
@@ -141,14 +142,31 @@ def _fixture(
         )
         for index, price in enumerate(prices)
     )
-    if not target_event and len(bars) >= 8:
+    if not target_event and len(analysis_bars) >= 8:
         neutral = (106, 107, 104, 106) if direction == "bear" else (100, 102, 99, 100)
-        bars = tuple(
+        analysis_bars = tuple(
             replace(
                 bar,
                 open_tick=neutral[0], high_tick=neutral[1], low_tick=neutral[2], close_tick=neutral[3],
             ) if bar.index >= 7 else bar
-            for bar in bars
+            for bar in analysis_bars
+        )
+    bars = analysis_bars
+    if full_session_edges:
+        analysis_bars = tuple(replace(bar, index=bar.index + 1) for bar in analysis_bars)
+        bars = (
+            GCChronologicalBar(0, _utc(TRADE_DATE, 4, 5), 100, 101, 99, 100, 9, True),
+            *analysis_bars,
+            GCChronologicalBar(
+                len(analysis_bars) + 1,
+                _utc(TRADE_DATE, 10, 5),
+                106,
+                107,
+                105,
+                106,
+                11,
+                True,
+            ),
         )
     segment_id = _h("segment")
     segment = GCCanonicalContractSegment(
@@ -179,7 +197,7 @@ def _fixture(
     observations: list[sweep_reclaim.GCNYAMSweepReclaimObservation] = []
     contexts: list[KillZoneContext] = []
     snapshots: list[KillZoneSnapshot] = []
-    for bar in bars:
+    for bar in analysis_bars:
         bar_open = bar.timestamp - timedelta(minutes=5)
         context_id = make_kill_zone_id(
             identity_kind="CONTEXT",
@@ -583,31 +601,109 @@ def test_case_15_exact_midpoint_signed_zero_and_arbitrary_magnitude_are_context_
     assert all(re.fullmatch(r"OPENING_RANGE:[0-9a-f]{64}", item) for item in identities)
 
 
-def test_case_16_0730_is_eligible_but_source_bars_are_not_formations() -> None:
-    result = _valid()
-    assert result.candidates[0].formation_index == 6
+def test_case_16_full_session_pre_nyam_bars_are_valid_but_not_expected_observations() -> None:
+    fixture = _fixture(full_session_edges=True)
+    dataset_bars = fixture["dataset_result"].segments[0].bars  # type: ignore[union-attr]
+    observations = fixture["observations"]  # type: ignore[assignment]
+    result = _run(fixture)
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert len(dataset_bars) == len(observations) + 2
+    assert dataset_bars[0].timestamp - timedelta(minutes=5) == _utc(TRADE_DATE, 4)
+    assert dataset_bars[0].index not in {item.index for item in observations}
     assert result.candidates[0].formation_observation_id not in result.opening_ranges[0].source_observation_ids
 
 
-def test_case_17_0900_and_later_are_end_exclusive() -> None:
-    fixture = _fixture(direction="none", count=30)
-    fixture = _with_prices(fixture, 24, open_tick=106, high_tick=108, low_tick=104, close_tick=106)
+def test_case_17_exact_nyam_membership_is_0700_inclusive_1000_exclusive() -> None:
+    fixture = _fixture(count=36, full_session_edges=True)
+    observations = fixture["observations"]  # type: ignore[assignment]
+    dataset_bars = fixture["dataset_result"].segments[0].bars  # type: ignore[union-attr]
     result = _run(fixture)
-    assert not result.candidates and "NO_SWEEP_RECLAIM" in result.reasons
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert observations[0].bar_open_timestamp == _utc(TRADE_DATE, 7)
+    assert observations[-1].bar_open_timestamp == _utc(TRADE_DATE, 9, 55)
+    assert dataset_bars[-1].timestamp - timedelta(minutes=5) == _utc(TRADE_DATE, 10)
+    assert dataset_bars[-1].index not in {item.index for item in observations}
 
 
-def test_case_18_bearish_upper_sweep_and_upper_half_reclaim() -> None:
-    candidate = _valid().candidates[0]
-    assert candidate.direction is SMCV2Direction.BEARISH
-    assert (candidate.swept_boundary_tick, candidate.sweep_extreme_tick, candidate.reclaim_close_tick) == (107, 108, 106)
-    assert candidate.midpoint_tick < candidate.reclaim_close_tick <= candidate.swept_boundary_tick
+def test_case_18_nyam_projection_missing_extra_and_reordered_evidence_fails_closed() -> None:
+    fixture = _fixture(full_session_edges=True)
+    observations = fixture["observations"]  # type: ignore[assignment]
+    contexts = fixture["kill_zone_contexts"]  # type: ignore[assignment]
+    snapshots = fixture["kill_zone_snapshots"]  # type: ignore[assignment]
+    assert _run(fixture, observations=observations[:3] + observations[4:]).status is SMCV2PrimitiveStatus.INVALID
+    assert _run(
+        fixture,
+        kill_zone_contexts=(contexts[1], contexts[0]) + contexts[2:],
+        kill_zone_result=KillZoneResult(
+            SMCV2PrimitiveStatus.VALID,
+            (contexts[1], contexts[0]) + contexts[2:],
+            snapshots,
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
+    assert _run(
+        fixture,
+        kill_zone_snapshots=(snapshots[1], snapshots[0]) + snapshots[2:],
+        kill_zone_result=KillZoneResult(
+            SMCV2PrimitiveStatus.VALID,
+            contexts,
+            (snapshots[1], snapshots[0]) + snapshots[2:],
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
 
 
-def test_case_19_bullish_lower_sweep_and_lower_half_reclaim() -> None:
-    candidate = _run(_fixture(direction="bull")).candidates[0]
-    assert candidate.direction is SMCV2Direction.BULLISH
-    assert (candidate.swept_boundary_tick, candidate.sweep_extreme_tick, candidate.reclaim_close_tick) == (99, 98, 100)
-    assert candidate.swept_boundary_tick <= candidate.reclaim_close_tick < candidate.midpoint_tick
+def test_case_19_non_nyam_projection_member_is_unrequested_without_relabeling_dataset_bar() -> None:
+    fixture = _fixture(full_session_edges=True)
+    common = _identity_common(fixture)
+    pre_bar = fixture["dataset_result"].segments[0].bars[0]  # type: ignore[union-attr]
+    pre_open = pre_bar.timestamp - timedelta(minutes=5)
+    context_id = make_kill_zone_id(
+        identity_kind="CONTEXT",
+        instrument="GC",
+        timeframe="5M",
+        calendar_version=CALENDAR_VERSION,
+        timezone_name="America/New_York",
+        timezone_data_version=TZDATA_VERSION,
+        observation_index=pre_bar.index,
+        observation_timestamp=pre_open,
+        trade_date=TRADE_DATE,
+        zone=KillZoneName.LONDON,
+        session_status=KillZoneSessionStatus.OPEN,
+        quality=KillZoneQuality.VERIFIED,
+    )
+    snapshot_id = make_kill_zone_id(
+        identity_kind="SNAPSHOT",
+        instrument="GC",
+        timeframe="5M",
+        calendar_version=CALENDAR_VERSION,
+        timezone_name="America/New_York",
+        timezone_data_version=TZDATA_VERSION,
+        effective_index=pre_bar.index,
+        effective_timestamp=pre_open,
+        context_ids=(context_id,),
+    )
+    extra_context = KillZoneContext(
+        context_id,
+        pre_bar.index,
+        pre_open,
+        TRADE_DATE,
+        KillZoneName.LONDON,
+        KillZoneSessionStatus.OPEN,
+        KillZoneQuality.VERIFIED,
+        CALENDAR_VERSION,
+        common["timezone_name"],
+        common["timezone_data_version"],
+    )
+    extra_snapshot = KillZoneSnapshot(snapshot_id, pre_bar.index, pre_open, (context_id,))
+    contexts = (extra_context,) + fixture["kill_zone_contexts"]  # type: ignore[operator]
+    snapshots = (extra_snapshot,) + fixture["kill_zone_snapshots"]  # type: ignore[operator]
+    result = _run(
+        fixture,
+        kill_zone_contexts=contexts,
+        kill_zone_snapshots=snapshots,
+        kill_zone_result=KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots),
+    )
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert not result.opening_ranges and not result.candidates and not result.outcomes
 
 
 @pytest.mark.parametrize("changes", (
@@ -965,7 +1061,68 @@ def test_case_44_strictly_later_complete_append_is_prefix_invariant() -> None:
     assert extended.outcomes[:len(prefix.outcomes)] == prefix.outcomes
 
 
-def test_case_45_same_effective_repair_reorder_calendar_version_and_dataset_mutation_are_ineligible() -> None:
+def test_case_45_retained_dependency_prefix_is_unknown_and_preserves_only_complete_prior_evidence() -> None:
+    fixture = _fixture(count=36, full_session_edges=True)
+    complete = _run(fixture)
+    observations = fixture["observations"]  # type: ignore[assignment]
+    contexts = fixture["kill_zone_contexts"]  # type: ignore[assignment]
+    snapshots = fixture["kill_zone_snapshots"]  # type: ignore[assignment]
+    retained_count = 30
+    prefix = _run(
+        fixture,
+        observations=observations[:retained_count],
+        kill_zone_contexts=contexts[:retained_count],
+        kill_zone_snapshots=snapshots[:retained_count],
+        kill_zone_result=KillZoneResult(
+            SMCV2PrimitiveStatus.VALID,
+            contexts[:retained_count],
+            snapshots[:retained_count],
+        ),
+    )
+    assert complete.status is SMCV2PrimitiveStatus.VALID
+    assert prefix.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert "MISSING_TOP_LEVEL_CONTEXT" in prefix.reasons
+    assert prefix.manifest is None
+    assert prefix.opening_ranges == complete.opening_ranges
+    assert prefix.candidates == complete.candidates
+    assert prefix.outcomes == complete.outcomes
+
+    root = Path(__file__).resolve().parents[1]
+    correction = (root / "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_private_run_correction_proposal.md").read_text(encoding="utf-8")
+    assert "133" in correction and "113" in correction
+    assert "missing suffix segments" in correction.lower()
+
+
+def test_case_46_complete_dependency_preserves_native_valid_and_none_statuses() -> None:
+    valid_fixture = _fixture(count=36, full_session_edges=True)
+    none_fixture = _fixture(direction="none", count=36, full_session_edges=True)
+    valid_result = _run(valid_fixture)
+    none_result = _run(none_fixture)
+    assert valid_result.status is SMCV2PrimitiveStatus.VALID
+    assert none_result.status is SMCV2PrimitiveStatus.NONE
+    assert len(valid_fixture["observations"]) == len(valid_fixture["kill_zone_contexts"]) == len(valid_fixture["kill_zone_snapshots"]) == 36  # type: ignore[arg-type]
+    assert len(none_fixture["observations"]) == len(none_fixture["kill_zone_contexts"]) == len(none_fixture["kill_zone_snapshots"]) == 36  # type: ignore[arg-type]
+    assert valid_result.candidates and valid_result.outcomes
+    assert not none_result.candidates and not none_result.outcomes
+
+
+def test_case_47_exact_three_path_scope_and_private_root_immutability_are_locked() -> None:
+    root = Path(__file__).resolve().parents[1]
+    reserved = {
+        "analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py",
+        "tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py",
+        "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_checkpoint.md",
+    }
+    correction = (root / "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_private_run_correction_proposal.md").read_text(encoding="utf-8")
+    for path in reserved:
+        assert path in correction
+    assert "Candidate Evidence artifact remains immutable" in " ".join(correction.split())
+    source = (root / "analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py").read_text(encoding="utf-8")
+    for forbidden in ("pathlib", "private_data", "open(", "read_text", "write_text"):
+        assert forbidden not in source
+
+
+def test_case_48_private_run_training_oos_integration_push_and_trading_remain_unused() -> None:
     fixture = _fixture()
     observations = fixture["observations"]  # type: ignore[assignment]
     assert _run(fixture, observations=(observations[1], observations[0]) + observations[2:]).status is SMCV2PrimitiveStatus.INVALID
@@ -975,33 +1132,10 @@ def test_case_45_same_effective_repair_reorder_calendar_version_and_dataset_muta
     assert _run(fixture, kill_zone_calendar=(changed_calendar,)).status is SMCV2PrimitiveStatus.INVALID
     changed_dataset = replace(fixture["dataset_result"], dataset_id=_h("other"))  # type: ignore[arg-type]
     assert _run(fixture, dataset_result=changed_dataset).status is SMCV2PrimitiveStatus.INVALID
-
-
-def test_case_46_locked_promotion_thresholds_are_discriminated() -> None:
-    def passes(days: int, long_samples: int, short_samples: int, long_wins: int, short_wins: int) -> bool:
-        return days >= 30 and long_samples >= 24 and short_samples >= 24 and long_wins >= 10 and short_wins >= 10 and long_wins + short_wins >= 16
-    assert passes(30, 24, 24, 10, 10)
-    assert not passes(29, 24, 24, 10, 10)
-    assert not passes(30, 23, 24, 10, 10)
-    assert not passes(30, 24, 24, 9, 10)
-    assert not passes(30, 24, 24, 8, 8)
-
-
-def test_case_47_fail_retires_family_and_only_prospective_expansion_is_allowed() -> None:
     root = Path(__file__).resolve().parents[1]
-    proposal = (root / "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_feasibility_change_proposal.md").read_text(encoding="utf-8")
-    for phrase in ("retires", "prospective data expansion", "candidate rescue", "STOP"):
-        assert phrase.lower() in proposal.lower()
-
-
-def test_case_48_exact_three_paths_forbidden_authority_and_no_private_run_surface() -> None:
-    root = Path(__file__).resolve().parents[1]
-    reserved = {
-        "analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py",
-        "tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py",
-        "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_checkpoint.md",
-    }
-    assert all((root / item).parent.exists() for item in reserved)
+    correction = (root / "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_private_run_correction_proposal.md").read_text(encoding="utf-8")
     source = (root / "analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py").read_text(encoding="utf-8")
     for forbidden in ("import main", "storage.decision_trace", "DECISION_CANDIDATE", "place_order", "execute_trade", "PRIVATE_RUN", "TRAINING"):
         assert forbidden not in source
+    for forbidden in ("private execution", "training", "OOS", "integration", "push", "trading"):
+        assert forbidden.lower() in correction.lower()

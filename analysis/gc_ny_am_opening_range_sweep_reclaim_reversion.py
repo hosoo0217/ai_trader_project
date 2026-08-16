@@ -798,6 +798,16 @@ def _session_covers_full_analysis_window(
     )
 
 
+def _is_expected_ny_am_bar(bar: Any, trade_day: date) -> bool:
+    """Return exact start-inclusive/end-exclusive NY-AM bar-open membership."""
+    bar_open = _timestamp(bar.timestamp, "bar timestamp") - timedelta(minutes=5)
+    local_open = bar_open.astimezone(ZoneInfo(_TIMEZONE_NAME))
+    return (
+        local_open.date() == trade_day
+        and time(7, 0) <= local_open.time().replace(tzinfo=None) < time(10, 0)
+    )
+
+
 def _validate_observation(item: Any, expected: tuple[int, Any, date], common: dict[str, Any]) -> GCNYAMSweepReclaimObservation:
     ordinal, segment, trade_date = expected
     if not isinstance(item, GCNYAMSweepReclaimObservation):
@@ -1215,7 +1225,7 @@ def analyze_gc_ny_am_opening_range_sweep_reclaim_reversion(
         for ordinal, segment in enumerate(segments):
             for bar in segment.bars:
                 trade_day = _bar_trade_date(bar.timestamp, split_entries)
-                if trade_day in requested:
+                if trade_day in requested and _is_expected_ny_am_bar(bar, trade_day):
                     expected.append((ordinal, segment, trade_day, bar))
         if len(supplied_observations) > len(expected):
             raise _EvidenceError("UNREQUESTED_EVIDENCE")
