@@ -12,9 +12,11 @@
 - Implementation version: `GC-CROSS-SEGMENT-CONTINUITY-V1`.
 - Task classification: offline, reference-only continuity feasibility diagnostics.
 - Independent semantic audit status: `PASS`.
-- Private-data execution: one separately authorized feasibility attempt was
-  performed and stopped atomically before publication; the corrected private
-  rerun is `NOT_PERFORMED` and remains separately gated.
+- Private-data execution: two separately authorized feasibility attempts were
+  performed and stopped atomically before publication. The first exposed the
+  corrected first-known causality defect; the second exposed the partial-
+  boundary classification defect corrected in this revision. A further
+  corrected private rerun is `NOT_PERFORMED` and remains separately gated.
 - OOS access, candidate/feature/label construction, model work, and training:
   `NOT_PERFORMED` and `NOT_AUTHORIZED`.
 - Strategy, risk, execution, trace, runtime, and integration authority:
@@ -111,6 +113,25 @@ transition IDs and full object digest; it does not rewrite, infer, or enrich
 the foreign snapshot. The corrected focused and full suites are GREEN. No
 corrected private rerun, training, OOS access, or integration was performed.
 
+The separately authorized corrected private attempt then stopped atomically
+with `INVALID_BOUNDARY_EVIDENCE`; its final output root remained absent and all
+eight accepted private inputs remained byte-immutable. Aggregate metadata
+profiling found `70` dataset segments with nonzero
+`preceding_missing_bar_count`, all inside the first `113` canonical-control
+segment results. The analyzer encountered the first such adjacent pair after
+preserving two strictly prior boundaries.
+
+The governing proposal Sections 8--9 explicitly make a partial or missing-bar
+boundary ineligible, not globally invalid. Case 12 was therefore strengthened
+test-first without changing the exact 48 logical cases. The RED run was
+`1 failed, 47 passed`: a canonical partial segment returned
+`INVALID_BOUNDARY_EVIDENCE`. The minimal source correction now returns an
+`INELIGIBLE` boundary with exact reason `PARTIAL_SEGMENT_BOUNDARY`, empty
+dependency references, and no receiving-group promotion. A genuinely malformed
+or open bar remains `INVALID`. This does not repair, filter, synthesize, or
+promote partial evidence; it records the proposal-locked valid ineligibility
+decision and continues causal assessment of later accepted boundaries.
+
 ## 5. Input and control-arm validation
 
 The analyzer accepts only the locked immutable dataset config/result, split
@@ -134,10 +155,11 @@ and next-open reconciliation, unchanged lineage/version context, and the next
 eligible business trade date.
 
 Contract roll, OOS or purge boundaries, closed or early-close sessions,
-non-adjacent segments, partial/open/missing/reordered bars, and provenance or
-version drift are deterministically `INELIGIBLE` or fail-closed according to
-the governing proposal. No carried state is attached to an ineligible
-boundary.
+non-adjacent segments, and canonically identified partial/missing-bar segments
+are deterministically `INELIGIBLE`. A partial boundary carries exact reason
+`PARTIAL_SEGMENT_BOUNDARY`, empty dependency references, and no receiving
+group. Malformed/open/reordered bars and provenance or version drift remain
+fail-closed `INVALID`. No carried state is attached to an ineligible boundary.
 
 ## 7. Reference-only dependency closure
 
@@ -229,6 +251,7 @@ projection reconstructed from foreign IDs.
 Cases 1 through 48 and exactly 48 collected executions. Coverage includes input
 binding, missing/malformed precedence, canonical rebuild equality, adjacent
 segment and calendar eligibility, roll/closed/early-close ineligibility,
+canonical partial-boundary ineligibility, malformed/open-bar invalidity,
 timezone normalization, dependency closure, terminal-state rejection, immutable
 foreign objects, ACTIVE Dealing Range extension first-known causality,
 receiving event/FVG reconciliation, suffix mismatch, atomic
@@ -244,16 +267,16 @@ forbidden authority/import surface.
 Final focused evidence:
 
 - command:
-  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest_tmp_gc_continuity_green tests/test_gc_cross_segment_continuity.py`;
-- result: `48 passed in 0.59s`;
+  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_cross_segment_continuity.py`;
+- result: `48 passed in 0.68s`;
 - exact logical cases: `48`;
 - collected focused executions: `48`.
 
 Final full public regression evidence:
 
 - command:
-  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest_tmp_gc_continuity_full_tests tests`;
-- result: `2346 passed in 12.25s`;
+  `.\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests`;
+- result: `2346 passed in 13.74s`;
 - preceding accepted baseline: `2298`;
 - net new executions: `48`.
 
@@ -263,22 +286,21 @@ outside this task. Explicit `tests` collection covers the complete tracked
 public regression suite without reading private evidence. A diagnostic
 repository-root invocation confirmed the same private-directory ACL boundary
 and stopped during collection; it produced no assertion or product-code
-failure. Fresh isolated workspace `--basetemp` directories completed the
-accepted focused and full commands successfully; their runtime-only contents
-are outside product scope and excluded from Git.
+failure. The accepted focused and explicit `tests` commands completed without
+opening or changing private evidence.
 
 ## 14. Artifact evidence
 
 - `analysis/gc_cross_segment_continuity.py`
   - SHA-256:
-    `F1AC1A1DF5A6C2E5012EAF2392E0CCF8E8F99A397C0B2999F283A411E5A1D411`;
-  - bytes: `58214`;
+    `1F59432FD738699015DDD92DC8AEB437D1B3DADE7EF96B1BB816245F05DB34D7`;
+  - bytes: `58251`;
   - physical lines: `1124`.
 - `tests/test_gc_cross_segment_continuity.py`
   - SHA-256:
-    `BB3BB3B8C948A7F5903015FC3848F6747ADC4A102BC8822EBBAE39288A058A57`;
-  - bytes: `47925`;
-  - physical lines: `1052`.
+    `9E666DE295F7F538E81CFE772A1B436E625F5D9644E5136C045C049E458205C4`;
+  - bytes: `49354`;
+  - physical lines: `1094`.
 
 The checkpoint hash is intentionally computed only after its final bytes are
 fixed and is verified during cached/committed artifact audit.
@@ -307,9 +329,10 @@ look-ahead, partial-group promotion, or failed regression blocks promotion.
 The bounded implementation is `PASS` and is ready for exact three-path local
 staging and commit. Focused and full regressions are GREEN; the governing
 point-in-time identity contract, source, tests, and checkpoint are consistent.
-A separately authorized private feasibility attempt exposed one in-scope
-continuity-adapter defect; Case 21 and the source were corrected test-first,
-while the corrected private rerun remains unperformed and separately gated.
+Two separately authorized private feasibility attempts exposed two in-scope
+continuity-adapter defects. Cases 21 and 12 and the source were corrected
+test-first. The next corrected private rerun remains unperformed and separately
+gated.
 
 After local commit, STOP remains mandatory before push, private execution, OOS
 access, candidate/feature/label work, model or training work, package export,

@@ -790,7 +790,7 @@ def _boundary_decision(
     if source.contract != receiving.contract:
         return GCCrossSegmentContinuityDecision.INELIGIBLE, ("CONTRACT_BOUNDARY",)
     if source.preceding_missing_bar_count or receiving.preceding_missing_bar_count:
-        raise ValueError("partial segment boundary")
+        return GCCrossSegmentContinuityDecision.INELIGIBLE, ("PARTIAL_SEGMENT_BOUNDARY",)
     split = _calendar_by_date(boundary_entries)
     control = _calendar_by_date(candidate_entries)
     source_entry = split.get(source.last_trade_date)

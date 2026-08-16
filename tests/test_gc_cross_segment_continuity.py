@@ -409,11 +409,53 @@ def test_case_11_complete_standard_sessions_pass(monkeypatch: pytest.MonkeyPatch
     assert _run(monkeypatch, _fixture()).boundaries[0].reason_tokens == ("ELIGIBLE_STANDARD_BOUNDARY",)
 
 
-def test_case_12_partial_or_open_bar_is_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_case_12_partial_boundary_is_ineligible_and_open_bar_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = _fixture()
     dataset = fixture["dataset"]
+    control = fixture["canonical_candidate_evidence"]
     assert isinstance(dataset, GCDatasetBuildResult)
+    assert dataset.manifest is not None
+    assert isinstance(control, GCCandidateEvidenceResult)
     source = dataset.segments[0]
+
+    partial = _segment(
+        0,
+        source.first_trade_date,
+        source.bars[0].timestamp - timedelta(minutes=5),
+        source.bars[-1].timestamp,
+        missing=1,
+        bars=source.bars,
+    )
+    partial_dataset = replace(
+        dataset,
+        segments=(partial, dataset.segments[1]),
+        manifest=replace(
+            dataset.manifest,
+            segment_ids=(partial.segment_id, dataset.segments[1].segment_id),
+        ),
+    )
+    partial_control = replace(
+        control,
+        segment_results=(
+            replace(control.segment_results[0], segment_id=partial.segment_id),
+            control.segment_results[1],
+        ),
+    )
+    partial_result = _run(
+        monkeypatch,
+        fixture,
+        dataset=partial_dataset,
+        canonical_candidate_evidence=partial_control,
+    )
+    assert partial_result.status is SMCV2PrimitiveStatus.NONE
+    assert len(partial_result.boundaries) == 1
+    assert partial_result.boundaries[0].decision is continuity.GCCrossSegmentContinuityDecision.INELIGIBLE
+    assert partial_result.boundaries[0].reason_tokens == ("PARTIAL_SEGMENT_BOUNDARY",)
+    assert not partial_result.boundaries[0].dependency_references
+    assert not partial_result.receiving_groups
+
     malformed = replace(source, bars=(replace(source.bars[0], is_closed=False),) + source.bars[1:])
     assert _run(monkeypatch, fixture, dataset=replace(dataset, segments=(malformed, dataset.segments[1]))).status is SMCV2PrimitiveStatus.INVALID
 
