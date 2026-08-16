@@ -4,7 +4,7 @@
 
 - Proposal ID: `GC-PHASE-A-CROSS-SEGMENT-CONTINUITY-PRIVATE-RUN-PROPOSAL-V1`.
 - Decision date: `2026-08-16`.
-- Binding source commit: `fea519eabb0891e5365ef0c3a3095df7073c817a`.
+- Binding source commit: `ea3711da898f3ec582e6fab758bb31f3e68da52e`.
 - Binding parent proposal commit: `ad70be419a5dfc361be06d512e6d8fe8749b2a56`.
 - Classification: documentation-only private-execution readiness record.
 - Current decision: `READY_FOR_SEPARATE_EXPLICIT_PRIVATE_RUN_AUTHORIZATION`.
@@ -32,15 +32,17 @@ emitted boundary or receiving-group objects remain non-promotable diagnostic evi
 At this record's baseline:
 
 - `HEAD`, local `origin/main`, and live remote `main` equal
-  `fea519eabb0891e5365ef0c3a3095df7073c817a`;
-- the commit subject is `feat(analysis): add GC cross-segment continuity diagnostics`;
-- its exact parent is `ad70be419a5dfc361be06d512e6d8fe8749b2a56`;
+  `ea3711da898f3ec582e6fab758bb31f3e68da52e`;
+- the commit subject is `fix(analysis): preserve continuity first-known causality`;
+- its exact parent is `17b84bfe489e5cfb99e33d34ec3145e90a8402ef`;
 - the tracked index and worktree are clean;
 - exactly three pre-existing untracked proposal documents remain outside this task and untouched;
-- the focused public result is `48 passed in 0.64s`;
-- the full public result is `2346 passed in 15.05s`;
-- private continuity execution, feature/label work, training, OOS access, and integration have not
-  begun.
+- the corrected focused public result is `48 passed in 0.59s`;
+- the corrected full public result is `2346 passed in 12.25s`;
+- one separately authorized private continuity attempt stopped atomically with
+  `INVALID_BOUNDARY_EVIDENCE` before publication;
+- the corrected private rerun has not begun, and feature/label work, training, OOS access, and
+  integration remain unperformed.
 
 The future output root in Section 15 is absent and Git-ignored. Baseline or dependency drift before
 execution is a STOP condition, not an invitation to repair evidence in place.
@@ -193,15 +195,15 @@ The future run stops unless every bound artifact matches:
 | `analysis/gc_dataset_builder.py` | `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843` |
 | `analysis/gc_structural_seed_evidence.py` | `B60D7BE3203EB54D6DA7EF0DAC324FCECB0547CEDF08364F8A3881ADC48794A2` |
 | `analysis/gc_candidate_evidence_builder.py` | `0599B1C32DA89FB17CDE1F5441273B34EDDCF18AB6077986319CBA16B8B9022F` |
-| `analysis/gc_cross_segment_continuity.py` | `1DC5E45FC79F11FBDC296A7028E299BA97F1CA2E93F20514DFCA5DC3B6AE28D7` |
+| `analysis/gc_cross_segment_continuity.py` | `F1AC1A1DF5A6C2E5012EAF2392E0CCF8E8F99A397C0B2999F283A411E5A1D411` |
 | `smc/equal_liquidity.py` | `505FAB8F00FC4DDDE73042E5D9CA7764B023565CB6854398C054F9354012BF7B` |
 | `smc/dealing_range.py` | `F2D6754A7456D39C6BCC5EE312024F8C538CFDBD43474BC76957D44B62EBCE0E` |
 | `smc/liquidity_map.py` | `592F79275A2945328969D727946B88361676F0568C0A5A2D0010CE0F9C3F2321` |
 | `smc/fair_value_gap.py` | `AC8E9B8123AF6CA233C27CE2AC14A41F41EC87CE43E9807785C12D1619AFDBC1` |
 | `smc/inducement.py` | `57DA49BE7C99DF9385610749446566323865676817FF8C44D8F8D3868C8C633F` |
 | governing feasibility proposal | `90130C122C1D07C861B24E350BA8D294E79287E0FE02C4D1ADC01EC49CD15F82` |
-| implementation tests | `99FD371EED6941B1B431BFE5D3BBFEC95AB05D0E59D739E5BE18C536ABA99DD4` |
-| implementation checkpoint | `4C7C22A6C0B7E5F4D264DA6A25D35ED68F295C910A8E2A9EE5A2C773872B55EB` |
+| implementation tests | `BB3BB3B8C948A7F5903015FC3848F6747ADC4A102BC8822EBBAE39288A058A57` |
+| implementation checkpoint | `B31A22AE4E9FE1C9A0E0F9022E7639D1571E73D456A91B9F24E8639A32AA8095` |
 | accepted negative-outcome decision | `75DB65DADB89368EE600ED2E59C967136313E5973CF91505CA58F2F8399C0D0B` |
 | selected next-hypothesis decision | `77554406D75B81E279409D1D46F3AC44C89FAD6FC08D010D98DA543016B4181E` |
 
@@ -451,8 +453,19 @@ structural, scope, hash, and regression audit, the next single task is acceptanc
 one file. Private execution remains a later, separately explicit authorization. No other task may
 start from this record.
 
-Final independent documentation audit evidence: exact sections `1` through `24`, exact sequential
+The original documentation audit reconciled exact sections `1` through `24`, exact sequential
 logical cases `1` through `48`, all Section 6 private input names/lengths/hashes, all Section 11
-dependency hashes, public signatures/exports, absent Git-ignored output root, and exact scope all
-reconciled. The isolated focused command passed `48` tests in `0.72s`; the isolated full command
-passed `2346` tests in `14.46s`. No private analyzer execution or prohibited mutation occurred.
+dependency hashes, public signatures/exports, absent Git-ignored output root, and exact scope. A
+later authorized private attempt exposed one continuity-adapter causality defect and stopped
+without publication. The source, Case 21, and implementation checkpoint were corrected test-first
+in `ea3711da898f3ec582e6fab758bb31f3e68da52e`; this record now binds those corrected artifacts.
+The corrected private rerun remains unperformed until this revision passes its own independent
+audit and promotion gates. No feature/label work, training, OOS access, integration, or prohibited
+mutation occurred.
+
+Corrected-revision independent audit evidence: exact sections `1` through `24`, exact sequential
+logical cases `1` through `48`, all eight immutable private input names/lengths/hashes, corrected
+Section 11 dependency hashes, public signatures/exports, absent Git-ignored output root, and exact
+one-file scope all reconcile. The isolated focused command passed `48` tests in `0.87s`; the
+isolated full command passed `2346` tests in `15.25s`. The corrected private rerun remains
+unperformed and separately gated.
