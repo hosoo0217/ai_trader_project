@@ -2,26 +2,32 @@
 
 ## 1. Proposal record
 
-- Proposal ID: `GC-PHASE-B-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REFRESHED-PRIVATE-RUN-V2`.
+- Proposal ID: `GC-PHASE-B-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REFRESHED-PRIVATE-RUN-V3`.
 - Decision date: `2026-08-17`.
-- Binding repository baseline: `af6443da81ee4bbb9183c99b3b0ec9baab90a541`.
-- Corrected implementation commit: `5c8bf58e2a7d63d0587e9a39d9a797a17abba9a4`.
+- Binding repository baseline: `4f33bf4414949d7b486af550a6e5145fe1172df5`.
+- Corrected implementation commit: `4f33bf4414949d7b486af550a6e5145fe1172df5`.
 - Governing correction proposal: `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_private_run_correction_proposal.md`, SHA-256 `FEDBE60FFC5E984692EEDA41BAB5C131377E7578EC7E9EB56063D35B0A80883D`.
 - Complete Kill-zone dependency proposal: `docs/gc_futures_phase_b_complete_kill_zone_dependency_build_change_proposal.md`, SHA-256 `4AA736C38A6170CF4F0DEF4752A02C763945B6711C212BEE4F938A973EBBD360`.
+- Complete Kill-zone alignment correction proposal: `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_complete_kill_zone_alignment_correction_proposal.md`, SHA-256 `BEDB0596321A8A00D3B093E1BBF87A9A3437E4B49AF8A5978375E49246FAB772`.
 - Classification: documentation-only refreshed private-run preflight contract.
 - Current decision: `READY_FOR_EXACT_REFRESHED_PRIVATE_RUN_ACCEPTANCE_WORKFLOW`.
 
-This record does not execute the private run. It replaces the non-executable V1
-run contract for future execution purposes without rewriting or deleting the V1
-record. It grants no training, OOS, feature, label, model, PnL, integration,
-runtime, execution, trading, or remote-publication authority.
+This record does not execute the private run. It supersedes the non-executable
+V1 and V2 run contracts for future execution purposes without rewriting or
+deleting either historical record. It grants no training, OOS, feature, label,
+model, PnL, integration, runtime, execution, trading, or remote-publication
+authority.
 
 ## 2. Accepted correction and dependency outcome
 
-The observation-grain defect is corrected in committed code: the analyzer now
-expects exactly the canonical five-minute bars whose normalized opens fall in
-`[07:00:00, 10:00:00) America/New_York`, while the full immutable dataset remains
-the source of dataset, segment, trade-date, and chronological evidence.
+The observation-grain and terminal-boundary defects are corrected in committed
+code. The analyzer now intersects canonical Phase B five-minute bar-open
+membership with public Kill-zone fully-closed bar-close membership: normalized
+opens are exactly `[07:00:00, 09:55:00) America/New_York`, corresponding to
+normalized closes in `[07:05:00, 10:00:00)`. The canonical `09:55` open / `10:00`
+close bar remains immutable dataset evidence but is not a Phase B observation.
+The full immutable dataset remains the source of dataset, segment, trade-date,
+and chronological evidence.
 
 The previously incomplete Candidate Evidence Kill-zone prefix remains immutable
 `UNKNOWN` lineage evidence and is not repaired or relabeled. A separate complete
@@ -31,15 +37,22 @@ counts are `101 VALID` and `32 NONE`; it contains `9,839` contexts, `9,839`
 snapshots, and `2,276` `NEW_YORK_AM` contexts. This removes the dependency
 completeness blocker only. It does not predetermine the feasibility result.
 
+The final committed implementation evidence is `59 passed in 6.50s` focused and
+`2453 passed in 23.10s` full regression, with the unchanged exact `48` logical
+cases. This proposal's cache-disabled acceptance audit independently reproduced
+`59 passed in 6.50s` focused and `2453 passed in 23.01s` full regression. No
+private V2 feasibility run has been executed.
+
 ## 3. Verified repository and worktree baseline
 
 At authoring time:
 
-- `HEAD` and local `origin/main` both equal
-  `af6443da81ee4bbb9183c99b3b0ec9baab90a541`, with divergence `0/0`;
+- `HEAD`, local `origin/main`, and the post-push live remote `main` all equal
+  `4f33bf4414949d7b486af550a6e5145fe1172df5`, with local divergence `0/0`;
 - the tracked index and tracked worktree are clean;
-- the corrected source, test, checkpoint, and complete dependency hashes match
-  Sections 8 and 9;
+- the corrected current source, test, and checkpoint hashes match Section 9,
+  while the complete dependency file hashes and its immutable construction-time
+  provenance match Section 7;
 - the V1 and V2 final feasibility roots are absent;
 - no sweep-reclaim private feasibility result, feature/label artifact, training,
   OOS access, model fitting, integration, PnL, or trading action exists; and
@@ -123,6 +136,19 @@ segments, `17,404` bars, `64` requested dates, zero OOS, and two independent
 executions. The retained temporary run is audit evidence only and is not an
 alternative dependency root.
 
+The dependency's immutable input binding records these construction-time Phase
+B provenance hashes: source
+`270F9350C1CAAEB69DE87DD1079C876DAF0ADDF00C459F0CDDCE968BF208E39D`,
+test `CAF35F41DBA99D4977A5E6827104A5BB961DA754408FA3CEC8156887AA4713FD`,
+and checkpoint
+`A21DA53852CBCC29ED12E5AA36D1D6E4A6C976438CBDC6FEB6C8ECB8639320C4`.
+They remain exact historical construction provenance and must validate against
+the immutable dependency bytes; they are not required to equal the corrected
+current tracked hashes in Section 9. The authorized difference is bound only by
+the alignment correction proposal and commit `4f33bf4`. Rewriting the dependency
+to replace those historical hashes, or treating any unlisted difference as
+authorized drift, is forbidden.
+
 ## 8. Immutable dataset, calendar, and partition binding
 
 Both roots must reconcile to the same exact binding:
@@ -153,9 +179,9 @@ The refreshed run is admissible only when these tracked bytes match exactly:
 
 | Path | SHA-256 |
 |---|---|
-| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `270F9350C1CAAEB69DE87DD1079C876DAF0ADDF00C459F0CDDCE968BF208E39D` |
-| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `CAF35F41DBA99D4977A5E6827104A5BB961DA754408FA3CEC8156887AA4713FD` |
-| `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_checkpoint.md` | `A21DA53852CBCC29ED12E5AA36D1D6E4A6C976438CBDC6FEB6C8ECB8639320C4` |
+| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `FA78D5C978DD002D80363008A451FE4C8A5882D3AA7EC6F4979A038509C1FE7F` |
+| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `E52F37607FE3DFFC255617420CA47C5A9F38F70298458F15C386F950AA0BB872` |
+| `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_checkpoint.md` | `C32626B4E90B6684636387B79AFDEDB7635D8D9D9D5595A2E017091F31E3C5FD` |
 | `smc/kill_zones.py` | `6655415F82B85D42D20088676A12D4F3883B992CE17B67EAF784188E1CD27D21` |
 | `smc/smc_v2_primitives.py` | `091EDFEA9A05E128EED573932C3C98D261E463E828B82C15B28B87FF56A464FD` |
 | `analysis/gc_dataset_builder.py` | `79EF499D0010674E7FF194D5CB1415F98E76E60AA3696CAE618AF824AF850843` |
@@ -166,6 +192,12 @@ The analyzer version remains exactly
 `GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1`; corrected observation
 membership did not change the public API, identity payloads, version, enums,
 frozen dataclasses, or exports.
+
+These current hashes intentionally supersede only the three construction-time
+Phase B provenance hashes recorded inside the immutable dependency binding in
+Section 7. All unchanged Kill-zone/shared tracked dependency hashes must match
+both the immutable construction record and this current repository. This
+lineage-aware distinction is exact; it is not a general hash-drift waiver.
 
 ## 10. Exact public analyzer boundary
 
@@ -203,10 +235,13 @@ calendar entries from the accepted normalized calendar without network lookup,
 inference, or timezone fallback.
 
 It projects exactly one `GCNYAMSweepReclaimObservation` for each canonical bar
-whose normalized open is in `[07:00:00, 10:00:00) America/New_York`. Every
-projected observation must reconcile one-to-one with the same-moment
-`NEW_YORK_AM`, `VERIFIED`, matching-trade-date context and its corresponding
-snapshot from the complete dependency. Non-NY-AM dataset bars remain required
+whose normalized open is in `[07:00:00, 09:55:00) America/New_York` and whose
+normalized close is independently in `[07:00:00, 10:00:00)`. Thus `07:00`
+through `09:50` opens are eligible, while the canonical `09:55` open / `10:00`
+close bar is retained only as dataset evidence. Every projected observation
+must reconcile one-to-one at its bar-close evidence moment with the
+`NEW_YORK_AM`, `VERIFIED`, matching-trade-date context and corresponding
+snapshot from the complete dependency. Other dataset bars remain required
 dataset evidence but are not projected observations. The incomplete Candidate
 Evidence prefix may not fill, filter, or replace any dependency object.
 
@@ -225,13 +260,20 @@ same-segment causal. The aggregate counts must reconcile exactly to `9,839`
 contexts, `9,839` snapshots, `2,276` `NEW_YORK_AM` contexts, and status counts
 `101 VALID` / `32 NONE`. No object may be synthesized outside the public output.
 
+The dependency input binding is validated byte-for-byte with its recorded
+construction-time provenance. The future runner must not compare its three
+historical Phase B hashes directly to the corrected current bytes; instead it
+must verify the exact authorized lineage mapping in Sections 1, 7, and 9. Any
+other construction/current mismatch is `INVALID` and stops.
+
 ## 13. Observation, calendar, and no-look-ahead gate
 
 Observations are ordered by canonical segment order and then strictly increasing
 bar index and normalized timestamp. Each is fully closed, timezone-aware,
 integer-tick, and has nonnegative integer volume; booleans are not integers.
 Opening/closing moments are exact five-minute moments, and context/snapshot
-moments equal the observation open.
+moments equal the observation close, which is the public Kill-zone evidence
+moment.
 
 Each requested date must have complete split-session and Kill-zone calendar
 coverage before analysis. The fixed New York window, runtime tzdata, trade-date
@@ -257,9 +299,10 @@ semantics. Post-`10:00` evidence cannot repair a truncated NY-AM horizon.
 ## 15. Deterministic preflight and decision gates
 
 Before either temporary root is created, a separate authorized runner must
-prove repository/hash/API/runtime bindings, both exact input roots and file
-sets, cross-root dataset/calendar identity, output-root absence, Git exclusion,
-and zero OOS/network/repair/parameter-choice need.
+prove the lineage-aware repository/hash/API/runtime bindings in Sections 1, 7,
+and 9, both exact input roots and file sets, cross-root dataset/calendar
+identity, output-root absence, Git exclusion, and zero
+OOS/network/repair/parameter-choice need.
 
 Publication eligibility requires two fresh calls returning byte-identical,
 complete public `VALID` or `NONE` results with non-null manifests and 100%
@@ -321,12 +364,13 @@ integers are decimal integers; Decimal midpoint uses canonical `.0`/`.5` with
 all zero forms serialized as `0.0`; enums use exact `.value`; identities are
 lowercase 64-hex in payloads and retain public kind prefixes externally.
 
-The input binding records both proposal identities/hashes, baseline and
-implementation commits, every exact member of both roots, both artifact-set
-identities, dataset/seed/continuity/calendar/timezone/config bindings, exact
-public signatures, requested dates, contracts, analyzer call count, and
-explicit false flags for OOS, features, labels, training, models, integration,
-promotion, PnL, trading, and network access.
+The input binding records all governing proposal identities/hashes, baseline
+and implementation commits, the exact historical-to-current Phase B provenance
+mapping, every exact member of both roots, both artifact-set identities,
+dataset/seed/continuity/calendar/timezone/config bindings, exact public
+signatures, requested dates, contracts, analyzer call count, and explicit false
+flags for OOS, features, labels, training, models, integration, promotion, PnL,
+trading, and network access.
 
 ## 19. Atomic publication and immutable failure evidence
 
@@ -370,7 +414,7 @@ The refreshed procedure locks exactly these sequential logical cases:
 3. Existing V2 temporary or final root stops without overwrite or deletion.
 4. Phase A missing, extra, renamed, reordered-manifest, size-, or hash-drifted member stops.
 5. Dependency missing, extra, renamed, reordered-manifest, size-, or hash-drifted member stops.
-6. Repository baseline, proposal, source, test, checkpoint, or dependency hash drift stops.
+6. Repository/proposal/dependency drift or any hash mismatch outside the exact three-member historical-to-current Phase B lineage mapping stops.
 7. Cross-root dataset, calendar, timezone, segment, date, contract, or OOS binding mismatch stops.
 8. Dataset remains `VALID`, development-only, `17,404` bars, `133` segments, and zero OOS.
 9. Requested dates are exact `64`, strictly increasing, and span `2026-02-23` through `2026-05-22`.
@@ -383,9 +427,9 @@ The refreshed procedure locks exactly these sequential logical cases:
 16. Every context and snapshot identity recomputes and ordered history mirrors causality.
 17. Split-session and Kill-zone calendars reconcile exact version, digest, trade date, and session status.
 18. Runtime tzdata must normalize exactly to `2026.2`; unavailable timezone/version stops.
-19. Canonical expected observations are exactly bar opens in `[07:00, 10:00)` New York time.
+19. Canonical expected observations are exact five-minute opens in `[07:00, 09:55)` whose closes are in public Kill-zone `[07:00, 10:00)` evidence time.
 20. Valid non-NY-AM dataset bars remain dataset evidence and do not cause observation rejection.
-21. Every projected observation reconciles one-to-one to its same-moment NY-AM context and snapshot.
+21. Every projected observation reconciles one-to-one at its bar-close moment to its NY-AM context and snapshot.
 22. Duplicate, missing, extra, reordered, cross-segment, cross-contract, or wrong-date projection is `INVALID`.
 23. Exact six `07:00` through `07:25` observations create a positive-width opening range.
 24. Missing or malformed opening-range member follows locked `UNKNOWN`/`INVALID` precedence.
@@ -438,8 +482,9 @@ full-content/cached-diff audit, cache-disabled focused and full regression PASS,
 and an independent semantic/structural audit. Only exact-path staging and a local
 documentation commit are authorized by the present workflow.
 
-Before commit, rollback is deletion of this exact new file; after commit it is a
-bounded revert. History rewriting and accepted-evidence deletion are forbidden.
+Before commit, rollback is restoration of this exact tracked document to its
+accepted parent bytes; after commit it is a bounded revert. History rewriting
+and accepted-evidence deletion are forbidden.
 STOP on input/hash/API/version/calendar/timezone/partition/count/status/reason/
 identity/serialization/output-root/scope drift; private mutation; OOS contact;
 nondeterminism; exception leakage; silent sort/exclusion/repair; parameter or
