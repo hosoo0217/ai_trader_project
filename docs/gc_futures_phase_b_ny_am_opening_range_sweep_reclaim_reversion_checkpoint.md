@@ -139,6 +139,24 @@ coverage remains `INCOMPLETE_OPENING_RANGE`. A mixed complete plus attested
 input preserves the complete group's byte-exact range, candidate, and outcome
 evidence and retains the status earned by that complete group.
 
+The final independent ordering audit found that the V2 implementation had
+placed the new attested-no-trade funnel key after `COMPLETE_OPENING_RANGES` and
+the new reason token after `INCOMPLETE_OPENING_RANGE`, contrary to the
+governing proposal's exact insertion points. Public Cases 39, 41, and 43 were
+locked first and reproduced the defect:
+
+```text
+3 failed, 56 passed in 7.05s
+```
+
+The minimal correction moves
+`ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES` immediately after
+`CALENDAR_ELIGIBLE_TRADE_DATES` and `ATTESTED_NO_TRADE_OPENING_RANGE`
+immediately after `SESSION_INELIGIBLE`. Case 39 now distinguishes both reason
+tokens in one public analyzer result, while Cases 41 and 43 lock exact manifest
+funnel order for ordinary and attested inputs. No count, status, identity
+field, version, or public API changed.
+
 No correction broadened the public API, identity payload, chronology, status,
 or exact three-path boundary.
 
@@ -295,10 +313,10 @@ Commands were executed with pytest cache disabled:
 
 ```text
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py
-59 passed in 6.75s
+59 passed in 7.13s
 
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
-2453 passed in 24.22s
+2453 passed in 23.77s
 ```
 
 Repository-root discovery is not the accepted regression surface because
@@ -310,8 +328,8 @@ file was accessed or mutated.
 
 | Artifact | Bytes | Lines | SHA-256 |
 |---|---:|---:|---|
-| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `84,232` | `1,648` | `D45745B5DBB8F655A90DF4E0C32642729736261422025C3AFDE92EF4AA6BEAA7` |
-| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `81,983` | `1,528` | `2B878295883A3DB563D11CAA0D2BCDD7DD27E7506F071B1FD39796DC9356BFA8` |
+| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `84,232` | `1,648` | `75FFD671FE09FB3BF91D31658E3D990BAA0418578AD3EB503BC417ED4601AF28` |
+| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `82,397` | `1,537` | `578A2F0E733ADDE0698E6782621A89B6644C3AC4B66486EA3C205D10440DAF91` |
 
 The checkpoint is intentionally excluded from its own self-referential hash
 table. Its final hash, byte count, and line count must be captured by staging
