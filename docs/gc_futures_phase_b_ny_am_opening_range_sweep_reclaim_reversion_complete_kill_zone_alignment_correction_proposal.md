@@ -4,8 +4,8 @@
 
 - Record date: `2026-08-17`.
 - Repository baseline: exact local `HEAD`
-  `447b8548b55ea9137d7f41b7f6042692078d8877`.
-- Decision state: `FAIL_CLOSED / DOCUMENTATION-ONLY CORRECTION PROPOSED`.
+  `22182d5ae8a6c36e804a4f38c88a8f1b43d7c330`.
+- Decision state: `FAIL_CLOSED / DOCUMENTATION-ONLY SEMANTIC CORRECTION`.
 - Affected capability: `GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1`.
 - Accepted upstream dependency:
   `gc_2026_phase_b_ny_am_sweep_reclaim_complete_kill_zone_dependency_v1`.
@@ -15,7 +15,7 @@
 ## 2. Decision summary
 
 The accepted complete Kill-zone dependency is canonical, internally
-recomputable, and complete, but the current Phase B analyzer interprets four
+recomputable, and complete, but the current Phase B analyzer interprets five
 parts of that evidence incorrectly:
 
 1. it compares canonical fully-closed Kill-zone moments with the Phase B bar
@@ -25,7 +25,10 @@ parts of that evidence incorrectly:
 3. it requires global index-first ordering although public dataset indices are
    segment-local and reset at canonical segment boundaries; and
 4. it requires the complete dependency member sets to equal the NY-AM
-   observation-reference subset.
+   observation-reference subset; and
+5. it admits a canonical bar opened at `09:55` even though that fully closed
+   bar's `10:00` evidence moment is outside the public Kill-zone
+   start-inclusive/end-exclusive `NEW_YORK_AM` window.
 
 These are analyzer-contract defects, not failed market evidence and not defects
 in the accepted dependency. The private hypothesis run remains blocked until a
@@ -59,12 +62,13 @@ history contains a dangling context ID.
 
 ## 4. Exact documentation-only scope
 
-This proposal changes only:
+This semantic correction amends only:
 
 `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_complete_kill_zone_alignment_correction_proposal.md`
 
-No existing file is edited. No private artifact is created, deleted, repaired,
-or renamed. Broad staging is forbidden. The global code freeze remains active.
+No other existing file is edited. No private artifact is created, deleted,
+repaired, or renamed. Broad staging is forbidden. The global code freeze
+remains active.
 
 ## 5. Reproduced fully-closed moment defect
 
@@ -85,6 +89,17 @@ The current comparison to `bar_open_timestamp` therefore rejects every
 canonical projected dependency object. The correction must compare context and
 snapshot effective moments to `bar_close_timestamp`. It must not shift,
 relabel, or recreate upstream evidence.
+
+The public Kill-zone detector also classifies its fully closed observation
+timestamp using the fixed start-inclusive/end-exclusive interval
+`[07:00, 10:00)` New York. Phase B may therefore project a canonical five-minute
+bar only when both its open-time structural membership and its close-time
+Kill-zone evidence membership are true. Their exact intersection is bar-open
+`[07:00, 09:55)`: `07:00` through `09:50` at five-minute spacing. A canonical
+bar opened at `09:55` and closed at `10:00` remains immutable dataset evidence,
+but it cannot carry a canonical `NEW_YORK_AM` context and must not become a
+Phase B observation. Timestamp shifting, a synthetic `09:55` context, or an
+upstream Kill-zone contract change is forbidden.
 
 ## 6. Reproduced cumulative-history defect
 
@@ -152,8 +167,10 @@ For one projected `GCNYAMSweepReclaimObservation`:
 2. `bar_close_timestamp` must equal the dataset bar timestamp;
 3. `bar_open_timestamp` must equal that timestamp minus exactly five minutes;
 4. OHLC ticks, integer volume, and `is_closed=True` must match the same bar;
-5. New York window membership remains based only on normalized
-   `bar_open_timestamp` in start-inclusive/end-exclusive `[07:00, 10:00)`;
+5. structural New York membership requires normalized `bar_open_timestamp` in
+   start-inclusive/end-exclusive `[07:00, 10:00)` and canonical Kill-zone
+   evidence membership independently requires normalized
+   `bar_close_timestamp` in `[07:00, 10:00)`;
 6. the referenced context observation index must equal the local bar index;
 7. the referenced context and snapshot moments must equal
    `bar_close_timestamp`; and
@@ -163,6 +180,13 @@ For one projected `GCNYAMSweepReclaimObservation`:
 Using the fully closed bar-close moment for evidence reconciliation does not
 move the trading window and does not introduce look-ahead. Candidate formation
 still begins only after all required source bars are closed.
+
+For the locked five-minute timeframe, the two membership requirements make
+`07:00` through `09:50` the only admissible bar-open sequence. The
+`09:55`-open/`10:00`-close bar is retained in the canonical dataset result but
+is excluded from `GCNYAMSweepReclaimObservation`; it is never relabeled,
+silently dropped from the dataset, or represented by synthesized Kill-zone
+evidence.
 
 ## 10. Exact segment ownership and ordering
 
@@ -290,6 +314,12 @@ member synthesis, foreign hash substitution, timezone fallback, calendar
 enrichment, or post-hoc status repair is allowed. The accepted dependency bytes
 remain immutable evidence.
 
+The analyzer may filter canonical dataset bars into Phase B observations only
+by the exact Section 9 intersection. That deterministic projection is not an
+upstream mutation: the terminal `09:55`-open bar remains present in the dataset
+and absent only from the Phase B observation tuple because its canonical close
+moment cannot produce a `NEW_YORK_AM` identity.
+
 ## 17. Unchanged structural hypothesis semantics
 
 This correction does not change:
@@ -304,7 +334,8 @@ This correction does not change:
   semantics; or
 - any no-outcome, no-PnL, no-training, and no-trading-authority boundary.
 
-The correction changes dependency validation only.
+The correction changes dependency validation and the deterministic admissible
+observation projection only.
 
 ## 18. Reserved exact implementation scope
 
@@ -332,7 +363,10 @@ smallest internal correction that:
 7. uses segment-aware atomic cutoff and immutable prior-evidence preservation;
 8. contains nested exceptions within locked `INVALID` or builder
    `TypeError`/`ValueError` contracts; and
-9. preserves all existing structural, identity, public API, and status rules.
+9. excludes the canonical `09:55`-open/`10:00`-close bar from the Phase B
+   observation projection without deleting it from the dataset or synthesizing
+   context evidence; and
+10. preserves all existing structural, identity, public API, and status rules.
 
 The implementation must not read private files or call the upstream Kill-zone
 analyzer.
@@ -370,8 +404,12 @@ collected executions but may not add or remove a logical case.
 4. Exact five-minute subtraction remains the Phase B bar-open moment.
 5. Context at exact bar close is accepted and the same context at bar open is rejected.
 6. Snapshot at exact bar close is accepted and the same snapshot at bar open is rejected.
-7. NY-AM membership remains based on bar open, not evidence timestamp.
-8. Start-inclusive `07:00` and end-exclusive `10:00` behavior is unchanged.
+7. Structural NY-AM membership remains based on bar open while canonical
+   Kill-zone membership independently remains based on the fully closed
+   evidence timestamp.
+8. `07:00`-open/`07:05`-close and `09:50`-open/`09:55`-close bars are admitted;
+   the canonical `09:55`-open/`10:00`-close bar remains in the dataset but is
+   excluded from Phase B observations, with no synthetic context identity.
 9. Segment-local index reset is accepted at the next canonical segment.
 10. Non-increasing local index or timestamp inside one segment is `INVALID`.
 11. Reordered canonical segment ordinals are `INVALID` without silent sort.
@@ -438,7 +476,8 @@ Documentation acceptance requires exactly `24` sequential numbered sections,
 exactly `48` sequential logical cases, exact one-file scope, formatting PASS,
 SHA-256 and cached-diff audit, and preservation of all unrelated state.
 
-Before commit, rollback is deletion of this exact new file. After commit,
+Before commit, rollback restores only this proposal to its exact
+`22182d5ae8a6c36e804a4f38c88a8f1b43d7c330` committed bytes. After commit,
 rollback is a bounded revert; history rewrite and evidence deletion are
 forbidden. STOP on public API or identity expansion, scope drift, private-root
 mutation, upstream evidence mutation, ambiguous segment ownership, silent
@@ -455,8 +494,11 @@ committed artifact hashes.
 
 The accepted complete Kill-zone dependency remains valid and immutable. The
 current Phase B analyzer is `FAIL_CLOSED` against it because its evidence
-alignment contract is too narrow and its chronology cutoff is not segment
-aware. No private hypothesis result exists, and no model training has begun.
+alignment contract is too narrow, its chronology cutoff is not segment aware,
+and its terminal five-minute projection does not enforce the exact intersection
+of structural bar-open membership with canonical close-time Kill-zone
+membership. No private hypothesis result exists, and no model training has
+begun.
 
 PASS for this record authorizes only exact-path staging and a local
 documentation commit. It does not authorize the Section 18 implementation,
