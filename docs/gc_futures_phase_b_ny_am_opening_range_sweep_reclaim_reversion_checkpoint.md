@@ -16,8 +16,14 @@
   `acbe282934fa72fd22dec920c1a8bcf260fd5d2b`.
 - Governing terminal-alignment correction SHA-256:
   `BEDB0596321A8A00D3B093E1BBF87A9A3437E4B49AF8A5978375E49246FAB772`.
+- Governing attested-no-trade coverage correction proposal:
+  `docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_attested_no_trade_coverage_correction_proposal.md`.
+- Governing attested-no-trade coverage correction commit:
+  `c3f8d5b7c21f8cc5e1375e6468805c06b2cc6064`.
+- Governing attested-no-trade coverage correction SHA-256:
+  `6A1DE55F8597A17512B55D3F5E89186455C01CFEEFEA36742C6AA91114F6F9EA`.
 - Implementation version:
-  `GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1`.
+  `GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V2`.
 - Task classification: development-only, deterministic occurrence and
   structural-outcome feasibility diagnostics.
 - Independent semantic, structural, scope, and regression audit: `PASS`.
@@ -116,6 +122,23 @@ bar-open and fully closed bar-close inclusion. It did not shift timestamps,
 synthesize Kill-zone evidence, mutate the upstream detector, or remove the
 terminal canonical dataset bar.
 
+The attested-no-trade coverage correction also began with public failing
+tests. Before the source fix, Cases 9, 11, 12, 39, 42, 43, 44, and 47 exposed
+the former short-range collapse:
+
+```text
+7 failed, 52 passed
+```
+
+The minimal V2 correction validates canonical adjacent segment-gap lineage,
+five-minute arithmetic, missing-member counts, manifest missing-bar counts,
+and attested interval counts before classifying a qualified opening-range gap
+as `NONE` with `ATTESTED_NO_TRADE_OPENING_RANGE`. Corrupted or contradictory
+attestation remains `INVALID_OPENING_RANGE`; truly unavailable or truncated
+coverage remains `INCOMPLETE_OPENING_RANGE`. A mixed complete plus attested
+input preserves the complete group's byte-exact range, candidate, and outcome
+evidence and retains the status earned by that complete group.
+
 No correction broadened the public API, identity payload, chronology, status,
 or exact three-path boundary.
 
@@ -143,6 +166,12 @@ exact bar-open intersection `[07:00, 09:55)`. The `09:55` open / `10:00` close
 bar remains immutable dataset evidence but cannot enter Phase B observation,
 formation, or outcome logic.
 
+An absent opening-range member is never synthesized. V2 may classify the
+group as an attested no-trade `NONE` only when the canonical dataset manifest
+and immediately adjacent source segments prove every missing expected member
+with exact same-lineage five-minute gap arithmetic. Failed proof falls through
+to the locked `UNKNOWN` or `INVALID` boundary.
+
 ## 6. Calendar and session semantics
 
 Each requested trade date requires authoritative split-session and Kill-zone
@@ -161,6 +190,12 @@ The opening range uses exactly six closed source bars whose local opens are
 `America/New_York`. It becomes first known at `07:30`. Its low, high, positive
 width, exact Decimal midpoint, ordered source IDs, indices, and timestamps are
 immutable.
+
+If canonical lineage proves that one or more of those six expected members
+did not trade, the date increments
+`ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES`, emits
+`ATTESTED_NO_TRADE_OPENING_RANGE`, and promotes no opening range, candidate,
+or outcome. This is a coverage classification, not a synthetic range.
 
 The candidate window is start-inclusive at `07:30` and end-exclusive at
 `09:00`. A bearish candidate requires an upper-boundary sweep of at least one
@@ -239,8 +274,9 @@ sequential logical Cases 1 through 48. Parameterization yields 59 focused
 collected executions. The corrected matrix covers full-session dataset input,
 exact fully-closed NY-AM projection membership including terminal-bar
 exclusion, one-to-one observation/context/snapshot reconciliation,
-retained-prefix dependency rejection, native complete
-dependency statuses, and the immutable private-run boundary. It also covers
+retained-prefix dependency rejection, native complete dependency statuses,
+qualified versus corrupted attested-no-trade gaps, mixed complete plus
+attested groups, and the immutable private-run boundary. It also covers
 input binding, missing/malformed
 precedence, OOS rejection, immutable observation/calendar/context contracts,
 exact six-bar range, candidate boundaries and selection, mirrored geometry,
@@ -259,10 +295,10 @@ Commands were executed with pytest cache disabled:
 
 ```text
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py
-59 passed in 6.50s
+59 passed in 6.75s
 
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
-2453 passed in 23.10s
+2453 passed in 24.22s
 ```
 
 Repository-root discovery is not the accepted regression surface because
@@ -274,8 +310,8 @@ file was accessed or mutated.
 
 | Artifact | Bytes | Lines | SHA-256 |
 |---|---:|---:|---|
-| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `80,474` | `1,565` | `FA78D5C978DD002D80363008A451FE4C8A5882D3AA7EC6F4979A038509C1FE7F` |
-| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `69,751` | `1,323` | `E52F37607FE3DFFC255617420CA47C5A9F38F70298458F15C386F950AA0BB872` |
+| `analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `84,232` | `1,648` | `D45745B5DBB8F655A90DF4E0C32642729736261422025C3AFDE92EF4AA6BEAA7` |
+| `tests/test_gc_ny_am_opening_range_sweep_reclaim_reversion.py` | `81,983` | `1,528` | `2B878295883A3DB563D11CAA0D2BCDD7DD27E7506F071B1FD39796DC9356BFA8` |
 
 The checkpoint is intentionally excluded from its own self-referential hash
 table. Its final hash, byte count, and line count must be captured by staging

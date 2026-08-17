@@ -63,6 +63,7 @@ EXPECTED_EXPORTS = (
 
 COUNT_FUNNEL_KEYS = (
     "REQUESTED_TRADE_DATES", "CALENDAR_ELIGIBLE_TRADE_DATES", "COMPLETE_OPENING_RANGES",
+    "ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES",
     "NO_SWEEP_RECLAIM_TRADE_DATES", "AMBIGUOUS_SWEEP_GROUPS", "COMPLETE_CANDIDATES",
     "BULLISH_CANDIDATES", "BEARISH_CANDIDATES", "MIDPOINT_REACHED_OUTCOMES",
     "INVALIDATED_OUTCOMES", "SAME_BAR_AMBIGUOUS_OUTCOMES", "TIMEOUT_OUTCOMES",
@@ -74,7 +75,7 @@ REASON_TOKENS = (
     "INVALID_OBSERVATION", "MISSING_SPLIT_SESSION_CALENDAR", "INVALID_SPLIT_SESSION_CALENDAR",
     "MISSING_KILL_ZONE_CALENDAR", "INVALID_KILL_ZONE_CALENDAR", "MISSING_KILL_ZONE_EVIDENCE",
     "INVALID_KILL_ZONE_EVIDENCE", "SESSION_INELIGIBLE", "INCOMPLETE_OPENING_RANGE",
-    "INVALID_OPENING_RANGE", "NO_SWEEP_RECLAIM", "AMBIGUOUS_SWEEP_RECLAIM",
+    "ATTESTED_NO_TRADE_OPENING_RANGE", "INVALID_OPENING_RANGE", "NO_SWEEP_RECLAIM", "AMBIGUOUS_SWEEP_RECLAIM",
     "INCOMPLETE_OUTCOME_HORIZON", "INVALID_OUTCOME_EVIDENCE",
     "AMBIGUOUS_CANONICAL_INTERPRETATION",
 )
@@ -340,6 +341,179 @@ def _two_segment_reset_fixture() -> dict[str, object]:
         "kill_zone_calendar": kill_calendar,
         "observations": tuple(observations),
         "kill_zone_contexts": contexts,
+        "kill_zone_snapshots": snapshots,
+        "kill_zone_result": KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots),
+    }
+
+
+def _attested_opening_range_gap_fixture(
+    *,
+    corrupt_attestation: bool = False,
+    trade_date: date = TRADE_DATE,
+) -> dict[str, object]:
+    """Build a canonical gap with only the 07:20 source member and later evidence."""
+    base = _fixture(trade_date=trade_date)
+    split_calendar = base["split_session_calendar"]
+    kill_calendar = base["kill_zone_calendar"]
+    contract = "GCG26-COMEX"
+    source_ids = (_h("source"),)
+    segment_specs = (
+        (f"attested-pre-{trade_date}", 0, (GCChronologicalBar(0, _utc(trade_date, 6, 55), 100, 101, 99, 100, 9, True),)),
+        (f"attested-range-{trade_date}", 0 if corrupt_attestation else 5, (GCChronologicalBar(0, _utc(trade_date, 7, 25), 104, 106, 103, 105, 14, True),)),
+        (
+            f"attested-later-{trade_date}",
+            1,
+            tuple(
+                GCChronologicalBar(index, _utc(trade_date, 7, 35 + 5 * index), 106, 107, 104, 106, 15 + index, True)
+                for index in range(4)
+            ),
+        ),
+    )
+    segments = tuple(
+        GCCanonicalContractSegment(
+            _h(seed), contract, GCSegmentPartition.DEVELOPMENT, trade_date, trade_date,
+            source_ids, bars, missing,
+        )
+        for seed, missing, bars in segment_specs
+    )
+    all_bars = tuple(bar for segment in segments for bar in segment.bars)
+    dataset_id = _h(f"attested-gap-dataset-{trade_date}-{'corrupt' if corrupt_attestation else 'valid'}")
+    manifest = GCDatasetManifest(
+        dataset_id, "GC-DATASET-V1", source_ids, (_h("coverage"),), _h("coverage-digest"),
+        tuple(segment.segment_id for segment in segments), CALENDAR_VERSION, TZDATA_VERSION,
+        all_bars[0].timestamp, all_bars[-1].timestamp, all_bars[0].timestamp, all_bars[-1].timestamp,
+        len(all_bars), len(all_bars), len(all_bars), 0, 0,
+        1 if corrupt_attestation else 6, 1 if corrupt_attestation else 2,
+        sum(bar.volume for bar in all_bars), sum(bar.volume for bar in all_bars), 0,
+        ((contract, trade_date, sum(bar.volume for bar in all_bars)),), (), (),
+    )
+    dataset = GCDatasetBuildResult(GCDatasetBuildStatus.VALID, dataset_id, segments, manifest)
+    common = {
+        "instrument": "GC", "timeframe": "5M", "dataset_id": dataset_id,
+        "calendar_version": CALENDAR_VERSION,
+        "split_session_calendar_digest": sweep_reclaim._split_calendar_digest(split_calendar),
+        "kill_zone_calendar_digest": sweep_reclaim._kill_calendar_digest(kill_calendar),
+        "timezone_name": "America/New_York", "timezone_data_version": TZDATA_VERSION,
+    }
+    observations: list[sweep_reclaim.GCNYAMSweepReclaimObservation] = []
+    contexts: list[KillZoneContext] = []
+    snapshots: list[KillZoneSnapshot] = []
+    for ordinal, segment in enumerate(segments):
+        segment_context_ids: list[str] = []
+        for bar in segment.bars:
+            bar_open = bar.timestamp - timedelta(minutes=5)
+            if not (time(7, 0) <= bar_open.astimezone(NY).time().replace(tzinfo=None) < time(10, 0)):
+                continue
+            context_id = make_kill_zone_id(
+                identity_kind="CONTEXT", instrument="GC", timeframe="5M",
+                calendar_version=CALENDAR_VERSION, timezone_name="America/New_York",
+                timezone_data_version=TZDATA_VERSION, observation_index=bar.index,
+                observation_timestamp=bar.timestamp, trade_date=trade_date,
+                zone=KillZoneName.NEW_YORK_AM, session_status=KillZoneSessionStatus.OPEN,
+                quality=KillZoneQuality.VERIFIED,
+            )
+            segment_context_ids.append(context_id)
+            snapshot_id = make_kill_zone_id(
+                identity_kind="SNAPSHOT", instrument="GC", timeframe="5M",
+                calendar_version=CALENDAR_VERSION, timezone_name="America/New_York",
+                timezone_data_version=TZDATA_VERSION, effective_index=bar.index,
+                effective_timestamp=bar.timestamp, context_ids=tuple(segment_context_ids),
+            )
+            observation_id = sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(
+                identity_kind=sweep_reclaim.GCNYAMSweepReclaimIdentityKind.OBSERVATION,
+                **common, segment_ordinal=ordinal, segment_id=segment.segment_id,
+                contract=contract, trade_date=trade_date, index=bar.index,
+                bar_open_timestamp=bar_open, bar_close_timestamp=bar.timestamp,
+                open_tick=bar.open_tick, high_tick=bar.high_tick, low_tick=bar.low_tick,
+                close_tick=bar.close_tick, volume=bar.volume, is_closed=True,
+                kill_zone_context_id=context_id, kill_zone_snapshot_id=snapshot_id,
+            )
+            observations.append(sweep_reclaim.GCNYAMSweepReclaimObservation(
+                observation_id, ordinal, segment.segment_id, contract, trade_date, bar.index,
+                bar_open, bar.timestamp, bar.open_tick, bar.high_tick, bar.low_tick,
+                bar.close_tick, bar.volume, True, context_id, snapshot_id,
+            ))
+            contexts.append(KillZoneContext(
+                context_id, bar.index, bar.timestamp, trade_date, KillZoneName.NEW_YORK_AM,
+                KillZoneSessionStatus.OPEN, KillZoneQuality.VERIFIED, CALENDAR_VERSION,
+                "America/New_York", TZDATA_VERSION,
+            ))
+            snapshots.append(KillZoneSnapshot(snapshot_id, bar.index, bar.timestamp, tuple(segment_context_ids)))
+    return {
+        "instrument": "GC", "timeframe": "5M", "dataset_config": _config(),
+        "dataset_result": dataset, "requested_trade_dates": (trade_date,),
+        "split_session_calendar": split_calendar, "kill_zone_calendar": kill_calendar,
+        "observations": tuple(observations), "kill_zone_contexts": tuple(contexts),
+        "kill_zone_snapshots": tuple(snapshots),
+        "kill_zone_result": KillZoneResult(SMCV2PrimitiveStatus.VALID, tuple(contexts), tuple(snapshots)),
+    }
+
+
+def _combine_date_fixtures(first: dict[str, object], second: dict[str, object]) -> dict[str, object]:
+    first_dataset = first["dataset_result"]
+    second_dataset = second["dataset_result"]
+    segments = first_dataset.segments + second_dataset.segments  # type: ignore[union-attr]
+    dataset_id = _h("combined-complete-attested-dataset")
+    bars = tuple(bar for segment in segments for bar in segment.bars)
+    first_manifest = first_dataset.manifest  # type: ignore[union-attr]
+    second_manifest = second_dataset.manifest  # type: ignore[union-attr]
+    manifest = replace(
+        first_manifest,
+        dataset_id=dataset_id,
+        segment_ids=tuple(segment.segment_id for segment in segments),
+        raw_start_timestamp=bars[0].timestamp,
+        raw_end_timestamp=bars[-1].timestamp,
+        usable_start_timestamp=bars[0].timestamp,
+        usable_end_timestamp=bars[-1].timestamp,
+        parsed_row_count=len(bars),
+        eligible_row_count=len(bars),
+        development_bar_count=len(bars),
+        missing_bar_count=first_manifest.missing_bar_count + second_manifest.missing_bar_count,
+        attested_no_trade_interval_count=(
+            first_manifest.attested_no_trade_interval_count
+            + second_manifest.attested_no_trade_interval_count
+        ),
+        raw_volume=sum(bar.volume for bar in bars),
+        eligible_volume=sum(bar.volume for bar in bars),
+        completed_session_volumes=(
+            first_manifest.completed_session_volumes + second_manifest.completed_session_volumes
+        ),
+    )
+    dataset = replace(first_dataset, dataset_id=dataset_id, segments=segments, manifest=manifest)  # type: ignore[arg-type]
+    split_calendar = first["split_session_calendar"] + second["split_session_calendar"]  # type: ignore[operator]
+    kill_calendar = first["kill_zone_calendar"] + second["kill_zone_calendar"]  # type: ignore[operator]
+    contexts = first["kill_zone_contexts"] + second["kill_zone_contexts"]  # type: ignore[operator]
+    snapshots = first["kill_zone_snapshots"] + second["kill_zone_snapshots"]  # type: ignore[operator]
+    common = {
+        "instrument": "GC", "timeframe": "5M", "dataset_id": dataset_id,
+        "calendar_version": CALENDAR_VERSION,
+        "split_session_calendar_digest": sweep_reclaim._split_calendar_digest(split_calendar),
+        "kill_zone_calendar_digest": sweep_reclaim._kill_calendar_digest(kill_calendar),
+        "timezone_name": "America/New_York", "timezone_data_version": TZDATA_VERSION,
+    }
+    observations: list[sweep_reclaim.GCNYAMSweepReclaimObservation] = []
+    ordinal_offset = 0
+    for source in (first, second):
+        for item in source["observations"]:  # type: ignore[union-attr]
+            ordinal = item.segment_ordinal + ordinal_offset
+            observation_id = sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(
+                identity_kind=sweep_reclaim.GCNYAMSweepReclaimIdentityKind.OBSERVATION,
+                **common, segment_ordinal=ordinal, segment_id=item.segment_id,
+                contract=item.contract, trade_date=item.trade_date, index=item.index,
+                bar_open_timestamp=item.bar_open_timestamp, bar_close_timestamp=item.bar_close_timestamp,
+                open_tick=item.open_tick, high_tick=item.high_tick, low_tick=item.low_tick,
+                close_tick=item.close_tick, volume=item.volume, is_closed=item.is_closed,
+                kill_zone_context_id=item.kill_zone_context_id,
+                kill_zone_snapshot_id=item.kill_zone_snapshot_id,
+            )
+            observations.append(replace(item, segment_ordinal=ordinal, observation_id=observation_id))
+        ordinal_offset += len(source["dataset_result"].segments)  # type: ignore[union-attr]
+    return {
+        "instrument": "GC", "timeframe": "5M", "dataset_config": _config(),
+        "dataset_result": dataset,
+        "requested_trade_dates": first["requested_trade_dates"] + second["requested_trade_dates"],  # type: ignore[operator]
+        "split_session_calendar": split_calendar, "kill_zone_calendar": kill_calendar,
+        "observations": tuple(observations), "kill_zone_contexts": contexts,
         "kill_zone_snapshots": snapshots,
         "kill_zone_result": KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots),
     }
@@ -657,6 +831,9 @@ def test_case_09_early_close_preventing_source_or_horizon_is_ineligible() -> Non
     reset_result = _run(_two_segment_reset_fixture())
     assert reset_result.status is SMCV2PrimitiveStatus.UNKNOWN
     assert reset_result.reasons == ("INCOMPLETE_OPENING_RANGE",)
+    attested = _run(_attested_opening_range_gap_fixture())
+    assert attested.status is SMCV2PrimitiveStatus.NONE
+    assert attested.reasons == ("ATTESTED_NO_TRADE_OPENING_RANGE",)
 
 
 def test_case_10_exact_six_bar_opening_range_first_known_at_0730() -> None:
@@ -672,6 +849,9 @@ def test_case_11_five_bars_insufficient_and_seventh_never_enters_source() -> Non
     complete = _valid().opening_ranges[0]
     assert complete.source_observation_ids == tuple(item.observation_id for item in _fixture()["observations"][:6])  # type: ignore[index]
     assert _fixture()["observations"][6].observation_id not in complete.source_observation_ids  # type: ignore[index]
+    attested = _run(_attested_opening_range_gap_fixture())
+    assert attested.status is SMCV2PrimitiveStatus.NONE
+    assert not attested.opening_ranges and not attested.candidates and not attested.outcomes
 
 
 def test_case_12_missing_middle_timestamp_substitution_and_nonconsecutive_source_invalid() -> None:
@@ -682,6 +862,9 @@ def test_case_12_missing_middle_timestamp_substitution_and_nonconsecutive_source
     assert _run(fixture, observations=observations[:2] + (substituted,) + observations[3:]).status is SMCV2PrimitiveStatus.INVALID
     skipped = replace(observations[2], index=99)
     assert _run(fixture, observations=observations[:2] + (skipped,) + observations[3:]).status is SMCV2PrimitiveStatus.INVALID
+    corrupted = _run(_attested_opening_range_gap_fixture(corrupt_attestation=True))
+    assert corrupted.status is SMCV2PrimitiveStatus.INVALID
+    assert corrupted.reasons == ("INVALID_OPENING_RANGE",)
 
 
 def test_case_13_cross_date_segment_and_session_source_is_invalid() -> None:
@@ -1048,6 +1231,14 @@ def test_case_39_final_status_precedence_is_locked() -> None:
     assert _run(_fixture(count=12, target_event=False)).status is SMCV2PrimitiveStatus.UNKNOWN
     assert _valid().status is SMCV2PrimitiveStatus.VALID
     assert _run(_fixture(direction="none")).status is SMCV2PrimitiveStatus.NONE
+    assert _run(_attested_opening_range_gap_fixture()).status is SMCV2PrimitiveStatus.NONE
+    mixed = _run(_combine_date_fixtures(
+        _fixture(trade_date=TRADE_DATE),
+        _attested_opening_range_gap_fixture(trade_date=TRADE_DATE + timedelta(days=1)),
+    ))
+    assert mixed.status is SMCV2PrimitiveStatus.VALID
+    assert len(mixed.opening_ranges) == len(mixed.candidates) == len(mixed.outcomes) == 1
+    assert "ATTESTED_NO_TRADE_OPENING_RANGE" in mixed.reasons
     assert [item.value for item in (SMCV2PrimitiveStatus.INVALID, SMCV2PrimitiveStatus.AMBIGUOUS, SMCV2PrimitiveStatus.UNKNOWN, SMCV2PrimitiveStatus.VALID, SMCV2PrimitiveStatus.NONE)] == ["INVALID", "AMBIGUOUS", "UNKNOWN", "VALID", "NONE"]
 
 
@@ -1107,7 +1298,7 @@ def test_case_42_exact_public_apis_defaults_frozen_types_enums_version_and_expor
     assert all(item.default is inspect.Parameter.empty for item in analyzer.parameters.values())
     assert sweep_reclaim.__all__ == EXPECTED_EXPORTS
     assert sweep_reclaim.GC_NY_AM_OPENING_RANGE_SWEEP_RECLAIM_REVERSION_VERSION == (
-        "GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1"
+        "GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V2"
     )
     assert tuple(item.value for item in sweep_reclaim.GCNYAMSweepReclaimIdentityKind) == (
         "OBSERVATION", "OPENING_RANGE", "CANDIDATE", "OUTCOME", "MANIFEST",
@@ -1233,6 +1424,14 @@ def test_case_43_repeatability_identity_counts_manifest_order_and_bytes() -> Non
     payload["bar_open_timestamp"] = shifted.bar_open_timestamp.astimezone(timezone(timedelta(hours=9)))
     payload["bar_close_timestamp"] = shifted.bar_close_timestamp.astimezone(timezone(timedelta(hours=9)))
     assert sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(**payload) == shifted.observation_id
+    attested = _run(_attested_opening_range_gap_fixture())
+    assert attested.manifest is not None
+    assert tuple(key for key, _ in attested.manifest.count_funnel) == COUNT_FUNNEL_KEYS
+    assert dict(attested.manifest.count_funnel)["ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES"] == 1
+    assert dict(attested.manifest.reason_counts)["ATTESTED_NO_TRADE_OPENING_RANGE"] == 1
+    assert pickle.dumps(attested, protocol=5) == pickle.dumps(
+        _run(_attested_opening_range_gap_fixture()), protocol=5,
+    )
 
 
 def test_case_44_strictly_later_complete_append_is_prefix_invariant() -> None:
@@ -1241,6 +1440,9 @@ def test_case_44_strictly_later_complete_append_is_prefix_invariant() -> None:
     assert extended.opening_ranges[:len(prefix.opening_ranges)] == prefix.opening_ranges
     assert extended.candidates[:len(prefix.candidates)] == prefix.candidates
     assert extended.outcomes[:len(prefix.outcomes)] == prefix.outcomes
+    attested = _attested_opening_range_gap_fixture()
+    attested_result = _run(attested)
+    assert _run(attested) == attested_result
 
 
 def test_case_45_retained_dependency_prefix_is_unknown_and_preserves_only_complete_prior_evidence() -> None:
@@ -1302,6 +1504,9 @@ def test_case_47_exact_three_path_scope_and_private_root_immutability_are_locked
     source = (root / "analysis/gc_ny_am_opening_range_sweep_reclaim_reversion.py").read_text(encoding="utf-8")
     for forbidden in ("pathlib", "private_data", "open(", "read_text", "write_text"):
         assert forbidden not in source
+    attested = _attested_opening_range_gap_fixture()
+    assert attested["dataset_result"].manifest.attested_no_trade_interval_count == 2  # type: ignore[union-attr]
+    assert _run(attested).reasons == ("ATTESTED_NO_TRADE_OPENING_RANGE",)
 
 
 def test_case_48_private_run_training_oos_integration_push_and_trading_remain_unused() -> None:

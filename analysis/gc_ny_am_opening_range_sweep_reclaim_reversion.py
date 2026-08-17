@@ -33,7 +33,7 @@ from smc.kill_zones import (
 from smc.smc_v2_primitives import SMCV2Direction, SMCV2PrimitiveStatus
 
 
-GC_NY_AM_OPENING_RANGE_SWEEP_RECLAIM_REVERSION_VERSION = "GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V1"
+GC_NY_AM_OPENING_RANGE_SWEEP_RECLAIM_REVERSION_VERSION = "GC-NY-AM-OPENING-RANGE-SWEEP-RECLAIM-REVERSION-V2"
 
 
 class GCNYAMSweepReclaimIdentityKind(str, Enum):
@@ -174,6 +174,7 @@ _COUNT_FUNNEL_KEYS = (
     "REQUESTED_TRADE_DATES",
     "CALENDAR_ELIGIBLE_TRADE_DATES",
     "COMPLETE_OPENING_RANGES",
+    "ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES",
     "NO_SWEEP_RECLAIM_TRADE_DATES",
     "AMBIGUOUS_SWEEP_GROUPS",
     "COMPLETE_CANDIDATES",
@@ -202,6 +203,7 @@ _REASON_TOKENS = (
     "INVALID_KILL_ZONE_EVIDENCE",
     "SESSION_INELIGIBLE",
     "INCOMPLETE_OPENING_RANGE",
+    "ATTESTED_NO_TRADE_OPENING_RANGE",
     "INVALID_OPENING_RANGE",
     "NO_SWEEP_RECLAIM",
     "AMBIGUOUS_SWEEP_RECLAIM",
@@ -820,6 +822,83 @@ def _is_expected_ny_am_bar(bar: Any, trade_day: date) -> bool:
     )
 
 
+def _has_attested_no_trade_opening_range_gap(
+    trade_day: date,
+    group: tuple[GCNYAMSweepReclaimObservation, ...],
+    segments: tuple[Any, ...],
+    manifest: Any,
+) -> bool:
+    """Prove absent 07:00..07:25 members from canonical segment-gap lineage."""
+    try:
+        expected_opens = tuple(
+            datetime.combine(trade_day, time(7, minute), ZoneInfo(_TIMEZONE_NAME)).astimezone(_UTC)
+            for minute in (0, 5, 10, 15, 20, 25)
+        )
+        supplied_opens = tuple(_timestamp(item.bar_open_timestamp, "bar open") for item in group)
+        present = {moment for moment in supplied_opens if moment in expected_opens}
+        missing = set(expected_opens) - present
+        if not missing or not present or len(present) != len(supplied_opens) - sum(
+            moment not in expected_opens for moment in supplied_opens
+        ):
+            return False
+        manifest_missing = _integer(manifest.missing_bar_count, "missing_bar_count", minimum=0)
+        manifest_intervals = _integer(
+            manifest.attested_no_trade_interval_count,
+            "attested_no_trade_interval_count",
+            minimum=0,
+        )
+        attested: set[datetime] = set()
+        relevant_intervals = 0
+        total_segment_missing = 0
+        for ordinal, segment in enumerate(segments):
+            missing_count = _integer(
+                segment.preceding_missing_bar_count,
+                "preceding_missing_bar_count",
+                minimum=0,
+            )
+            total_segment_missing += missing_count
+            if missing_count == 0:
+                continue
+            bars = _tuple(segment.bars, "bars")
+            if ordinal == 0 or not bars:
+                continue
+            previous = segments[ordinal - 1]
+            previous_bars = _tuple(previous.bars, "bars")
+            if not previous_bars:
+                continue
+            if (
+                segment.contract != previous.contract
+                or _status_value(segment.partition) != _status_value(previous.partition)
+                or segment.first_trade_date != trade_day
+                or previous.last_trade_date != trade_day
+                or _tuple(segment.source_ids, "source_ids") != _tuple(previous.source_ids, "source_ids")
+            ):
+                continue
+            gap_start = _timestamp(previous_bars[-1].timestamp, "bar timestamp")
+            receiving_open = _timestamp(bars[0].timestamp, "bar timestamp") - timedelta(minutes=5)
+            duration = receiving_open - gap_start
+            if duration <= timedelta(0) or duration % timedelta(minutes=5) != timedelta(0):
+                continue
+            computed_count = duration // timedelta(minutes=5)
+            if computed_count != missing_count:
+                continue
+            interval_members = {
+                gap_start + timedelta(minutes=5 * position)
+                for position in range(missing_count)
+            }
+            if interval_members & missing:
+                relevant_intervals += 1
+            attested.update(interval_members)
+        return (
+            missing.issubset(attested)
+            and manifest_missing >= total_segment_missing
+            and relevant_intervals > 0
+            and manifest_intervals >= relevant_intervals
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError, ZoneInfoNotFoundError):
+        return False
+
+
 def _validate_observation(item: Any, expected: tuple[int, Any, date], common: dict[str, Any]) -> GCNYAMSweepReclaimObservation:
     ordinal, segment, trade_date = expected
     if not isinstance(item, GCNYAMSweepReclaimObservation):
@@ -1375,6 +1454,10 @@ def analyze_gc_ny_am_opening_range_sweep_reclaim_reversion(
             local = tuple((item, item.bar_open_timestamp.astimezone(ZoneInfo(_TIMEZONE_NAME))) for item in group)
             range_source = tuple(item for item, local_open in local if local_open.date() == day and (local_open.hour, local_open.minute) in ((7, 0), (7, 5), (7, 10), (7, 15), (7, 20), (7, 25)))
             if len(range_source) < 6:
+                if _has_attested_no_trade_opening_range_gap(day, group, segments, manifest):
+                    reasons.add("ATTESTED_NO_TRADE_OPENING_RANGE")
+                    counts["ATTESTED_NO_TRADE_OPENING_RANGE_TRADE_DATES"] += 1
+                    continue
                 has_later_evidence = any(
                     local_open.date() == day
                     and local_open.time().replace(tzinfo=None) >= time(7, 30)
