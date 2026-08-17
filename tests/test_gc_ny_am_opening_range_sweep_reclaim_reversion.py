@@ -129,10 +129,12 @@ def _fixture(
     collision: bool = False,
     target_event: bool = True,
     full_session_edges: bool = False,
+    trade_date: date = TRADE_DATE,
+    segment_seed: str = "segment",
 ) -> dict[str, object]:
-    opening = _utc(TRADE_DATE - timedelta(days=1), 18)
-    session_close = _utc(TRADE_DATE, 17)
-    first_open = _utc(TRADE_DATE, 7)
+    opening = _utc(trade_date - timedelta(days=1), 18)
+    session_close = _utc(trade_date, 17)
+    first_open = _utc(trade_date, 7)
     prices = _prices(count, direction=direction, collision=collision)
     analysis_bars = tuple(
         GCChronologicalBar(
@@ -155,11 +157,11 @@ def _fixture(
     if full_session_edges:
         analysis_bars = tuple(replace(bar, index=bar.index + 1) for bar in analysis_bars)
         bars = (
-            GCChronologicalBar(0, _utc(TRADE_DATE, 4, 5), 100, 101, 99, 100, 9, True),
+            GCChronologicalBar(0, _utc(trade_date, 4, 5), 100, 101, 99, 100, 9, True),
             *analysis_bars,
             GCChronologicalBar(
                 len(analysis_bars) + 1,
-                _utc(TRADE_DATE, 10, 5),
+                _utc(trade_date, 10, 5),
                 106,
                 107,
                 105,
@@ -168,10 +170,10 @@ def _fixture(
                 True,
             ),
         )
-    segment_id = _h("segment")
+    segment_id = _h(segment_seed)
     segment = GCCanonicalContractSegment(
         segment_id, "GCG26-COMEX", GCSegmentPartition.DEVELOPMENT,
-        TRADE_DATE, TRADE_DATE, (_h("source"),), bars, 0,
+        trade_date, trade_date, (_h("source"),), bars, 0,
     )
     dataset_id = _h("dataset")
     manifest = GCDatasetManifest(
@@ -179,18 +181,18 @@ def _fixture(
         (segment_id,), CALENDAR_VERSION, TZDATA_VERSION, bars[0].timestamp, bars[-1].timestamp,
         bars[0].timestamp, bars[-1].timestamp, len(bars), len(bars), len(bars), 0, 0, 0, 0,
         sum(bar.volume for bar in bars), sum(bar.volume for bar in bars), 0,
-        ((segment.contract, TRADE_DATE, sum(bar.volume for bar in bars)),), (), (),
+        ((segment.contract, trade_date, sum(bar.volume for bar in bars)),), (), (),
     )
     dataset = GCDatasetBuildResult(GCDatasetBuildStatus.VALID, dataset_id, (segment,), manifest)
     split_calendar = (
         GCSplitSessionCalendarEntry(
-            CALENDAR_VERSION, TRADE_DATE,
+            CALENDAR_VERSION, trade_date,
             (GCDatasetSessionInterval(opening, session_close),),
             (_h("calendar-source"),), (_h("calendar-sha"),),
         ),
     )
     kill_calendar = (
-        KillZoneCalendarEntry(CALENDAR_VERSION, TRADE_DATE, KillZoneSessionStatus.OPEN, opening, session_close),
+        KillZoneCalendarEntry(CALENDAR_VERSION, trade_date, KillZoneSessionStatus.OPEN, opening, session_close),
     )
     split_digest = sweep_reclaim._split_calendar_digest(split_calendar)
     kill_digest = sweep_reclaim._kill_calendar_digest(kill_calendar)
@@ -199,11 +201,20 @@ def _fixture(
     snapshots: list[KillZoneSnapshot] = []
     for bar in analysis_bars:
         bar_open = bar.timestamp - timedelta(minutes=5)
+        local_open = bar_open.astimezone(NY)
+        local_close = bar.timestamp.astimezone(NY)
+        if not (
+            local_open.date() == trade_date
+            and local_close.date() == trade_date
+            and time(7, 0) <= local_open.time().replace(tzinfo=None) < time(10, 0)
+            and time(7, 0) <= local_close.time().replace(tzinfo=None) < time(10, 0)
+        ):
+            continue
         context_id = make_kill_zone_id(
             identity_kind="CONTEXT",
             instrument="GC", timeframe="5M", calendar_version=CALENDAR_VERSION,
             timezone_name="America/New_York", timezone_data_version=TZDATA_VERSION,
-            observation_index=bar.index, observation_timestamp=bar_open, trade_date=TRADE_DATE,
+            observation_index=bar.index, observation_timestamp=bar.timestamp, trade_date=trade_date,
             zone=KillZoneName.NEW_YORK_AM, session_status=KillZoneSessionStatus.OPEN,
             quality=KillZoneQuality.VERIFIED,
         )
@@ -211,7 +222,8 @@ def _fixture(
             identity_kind="SNAPSHOT",
             instrument="GC", timeframe="5M", calendar_version=CALENDAR_VERSION,
             timezone_name="America/New_York", timezone_data_version=TZDATA_VERSION,
-            effective_index=bar.index, effective_timestamp=bar_open, context_ids=(context_id,),
+            effective_index=bar.index, effective_timestamp=bar.timestamp,
+            context_ids=tuple(item.context_id for item in contexts) + (context_id,),
         )
         observation_id = sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(
             identity_kind=sweep_reclaim.GCNYAMSweepReclaimIdentityKind.OBSERVATION,
@@ -220,29 +232,116 @@ def _fixture(
             kill_zone_calendar_digest=kill_digest, timezone_name="America/New_York",
             timezone_data_version=TZDATA_VERSION,
             segment_ordinal=0, segment_id=segment_id, contract=segment.contract,
-            trade_date=TRADE_DATE, index=bar.index, bar_open_timestamp=bar_open,
+            trade_date=trade_date, index=bar.index, bar_open_timestamp=bar_open,
             bar_close_timestamp=bar.timestamp, open_tick=bar.open_tick, high_tick=bar.high_tick,
             low_tick=bar.low_tick, close_tick=bar.close_tick, volume=bar.volume, is_closed=True,
             kill_zone_context_id=context_id, kill_zone_snapshot_id=snapshot_id,
         )
         observations.append(sweep_reclaim.GCNYAMSweepReclaimObservation(
-            observation_id, 0, segment_id, segment.contract, TRADE_DATE, bar.index,
+            observation_id, 0, segment_id, segment.contract, trade_date, bar.index,
             bar_open, bar.timestamp, bar.open_tick, bar.high_tick, bar.low_tick, bar.close_tick,
             bar.volume, True, context_id, snapshot_id,
         ))
         contexts.append(KillZoneContext(
-            context_id, bar.index, bar_open, TRADE_DATE, KillZoneName.NEW_YORK_AM,
+            context_id, bar.index, bar.timestamp, trade_date, KillZoneName.NEW_YORK_AM,
             KillZoneSessionStatus.OPEN, KillZoneQuality.VERIFIED, CALENDAR_VERSION,
             "America/New_York", TZDATA_VERSION,
         ))
-        snapshots.append(KillZoneSnapshot(snapshot_id, bar.index, bar_open, (context_id,)))
+        snapshots.append(KillZoneSnapshot(
+            snapshot_id,
+            bar.index,
+            bar.timestamp,
+            tuple(item.context_id for item in contexts),
+        ))
     return {
         "instrument": "GC", "timeframe": "5M", "dataset_config": _config(),
         "dataset_result": dataset, "observations": tuple(observations),
         "split_session_calendar": split_calendar, "kill_zone_calendar": kill_calendar,
         "kill_zone_contexts": tuple(contexts), "kill_zone_snapshots": tuple(snapshots),
         "kill_zone_result": KillZoneResult(SMCV2PrimitiveStatus.VALID, tuple(contexts), tuple(snapshots)),
-        "requested_trade_dates": (TRADE_DATE,),
+        "requested_trade_dates": (trade_date,),
+    }
+
+
+def _two_segment_reset_fixture() -> dict[str, object]:
+    """Build two canonical days whose public local indices both begin at zero."""
+    first = _fixture(count=5, trade_date=TRADE_DATE, segment_seed="segment-a")
+    second_day = TRADE_DATE + timedelta(days=1)
+    second = _fixture(count=5, trade_date=second_day, segment_seed="segment-b")
+    first_dataset = first["dataset_result"]
+    second_dataset = second["dataset_result"]
+    segments = first_dataset.segments + second_dataset.segments  # type: ignore[union-attr]
+    dataset_id = _h("two-segment-reset-dataset")
+    first_manifest = first_dataset.manifest  # type: ignore[union-attr]
+    bars = tuple(bar for segment in segments for bar in segment.bars)
+    manifest = replace(
+        first_manifest,
+        dataset_id=dataset_id,
+        segment_ids=tuple(segment.segment_id for segment in segments),
+        raw_start_timestamp=bars[0].timestamp,
+        raw_end_timestamp=bars[-1].timestamp,
+        usable_start_timestamp=bars[0].timestamp,
+        usable_end_timestamp=bars[-1].timestamp,
+        parsed_row_count=len(bars),
+        eligible_row_count=len(bars),
+        development_bar_count=len(bars),
+        raw_volume=sum(bar.volume for bar in bars),
+        eligible_volume=sum(bar.volume for bar in bars),
+        completed_session_volumes=tuple(
+            (segment.contract, segment.first_trade_date, sum(bar.volume for bar in segment.bars))
+            for segment in segments
+        ),
+    )
+    dataset = replace(first_dataset, dataset_id=dataset_id, segments=segments, manifest=manifest)  # type: ignore[arg-type]
+    split_calendar = first["split_session_calendar"] + second["split_session_calendar"]  # type: ignore[operator]
+    kill_calendar = first["kill_zone_calendar"] + second["kill_zone_calendar"]  # type: ignore[operator]
+    contexts = first["kill_zone_contexts"] + second["kill_zone_contexts"]  # type: ignore[operator]
+    snapshots = first["kill_zone_snapshots"] + second["kill_zone_snapshots"]  # type: ignore[operator]
+    common = {
+        "instrument": "GC",
+        "timeframe": "5M",
+        "dataset_id": dataset_id,
+        "calendar_version": CALENDAR_VERSION,
+        "split_session_calendar_digest": sweep_reclaim._split_calendar_digest(split_calendar),
+        "kill_zone_calendar_digest": sweep_reclaim._kill_calendar_digest(kill_calendar),
+        "timezone_name": "America/New_York",
+        "timezone_data_version": TZDATA_VERSION,
+    }
+    observations: list[sweep_reclaim.GCNYAMSweepReclaimObservation] = []
+    for ordinal, source in enumerate((first, second)):
+        for item in source["observations"]:  # type: ignore[union-attr]
+            observation_id = sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(
+                identity_kind=sweep_reclaim.GCNYAMSweepReclaimIdentityKind.OBSERVATION,
+                **common,
+                segment_ordinal=ordinal,
+                segment_id=item.segment_id,
+                contract=item.contract,
+                trade_date=item.trade_date,
+                index=item.index,
+                bar_open_timestamp=item.bar_open_timestamp,
+                bar_close_timestamp=item.bar_close_timestamp,
+                open_tick=item.open_tick,
+                high_tick=item.high_tick,
+                low_tick=item.low_tick,
+                close_tick=item.close_tick,
+                volume=item.volume,
+                is_closed=item.is_closed,
+                kill_zone_context_id=item.kill_zone_context_id,
+                kill_zone_snapshot_id=item.kill_zone_snapshot_id,
+            )
+            observations.append(replace(item, segment_ordinal=ordinal, observation_id=observation_id))
+    return {
+        "instrument": "GC",
+        "timeframe": "5M",
+        "dataset_config": _config(),
+        "dataset_result": dataset,
+        "requested_trade_dates": (TRADE_DATE, second_day),
+        "split_session_calendar": split_calendar,
+        "kill_zone_calendar": kill_calendar,
+        "observations": tuple(observations),
+        "kill_zone_contexts": contexts,
+        "kill_zone_snapshots": snapshots,
+        "kill_zone_result": KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots),
     }
 
 
@@ -501,6 +600,20 @@ def test_case_05_naive_timestamp_and_timezone_version_mismatch_fail() -> None:
     assert _run(fixture, observations=(naive,) + fixture["observations"][1:]).status is SMCV2PrimitiveStatus.INVALID  # type: ignore[index]
     assert _run(fixture, dataset_config=_config(exchange_timezone="UTC")).status is SMCV2PrimitiveStatus.INVALID
     assert _run(fixture, dataset_config=_config(timezone_data_version="0.0")).status is SMCV2PrimitiveStatus.INVALID
+    assert fixture["kill_zone_contexts"][0].observation_timestamp == fixture["observations"][0].bar_close_timestamp  # type: ignore[index]
+    at_open = replace(
+        fixture["kill_zone_contexts"][0],  # type: ignore[index]
+        observation_timestamp=fixture["observations"][0].bar_open_timestamp,  # type: ignore[index]
+    )
+    assert _run(
+        fixture,
+        kill_zone_contexts=(at_open,) + fixture["kill_zone_contexts"][1:],  # type: ignore[index]
+        kill_zone_result=KillZoneResult(
+            SMCV2PrimitiveStatus.VALID,
+            (at_open,) + fixture["kill_zone_contexts"][1:],  # type: ignore[index]
+            fixture["kill_zone_snapshots"],  # type: ignore[arg-type]
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
 
 
 @pytest.mark.parametrize("contract", ("MGCJ26-COMEX", "XAUUSD", "GC", "GCJ26-CME", "GCJ26-COMEX-OPT"))
@@ -541,6 +654,9 @@ def test_case_09_early_close_preventing_source_or_horizon_is_ineligible() -> Non
         result = _run(_with_calendars(fixture, kill_zone_calendar=(early,)))
         assert result.status is SMCV2PrimitiveStatus.NONE
         assert result.reasons == ("SESSION_INELIGIBLE",)
+    reset_result = _run(_two_segment_reset_fixture())
+    assert reset_result.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert reset_result.reasons == ("INCOMPLETE_OPENING_RANGE",)
 
 
 def test_case_10_exact_six_bar_opening_range_first_known_at_0730() -> None:
@@ -619,8 +735,32 @@ def test_case_17_exact_nyam_membership_is_0700_inclusive_1000_exclusive() -> Non
     dataset_bars = fixture["dataset_result"].segments[0].bars  # type: ignore[union-attr]
     result = _run(fixture)
     assert result.status is SMCV2PrimitiveStatus.VALID
+    assert len(observations) == 35
     assert observations[0].bar_open_timestamp == _utc(TRADE_DATE, 7)
-    assert observations[-1].bar_open_timestamp == _utc(TRADE_DATE, 9, 55)
+    assert observations[-1].bar_open_timestamp == _utc(TRADE_DATE, 9, 50)
+    assert observations[-1].bar_close_timestamp == _utc(TRADE_DATE, 9, 55)
+    terminal_bar = next(
+        bar
+        for bar in dataset_bars
+        if bar.timestamp - timedelta(minutes=5) == _utc(TRADE_DATE, 9, 55)
+    )
+    assert terminal_bar.timestamp == _utc(TRADE_DATE, 10)
+    assert terminal_bar.index not in {item.index for item in observations}
+    with pytest.raises((TypeError, ValueError)):
+        make_kill_zone_id(
+            identity_kind="CONTEXT",
+            instrument="GC",
+            timeframe="5M",
+            calendar_version=CALENDAR_VERSION,
+            timezone_name="America/New_York",
+            timezone_data_version=TZDATA_VERSION,
+            observation_index=terminal_bar.index,
+            observation_timestamp=terminal_bar.timestamp,
+            trade_date=TRADE_DATE,
+            zone=KillZoneName.NEW_YORK_AM,
+            session_status=KillZoneSessionStatus.OPEN,
+            quality=KillZoneQuality.VERIFIED,
+        )
     assert dataset_bars[-1].timestamp - timedelta(minutes=5) == _utc(TRADE_DATE, 10)
     assert dataset_bars[-1].index not in {item.index for item in observations}
 
@@ -651,11 +791,10 @@ def test_case_18_nyam_projection_missing_extra_and_reordered_evidence_fails_clos
     ).status is SMCV2PrimitiveStatus.INVALID
 
 
-def test_case_19_non_nyam_projection_member_is_unrequested_without_relabeling_dataset_bar() -> None:
+def test_case_19_complete_non_nyam_member_is_valid_but_never_becomes_a_phase_b_observation() -> None:
     fixture = _fixture(full_session_edges=True)
     common = _identity_common(fixture)
     pre_bar = fixture["dataset_result"].segments[0].bars[0]  # type: ignore[union-attr]
-    pre_open = pre_bar.timestamp - timedelta(minutes=5)
     context_id = make_kill_zone_id(
         identity_kind="CONTEXT",
         instrument="GC",
@@ -664,7 +803,7 @@ def test_case_19_non_nyam_projection_member_is_unrequested_without_relabeling_da
         timezone_name="America/New_York",
         timezone_data_version=TZDATA_VERSION,
         observation_index=pre_bar.index,
-        observation_timestamp=pre_open,
+        observation_timestamp=pre_bar.timestamp,
         trade_date=TRADE_DATE,
         zone=KillZoneName.LONDON,
         session_status=KillZoneSessionStatus.OPEN,
@@ -678,13 +817,13 @@ def test_case_19_non_nyam_projection_member_is_unrequested_without_relabeling_da
         timezone_name="America/New_York",
         timezone_data_version=TZDATA_VERSION,
         effective_index=pre_bar.index,
-        effective_timestamp=pre_open,
+        effective_timestamp=pre_bar.timestamp,
         context_ids=(context_id,),
     )
     extra_context = KillZoneContext(
         context_id,
         pre_bar.index,
-        pre_open,
+        pre_bar.timestamp,
         TRADE_DATE,
         KillZoneName.LONDON,
         KillZoneSessionStatus.OPEN,
@@ -693,17 +832,60 @@ def test_case_19_non_nyam_projection_member_is_unrequested_without_relabeling_da
         common["timezone_name"],
         common["timezone_data_version"],
     )
-    extra_snapshot = KillZoneSnapshot(snapshot_id, pre_bar.index, pre_open, (context_id,))
+    extra_snapshot = KillZoneSnapshot(snapshot_id, pre_bar.index, pre_bar.timestamp, (context_id,))
     contexts = (extra_context,) + fixture["kill_zone_contexts"]  # type: ignore[operator]
-    snapshots = (extra_snapshot,) + fixture["kill_zone_snapshots"]  # type: ignore[operator]
+    snapshots = [extra_snapshot]
+    for snapshot in fixture["kill_zone_snapshots"]:  # type: ignore[union-attr]
+        history = (context_id,) + snapshot.context_ids
+        rebound_id = make_kill_zone_id(
+            identity_kind="SNAPSHOT",
+            instrument="GC",
+            timeframe="5M",
+            calendar_version=CALENDAR_VERSION,
+            timezone_name="America/New_York",
+            timezone_data_version=TZDATA_VERSION,
+            effective_index=snapshot.index,
+            effective_timestamp=snapshot.timestamp,
+            context_ids=history,
+        )
+        snapshots.append(KillZoneSnapshot(rebound_id, snapshot.index, snapshot.timestamp, history))
+    rebound_observations = tuple(
+        replace(
+            item,
+            kill_zone_snapshot_id=snapshot.snapshot_id,
+            observation_id=sweep_reclaim.make_gc_ny_am_sweep_reclaim_id(
+                identity_kind=sweep_reclaim.GCNYAMSweepReclaimIdentityKind.OBSERVATION,
+                **common,
+                segment_ordinal=item.segment_ordinal,
+                segment_id=item.segment_id,
+                contract=item.contract,
+                trade_date=item.trade_date,
+                index=item.index,
+                bar_open_timestamp=item.bar_open_timestamp,
+                bar_close_timestamp=item.bar_close_timestamp,
+                open_tick=item.open_tick,
+                high_tick=item.high_tick,
+                low_tick=item.low_tick,
+                close_tick=item.close_tick,
+                volume=item.volume,
+                is_closed=item.is_closed,
+                kill_zone_context_id=item.kill_zone_context_id,
+                kill_zone_snapshot_id=snapshot.snapshot_id,
+            ),
+        )
+        for item, snapshot in zip(fixture["observations"], snapshots[1:])  # type: ignore[arg-type]
+    )
+    snapshots_tuple = tuple(snapshots)
     result = _run(
         fixture,
+        observations=rebound_observations,
         kill_zone_contexts=contexts,
-        kill_zone_snapshots=snapshots,
-        kill_zone_result=KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots),
+        kill_zone_snapshots=snapshots_tuple,
+        kill_zone_result=KillZoneResult(SMCV2PrimitiveStatus.VALID, contexts, snapshots_tuple),
     )
-    assert result.status is SMCV2PrimitiveStatus.INVALID
-    assert not result.opening_ranges and not result.candidates and not result.outcomes
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert result.opening_ranges and result.candidates and result.outcomes
+    assert context_id not in {item.kill_zone_context_id for item in rebound_observations}
 
 
 @pytest.mark.parametrize("changes", (
@@ -1100,8 +1282,8 @@ def test_case_46_complete_dependency_preserves_native_valid_and_none_statuses() 
     none_result = _run(none_fixture)
     assert valid_result.status is SMCV2PrimitiveStatus.VALID
     assert none_result.status is SMCV2PrimitiveStatus.NONE
-    assert len(valid_fixture["observations"]) == len(valid_fixture["kill_zone_contexts"]) == len(valid_fixture["kill_zone_snapshots"]) == 36  # type: ignore[arg-type]
-    assert len(none_fixture["observations"]) == len(none_fixture["kill_zone_contexts"]) == len(none_fixture["kill_zone_snapshots"]) == 36  # type: ignore[arg-type]
+    assert len(valid_fixture["observations"]) == len(valid_fixture["kill_zone_contexts"]) == len(valid_fixture["kill_zone_snapshots"]) == 35  # type: ignore[arg-type]
+    assert len(none_fixture["observations"]) == len(none_fixture["kill_zone_contexts"]) == len(none_fixture["kill_zone_snapshots"]) == 35  # type: ignore[arg-type]
     assert valid_result.candidates and valid_result.outcomes
     assert not none_result.candidates and not none_result.outcomes
 

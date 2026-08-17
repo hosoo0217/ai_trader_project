@@ -219,12 +219,14 @@ _TERMINAL_OUTCOMES = {
     GCNYAMSweepReclaimOutcomeType.SAME_BAR_AMBIGUOUS,
 }
 
+_CausalKey = tuple[int, int, datetime]
+
 
 class _EvidenceError(ValueError):
     def __init__(
         self,
         reason: str,
-        position: int | None = None,
+        position: _CausalKey | None = None,
         prefix: tuple[Any, ...] = (),
     ) -> None:
         super().__init__(reason)
@@ -690,8 +692,7 @@ def _validate_dataset(config: GCDatasetBuildConfig, dataset: Any) -> tuple[str, 
     if dataset.manifest is None or dataset.manifest.dataset_id != dataset_id or dataset.manifest.calendar_version == "" or dataset.manifest.timezone_data_version.upper() != config.timezone_data_version.upper():
         raise _EvidenceError("INVALID_DATASET")
     segments = _tuple(dataset.segments, "segments")
-    previous_index: int | None = None
-    previous_timestamp: datetime | None = None
+    previous_segment_timestamp: datetime | None = None
     for ordinal, segment in enumerate(segments):
         if _status_value(segment.partition) != "DEVELOPMENT":
             raise _EvidenceError("OOS_CONTACT", ordinal)
@@ -701,6 +702,8 @@ def _validate_dataset(config: GCDatasetBuildConfig, dataset: Any) -> tuple[str, 
         _day(segment.last_trade_date, "last_trade_date")
         if segment.first_trade_date > segment.last_trade_date:
             raise _EvidenceError("INVALID_DATASET", ordinal)
+        previous_index: int | None = None
+        previous_timestamp: datetime | None = None
         for bar in _tuple(segment.bars, "bars"):
             bar_timestamp = _timestamp(bar.timestamp, "bar timestamp")
             bar_index = _integer(bar.index, "bar index", minimum=0)
@@ -708,11 +711,16 @@ def _validate_dataset(config: GCDatasetBuildConfig, dataset: Any) -> tuple[str, 
                 (previous_index is not None and bar_index <= previous_index)
                 or (previous_timestamp is not None and bar_timestamp <= previous_timestamp)
             ):
-                raise _EvidenceError("INVALID_DATASET", ordinal)
+                raise _EvidenceError("INVALID_DATASET", (ordinal, bar_index, bar_timestamp))
             previous_index = bar_index
             previous_timestamp = bar_timestamp
             if bar.is_closed is not True:
-                raise _EvidenceError("INVALID_DATASET", ordinal)
+                raise _EvidenceError("INVALID_DATASET", (ordinal, bar_index, bar_timestamp))
+        if previous_timestamp is not None:
+            first_timestamp = _timestamp(segment.bars[0].timestamp, "bar timestamp")
+            if previous_segment_timestamp is not None and first_timestamp <= previous_segment_timestamp:
+                raise _EvidenceError("INVALID_DATASET", (ordinal, segment.bars[0].index, first_timestamp))
+            previous_segment_timestamp = previous_timestamp
     return dataset_id, segments, dataset.manifest
 
 
@@ -799,12 +807,16 @@ def _session_covers_full_analysis_window(
 
 
 def _is_expected_ny_am_bar(bar: Any, trade_day: date) -> bool:
-    """Return exact start-inclusive/end-exclusive NY-AM bar-open membership."""
-    bar_open = _timestamp(bar.timestamp, "bar timestamp") - timedelta(minutes=5)
+    """Return the exact five-minute structural/evidence NY-AM intersection."""
+    bar_close = _timestamp(bar.timestamp, "bar timestamp")
+    bar_open = bar_close - timedelta(minutes=5)
     local_open = bar_open.astimezone(ZoneInfo(_TIMEZONE_NAME))
+    local_close = bar_close.astimezone(ZoneInfo(_TIMEZONE_NAME))
     return (
         local_open.date() == trade_day
+        and local_close.date() == trade_day
         and time(7, 0) <= local_open.time().replace(tzinfo=None) < time(10, 0)
+        and time(7, 0) <= local_close.time().replace(tzinfo=None) < time(10, 0)
     )
 
 
@@ -812,7 +824,16 @@ def _validate_observation(item: Any, expected: tuple[int, Any, date], common: di
     ordinal, segment, trade_date = expected
     if not isinstance(item, GCNYAMSweepReclaimObservation):
         raise _EvidenceError("INVALID_OBSERVATION")
-    position = item.index if isinstance(item.index, int) and not isinstance(item.index, bool) else None
+    position = None
+    if (
+        isinstance(getattr(item, "index", None), int)
+        and not isinstance(getattr(item, "index", None), bool)
+        and isinstance(getattr(item, "bar_close_timestamp", None), datetime)
+    ):
+        try:
+            position = (ordinal, item.index, _timestamp(item.bar_close_timestamp, "bar_close_timestamp"))
+        except (TypeError, ValueError):
+            position = None
     try:
         if item.segment_ordinal != ordinal or item.segment_id != segment.segment_id or item.contract != segment.contract or item.trade_date != trade_date:
             raise ValueError("observation foreign reference")
@@ -843,13 +864,13 @@ def _validate_observation(item: Any, expected: tuple[int, Any, date], common: di
 def _validate_supplied_observation_shape(value: Any) -> tuple[GCNYAMSweepReclaimObservation, ...]:
     """Validate evidence that does not depend on a missing foreign collection."""
     result = _tuple(value, "observations")
-    previous_index: int | None = None
+    previous_key: _CausalKey | None = None
     previous_opening: datetime | None = None
-    previous_closing: datetime | None = None
     collapsed: list[GCNYAMSweepReclaimObservation] = []
     seen_ids: dict[str, GCNYAMSweepReclaimObservation] = {}
     seen_effective: dict[tuple[int, int, datetime], GCNYAMSweepReclaimObservation] = {}
     for item in result:
+        safe_position: _CausalKey | None = None
         if not isinstance(item, GCNYAMSweepReclaimObservation):
             raise _EvidenceError("INVALID_OBSERVATION")
         try:
@@ -878,7 +899,8 @@ def _validate_supplied_observation_shape(value: Any) -> tuple[GCNYAMSweepReclaim
                 raise ValueError("observation must be fully closed")
             _hash(item.kill_zone_context_id, "kill_zone_context_id")
             _hash(item.kill_zone_snapshot_id, "kill_zone_snapshot_id")
-            effective_key = (segment_ordinal, index, opening)
+            effective_key = (segment_ordinal, index, closing)
+            safe_position = effective_key
             prior_by_id = seen_ids.get(observation_id)
             prior_by_effective = seen_effective.get(effective_key)
             if prior_by_id is not None:
@@ -887,22 +909,27 @@ def _validate_supplied_observation_shape(value: Any) -> tuple[GCNYAMSweepReclaim
                 continue
             if prior_by_effective is not None:
                 raise ValueError("forked observation")
-            if (
-                (previous_index is not None and index <= previous_index)
-                or (previous_opening is not None and opening <= previous_opening)
-                or (previous_closing is not None and closing <= previous_closing)
-            ):
-                raise ValueError("observation ordering")
-            previous_index = index
+            if previous_key is not None:
+                prior_ordinal, prior_index, prior_closing = previous_key
+                if segment_ordinal < prior_ordinal:
+                    raise ValueError("observation ordering")
+                if segment_ordinal == prior_ordinal and (
+                    index <= prior_index
+                    or opening <= previous_opening
+                    or closing <= prior_closing
+                ):
+                    raise ValueError("observation ordering")
+                if segment_ordinal > prior_ordinal and closing <= prior_closing:
+                    raise ValueError("observation ordering")
+            previous_key = effective_key
             previous_opening = opening
-            previous_closing = closing
             seen_ids[observation_id] = item
             seen_effective[effective_key] = item
             collapsed.append(item)
         except (AttributeError, TypeError, ValueError) as exc:
             raise _EvidenceError(
                 "INVALID_OBSERVATION",
-                getattr(item, "index", None),
+                safe_position,
                 tuple(collapsed),
             ) from exc
     return tuple(collapsed)
@@ -918,11 +945,8 @@ def _validate_supplied_kill_result_shape(value: Any) -> KillZoneResult:
         members = _tuple(getattr(value, name), name)
         if any(not isinstance(item, str) or not item or item != item.strip() for item in members):
             raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
-    previous_context: tuple[int, datetime] | None = None
-    previous_snapshot: tuple[int, datetime] | None = None
     context_ids: set[str] = set()
     snapshot_ids: set[str] = set()
-    position: int | None = None
     try:
         for context in contexts:
             if not isinstance(context, KillZoneContext):
@@ -931,14 +955,8 @@ def _validate_supplied_kill_result_shape(value: Any) -> KillZoneResult:
             if context_id in context_ids:
                 raise ValueError("duplicate context")
             context_ids.add(context_id)
-            key = (
-                _integer(context.observation_index, "observation_index", minimum=0),
-                _timestamp(context.observation_timestamp, "observation_timestamp"),
-            )
-            position = key[0]
-            if previous_context is not None and key <= previous_context:
-                raise ValueError("context ordering")
-            previous_context = key
+            _integer(context.observation_index, "observation_index", minimum=0)
+            _timestamp(context.observation_timestamp, "observation_timestamp")
             _day(context.trade_date, "context trade_date")
             if context.zone is not None and (
                 not isinstance(context.zone, Enum)
@@ -964,17 +982,13 @@ def _validate_supplied_kill_result_shape(value: Any) -> KillZoneResult:
             if snapshot_id in snapshot_ids:
                 raise ValueError("duplicate snapshot")
             snapshot_ids.add(snapshot_id)
-            key = (
-                _integer(snapshot.index, "snapshot index", minimum=0),
-                _timestamp(snapshot.timestamp, "snapshot timestamp"),
-            )
-            position = key[0]
-            if previous_snapshot is not None and key <= previous_snapshot:
-                raise ValueError("snapshot ordering")
-            previous_snapshot = key
-            _hash_tuple(snapshot.context_ids, "snapshot context_ids", allow_empty=False)
+            _integer(snapshot.index, "snapshot index", minimum=0)
+            _timestamp(snapshot.timestamp, "snapshot timestamp")
+            history = _hash_tuple(snapshot.context_ids, "snapshot context_ids", allow_empty=False)
+            if len(set(history)) != len(history):
+                raise ValueError("snapshot history duplicates")
     except (AttributeError, TypeError, ValueError) as exc:
-        raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", position) from exc
+        raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE") from exc
     if _status_value(value.status) == "NONE" and (contexts or snapshots):
         raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
     return value
@@ -985,26 +999,51 @@ def _validate_kill_evidence(
     result: Any,
     common: dict[str, Any],
     *,
-    require_exact_references: bool,
+    segments: tuple[Any, ...],
+    split_entries: tuple[GCSplitSessionCalendarEntry, ...],
 ) -> None:
     result = _validate_supplied_kill_result_shape(result)
     contexts = _tuple(result.contexts, "contexts")
     snapshots = _tuple(result.snapshots, "snapshots")
-    context_map: dict[str, KillZoneContext] = {}
-    snapshot_map: dict[str, KillZoneSnapshot] = {}
-    previous_context: tuple[int, datetime] | None = None
-    previous_snapshot: tuple[int, datetime] | None = None
+    bar_owners: dict[tuple[int, datetime, date], list[tuple[int, Any]]] = {}
+    for ordinal, segment in enumerate(segments):
+        for bar in _tuple(segment.bars, "bars"):
+            moment = _timestamp(bar.timestamp, "bar timestamp")
+            trade_day = _bar_trade_date(moment, split_entries)
+            if trade_day is None:
+                continue
+            owner_key = (_integer(bar.index, "bar index", minimum=0), moment, trade_day)
+            bar_owners.setdefault(owner_key, []).append((ordinal, segment))
+
+    context_map: dict[str, tuple[KillZoneContext, _CausalKey]] = {}
+    contexts_by_segment: dict[int, list[str]] = {}
+    previous_context: _CausalKey | None = None
     for context in contexts:
-        if not isinstance(context, KillZoneContext):
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
-        key = (_integer(context.observation_index, "observation_index", minimum=0), _timestamp(context.observation_timestamp, "observation_timestamp"))
-        if previous_context is not None and key <= previous_context:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0])
-        previous_context = key
-        context_id = _hash(context.context_id, "context_id")
-        if context_id in context_map:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0])
+        safe_key: _CausalKey | None = None
         try:
+            if not isinstance(context, KillZoneContext):
+                raise ValueError("context type")
+            index = _integer(context.observation_index, "observation_index", minimum=0)
+            moment = _timestamp(context.observation_timestamp, "observation_timestamp")
+            trade_day = _day(context.trade_date, "context trade_date")
+            owners = bar_owners.get((index, moment, trade_day), ())
+            if len(owners) != 1:
+                raise ValueError("context/dataset ownership")
+            ordinal, _ = owners[0]
+            key = (ordinal, index, moment)
+            safe_key = key
+            if previous_context is not None:
+                if key[0] < previous_context[0]:
+                    raise ValueError("context ordering")
+                if key[0] == previous_context[0] and (
+                    key[1] <= previous_context[1] or key[2] <= previous_context[2]
+                ):
+                    raise ValueError("context ordering")
+                if key[0] > previous_context[0] and key[2] <= previous_context[2]:
+                    raise ValueError("context ordering")
+            context_id = _hash(context.context_id, "context_id")
+            if context_id in context_map:
+                raise ValueError("duplicate context")
             expected_context = make_kill_zone_id(
                 identity_kind="CONTEXT", instrument=common["instrument"], timeframe=common["timeframe"],
                 calendar_version=common["calendar_version"], timezone_name=_TIMEZONE_NAME,
@@ -1015,24 +1054,51 @@ def _validate_kill_evidence(
             if expected_context != context_id:
                 raise ValueError("context identity")
         except (AttributeError, TypeError, ValueError) as exc:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0]) from exc
-        context_map[context_id] = context
+            raise _EvidenceError(
+                "INVALID_KILL_ZONE_EVIDENCE",
+                safe_key,
+            ) from exc
+        previous_context = key
+        context_map[context_id] = (context, key)
+        contexts_by_segment.setdefault(ordinal, []).append(context_id)
+
+    snapshot_map: dict[str, tuple[KillZoneSnapshot, _CausalKey]] = {}
+    snapshot_counts: dict[int, int] = {}
+    previous_snapshot: _CausalKey | None = None
     for snapshot in snapshots:
-        if not isinstance(snapshot, KillZoneSnapshot):
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
-        key = (_integer(snapshot.index, "snapshot index", minimum=0), _timestamp(snapshot.timestamp, "snapshot timestamp"))
-        if previous_snapshot is not None and key <= previous_snapshot:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0])
-        previous_snapshot = key
-        snapshot_id = _hash(snapshot.snapshot_id, "snapshot_id")
-        if snapshot_id in snapshot_map:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0])
+        safe_key = None
         try:
-            if len(snapshot.context_ids) != 1 or snapshot.context_ids[0] not in context_map:
+            if not isinstance(snapshot, KillZoneSnapshot):
+                raise ValueError("snapshot type")
+            history = _hash_tuple(snapshot.context_ids, "snapshot context_ids", allow_empty=False)
+            if len(set(history)) != len(history) or history[-1] not in context_map:
                 raise ValueError("snapshot context reference")
-            context = context_map[snapshot.context_ids[0]]
-            if context.observation_index != snapshot.index or context.observation_timestamp != snapshot.timestamp:
+            terminal_context, terminal_key = context_map[history[-1]]
+            ordinal = terminal_key[0]
+            key = (
+                ordinal,
+                _integer(snapshot.index, "snapshot index", minimum=0),
+                _timestamp(snapshot.timestamp, "snapshot timestamp"),
+            )
+            safe_key = key
+            if key != terminal_key:
                 raise ValueError("snapshot/context moment")
+            if previous_snapshot is not None:
+                if key[0] < previous_snapshot[0]:
+                    raise ValueError("snapshot ordering")
+                if key[0] == previous_snapshot[0] and (
+                    key[1] <= previous_snapshot[1] or key[2] <= previous_snapshot[2]
+                ):
+                    raise ValueError("snapshot ordering")
+                if key[0] > previous_snapshot[0] and key[2] <= previous_snapshot[2]:
+                    raise ValueError("snapshot ordering")
+            expected_position = snapshot_counts.get(ordinal, 0)
+            expected_history = tuple(contexts_by_segment.get(ordinal, ())[: expected_position + 1])
+            if history != expected_history or terminal_context.context_id != history[-1]:
+                raise ValueError("snapshot history mirroring")
+            snapshot_id = _hash(snapshot.snapshot_id, "snapshot_id")
+            if snapshot_id in snapshot_map:
+                raise ValueError("duplicate snapshot")
             expected_snapshot = make_kill_zone_id(
                 identity_kind="SNAPSHOT", instrument=common["instrument"], timeframe=common["timeframe"],
                 calendar_version=common["calendar_version"], timezone_name=_TIMEZONE_NAME,
@@ -1042,23 +1108,31 @@ def _validate_kill_evidence(
             if expected_snapshot != snapshot_id:
                 raise ValueError("snapshot identity")
         except (AttributeError, TypeError, ValueError) as exc:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", key[0]) from exc
-        snapshot_map[snapshot_id] = snapshot
+            raise _EvidenceError(
+                "INVALID_KILL_ZONE_EVIDENCE",
+                safe_key,
+            ) from exc
+        previous_snapshot = key
+        snapshot_counts[ordinal] = expected_position + 1
+        snapshot_map[snapshot_id] = (snapshot, key)
+
+    if any(snapshot_counts.get(ordinal, 0) != len(ids) for ordinal, ids in contexts_by_segment.items()):
+        raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
     referenced_context_ids = {item.kill_zone_context_id for item in observations}
     referenced_snapshot_ids = {item.kill_zone_snapshot_id for item in observations}
-    if require_exact_references and (
-        set(context_map) != referenced_context_ids or set(snapshot_map) != referenced_snapshot_ids
-    ):
-        raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
     if not referenced_context_ids.issubset(context_map) or not referenced_snapshot_ids.issubset(snapshot_map):
         raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE")
     for item in observations:
         try:
-            context = context_map[item.kill_zone_context_id]
-            snapshot = snapshot_map[item.kill_zone_snapshot_id]
+            context, context_key = context_map[item.kill_zone_context_id]
+            snapshot, snapshot_key = snapshot_map[item.kill_zone_snapshot_id]
+            expected_key = (
+                item.segment_ordinal,
+                item.index,
+                _timestamp(item.bar_close_timestamp, "bar close"),
+            )
             if (
-                context.observation_index != item.index
-                or _timestamp(context.observation_timestamp, "context timestamp") != _timestamp(item.bar_open_timestamp, "bar open")
+                context_key != expected_key
                 or context.trade_date != item.trade_date
                 or _status_value(context.zone) != "NEW_YORK_AM"
                 or _status_value(context.session_status) not in {"OPEN", "EARLY_CLOSE"}
@@ -1068,10 +1142,13 @@ def _validate_kill_evidence(
                 or context.timezone_data_version.upper() != common["timezone_data_version"]
             ):
                 raise ValueError("context mismatch")
-            if snapshot.index != item.index or _timestamp(snapshot.timestamp, "snapshot timestamp") != _timestamp(item.bar_open_timestamp, "bar open") or snapshot.context_ids != (context.context_id,):
+            if snapshot_key != expected_key or snapshot.context_ids[-1] != context.context_id:
                 raise ValueError("snapshot mismatch")
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
-            raise _EvidenceError("INVALID_KILL_ZONE_EVIDENCE", item.index) from exc
+            raise _EvidenceError(
+                "INVALID_KILL_ZONE_EVIDENCE",
+                (item.segment_ordinal, item.index, _timestamp(item.bar_close_timestamp, "bar close")),
+            ) from exc
 
 
 def _make_manifest(common: dict[str, Any], requested: tuple[date, ...], ranges: tuple[GCNYAMSweepReclaimOpeningRange, ...], candidates: tuple[GCNYAMSweepReclaimCandidate, ...], outcomes: tuple[GCNYAMSweepReclaimOutcome, ...], counts: dict[str, int], reasons: tuple[str, ...]) -> GCNYAMSweepReclaimManifest:
@@ -1230,7 +1307,7 @@ def analyze_gc_ny_am_opening_range_sweep_reclaim_reversion(
         if len(supplied_observations) > len(expected):
             raise _EvidenceError("UNREQUESTED_EVIDENCE")
         valid_observations: list[GCNYAMSweepReclaimObservation] = []
-        invalid_position: int | None = (
+        invalid_position: _CausalKey | None = (
             observation_shape_issue.position
             if observation_shape_issue is not None
             else None
@@ -1239,12 +1316,20 @@ def analyze_gc_ny_am_opening_range_sweep_reclaim_reversion(
             reasons.add(observation_shape_issue.reason)
         for position, item in enumerate(supplied_observations):
             if position >= len(expected):
-                invalid_position = position
+                invalid_position = (
+                    item.segment_ordinal,
+                    item.index,
+                    _timestamp(item.bar_close_timestamp, "bar close"),
+                )
                 reasons.add("UNREQUESTED_EVIDENCE")
                 break
             ordinal, segment, trade_day, bar = expected[position]
             if getattr(item, "index", None) != bar.index:
-                invalid_position = getattr(item, "index", position) if isinstance(getattr(item, "index", None), int) else position
+                invalid_position = (
+                    ordinal,
+                    _integer(bar.index, "bar index", minimum=0),
+                    _timestamp(bar.timestamp, "bar timestamp"),
+                )
                 reasons.add("INVALID_OBSERVATION")
                 break
             try:
@@ -1261,13 +1346,24 @@ def analyze_gc_ny_am_opening_range_sweep_reclaim_reversion(
                 tuple(valid_observations),
                 kill_zone_result,
                 common,
-                require_exact_references=invalid_position is None,
+                segments=segments,
+                split_entries=split_entries,
             )
         except _EvidenceError as exc:
-            invalid_position = exc.position if exc.position is not None else 0
+            invalid_position = exc.position
             reasons.add(exc.reason)
-        if invalid_position is not None:
-            valid_observations = [item for item in valid_observations if item.index < invalid_position]
+            if invalid_position is None:
+                valid_observations = []
+        if "INVALID_OBSERVATION" in reasons or "UNREQUESTED_EVIDENCE" in reasons or "INVALID_KILL_ZONE_EVIDENCE" in reasons:
+            if invalid_position is not None:
+                valid_observations = [
+                    item for item in valid_observations
+                    if (
+                        item.segment_ordinal,
+                        item.index,
+                        _timestamp(item.bar_close_timestamp, "bar close"),
+                    ) < invalid_position
+                ]
             final_status = SMCV2PrimitiveStatus.INVALID
             counts["INVALID_GROUPS"] += 1
 
