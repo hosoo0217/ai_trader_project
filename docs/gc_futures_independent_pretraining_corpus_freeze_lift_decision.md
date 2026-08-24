@@ -5,8 +5,11 @@
 - Record type: documentation-only bounded freeze-lift decision.
 - Capability: deterministic independent GC Futures pretraining-corpus validation,
   chronological partitioning, purge/embargo enforcement, and immutable manifest publication.
-- Decision version: `GC-PRETRAINING-CORPUS-DECISION-V1`.
+- Decision version: `GC-PRETRAINING-CORPUS-DECISION-V2`.
 - Future implementation version: `GC-PRETRAINING-CORPUS-V1`.
+- V2 correction: the committed `GCDatasetBuildResult` omits the build config and normalized
+  calendar digest preimage required by public DATASET/SEGMENT identity schemas; Sections 6, 18,
+  19, 22, and 23 now require those caller-supplied immutable proof inputs without rebuilding data.
 - Instrument/timeframe/tick size: exactly `GC` / `5M` / `Decimal("0.1")`.
 - Feature schema: exactly `GC_AI_FEATURE_SCHEMA_V1`.
 - Label schema: exactly `GC_AI_LABEL_SCHEMA_V1`.
@@ -26,8 +29,9 @@ boundary-crossing evidence atomically; and publishes deterministic research reco
 
 The builder is reference-only with respect to upstream evidence. It must not rerun detectors,
 recompute features or labels, repair incomplete evidence, change dates or thresholds, infer missing
-lineage, or open the sealed final-OOS payload. Its output is a research corpus candidate, not proof
-of profitability or authority to train or trade.
+lineage, or open the sealed final-OOS payload. Canonical identity recomputation from caller-supplied
+immutable proof inputs is validation, not upstream evidence recomputation. Its output is a research
+corpus candidate, not proof of profitability or authority to train or trade.
 
 ## 3. Verified Baseline
 
@@ -77,7 +81,8 @@ The future builder may only validate caller-supplied immutable objects and retur
 It has no authority to:
 
 - read a path, directory, environment variable, database, network resource, email, chart, or clock;
-- mutate, enrich, reorder, repair, or recompute any upstream result;
+- mutate, enrich, reorder, repair, or regenerate any upstream result; canonical identity validation
+  from supplied immutable fields remains mandatory;
 - generate detector, candidate, feature, label, outcome, calendar, roll, or source evidence;
 - inspect any sealed final-OOS row, bar, feature, label, outcome, or metric;
 - fit preprocessing, train, tune, score, compare, calibrate, serialize, or register a model;
@@ -86,19 +91,51 @@ It has no authority to:
 
 Any such need is a mandatory STOP and requires a separate accepted proposal and freeze-lift record.
 
-## 6. Immutable Upstream Result Contracts
+## 6. Immutable Upstream Result and Dataset-Identity Proof Contracts
 
-The three upstream arguments are exact instances, not subclasses or mutable look-alikes:
+The five upstream/proof arguments are exact instances, not subclasses or mutable look-alikes:
 
-1. `dataset_result: GCDatasetBuildResult` with exact `VALID` status, non-null manifest and dataset
+1. `dataset_config: GCDatasetBuildConfig` is the exact immutable configuration used to create the
+   supplied dataset. All eleven fields are locally validated, including exact `GC` / `5M`, source
+   timezone `Asia/Tokyo`, exchange timezone `America/New_York`, runtime timezone-data version,
+   `Decimal("0.1")`, contract/date geometry, roll-confirmation count `3`, and ordered OOS dates;
+2. `dataset_calendar_entries` is the exact ordered tuple of `KillZoneCalendarEntry` or
+   `GCSplitSessionCalendarEntry` objects used by the dataset build. It is normalized without silent
+   sorting under the committed dataset-builder rules: strictly increasing unique trade dates, one
+   nonempty calendar version, canonical New York single-interval session bounds, exact OPEN/
+   EARLY_CLOSE/SESSION_CLOSED geometry, ordered non-touching five-minute-grid split intervals, no
+   cross-entry overlap, and exact split-session provenance;
+3. `dataset_result: GCDatasetBuildResult` has exact `VALID` status, a non-null manifest and dataset
    ID, canonical segment ordering, zero exposed OOS bars, and locally recomputable DATASET and
-   SEGMENT identities;
-2. `candidate_result: GCCandidateEvidenceResult` with exact `VALID` status, non-null manifest,
+   SEGMENT identities using items 1 and 2;
+4. `candidate_result: GCCandidateEvidenceResult` has exact `VALID` status, a non-null manifest,
    exact dataset ID, detector versions, ordered segment results, candidate references, and locally
    recomputable BUNDLE and MANIFEST identities;
-3. `feature_label_result: GCFeatureLabelResult` with exact `VALID` status, non-null manifest, exact
+5. `feature_label_result: GCFeatureLabelResult` has exact `VALID` status, a non-null manifest, exact
    dataset ID, schema IDs, horizon `12`, equal ordered row/label histories, and locally recomputable
    FEATURE_ROW, LABEL, and MANIFEST identities.
+
+The dataset proof boundary is executable and exact:
+
+- each SEGMENT bar digest is recomputed from its ordered immutable bars, then the SEGMENT ID is
+  recomputed through public `make_gc_dataset_id(..., config=dataset_config, ...)`;
+- the normalized calendar digest is lowercase SHA-256 of canonical JSON for the ordered tuple of
+  `{calendar_kind, calendar_version, trade_date, session_status, intervals,
+  source_artifact_ids, source_artifact_sha256s}` using sorted keys, compact separators, UTC
+  timestamp text, and the dataset builder's exact `SINGLE_INTERVAL` / `SPLIT_SESSION` rules;
+- the dataset evidence digest is reconstructed from every immutable manifest field using the
+  committed dataset-builder payload, including ISO trade dates and UTC timestamps;
+- the DATASET ID is recomputed through public `make_gc_dataset_id` from `dataset_config`, ordered
+  source/coverage/segment IDs, the recomputed calendar and evidence digests, the manifest's exact
+  coverage digest, and ordered roll trade dates;
+- the manifest coverage digest is an opaque canonical 64-hex dependency value because coverage
+  evidence is outside this API; its exact shape and use in DATASET identity are validated, but its
+  unavailable preimage is not invented.
+
+Allowed direct dependency imports for this proof are limited to the already committed public
+dataset/calendar types and `make_gc_dataset_id` from `analysis.gc_dataset_builder` and
+`smc.kill_zones`. Calling `build_gc_futures_dataset`, importing private helpers, or widening the API
+to raw exports/coverage evidence is forbidden.
 
 Every tuple must be an exact tuple. Every public upstream dataclass must retain its frozen field
 contract. Hashes are lowercase 64-hex. Timestamps are timezone-aware and normalize to UTC without
@@ -107,7 +144,8 @@ canonical. Missing or malformed supplied evidence is never hidden by another mis
 
 Unavailable foreign identities remain opaque only where the committed dependency contract makes
 recomputation impossible. Opaque means exact shape/equality/reference validation, never invented
-proof. Any locally recomputable mismatch is `INVALID`.
+proof. Any locally recomputable mismatch, missing dataset identity-proof input while a dataset is
+supplied, or conflict between proof inputs and an available result is `INVALID`.
 
 ## 7. Exact Source Registry Contract
 
@@ -233,9 +271,11 @@ debug evidence may be emitted. Any payload access or use of full GCQ26 as a repl
 ## 11. Calendar, Session, Contract, and Roll Integrity
 
 Every emitted record must reconcile one canonical trade date, contract-specific segment, exact
-calendar version, runtime timezone-data version, source ID tuple, and complete session evidence.
-Calendar or timezone mismatch, unexplained expected slot, duplicate moment, invalid OHLC/volume,
-maintenance bridging, session-closed evidence, or cross-contract horizon is `INVALID`.
+caller-supplied dataset config, calendar version, runtime timezone-data version, source ID tuple,
+and complete session evidence. The normalized caller-supplied calendar tuple must reproduce the
+calendar digest required by the canonical DATASET identity. Calendar/config/timezone mismatch,
+unexplained expected slot, duplicate moment, invalid OHLC/volume, maintenance bridging,
+session-closed evidence, or cross-contract horizon is `INVALID`.
 
 GCV25 is eligible only when the supplied canonical dataset's prior-completed-session
 three-confirmation roll evidence selects it without future information. The builder validates that
@@ -448,6 +488,10 @@ GCPretrainingCorpusResult
 
 def build_gc_pretraining_corpus(
     *,
+    dataset_config: GCDatasetBuildConfig | None,
+    dataset_calendar_entries: tuple[
+        KillZoneCalendarEntry | GCSplitSessionCalendarEntry, ...
+    ] | None,
     dataset_result: GCDatasetBuildResult | None,
     candidate_result: GCCandidateEvidenceResult | None,
     feature_label_result: GCFeatureLabelResult | None,
@@ -456,11 +500,12 @@ def build_gc_pretraining_corpus(
 ) -> GCPretrainingCorpusResult: ...
 ```
 
-All five parameters are required and keyword-only; none has a default. `None` is accepted only on
-the four context inputs shown and is handled under Section 19. There is no config object, convenience
-overload, path input, parser, serializer, identity builder, scorer, trainer, or alternate partition
-API. Module `__all__` contains exactly the six constants, two enums, six dataclasses, and one builder
-listed above. Package-level exports remain unchanged.
+All seven parameters are required and keyword-only; none has a default. `None` is accepted only on
+the six proof/context inputs shown and is handled under Section 19. There is no corpus-specific
+config object, convenience overload, path input, parser, serializer, public corpus identity builder,
+scorer, trainer, or alternate partition API. Module `__all__` contains exactly the six constants,
+two enums, six dataclasses, and one builder listed above. The imported upstream proof types and
+`make_gc_dataset_id` are not re-exported. Package-level exports remain unchanged.
 
 ## 19. Status Precedence, Reason Tokens, and Missing Context
 
@@ -479,8 +524,10 @@ Exact ordered reason tokens are:
 7. `NO_ELIGIBLE_PRETRAINING_EVIDENCE`.
 
 Supplied counterparts are independently validated before a missing-input result. Determinable
-malformed evidence yields `INVALID` even when another top-level input is `None`. Missing evidence is
-not invented: cross-reference checks requiring the absent input are deferred and return `UNKNOWN`.
+malformed evidence yields `INVALID` even when another top-level input is `None`. A supplied dataset
+without either exact dataset proof input is `INVALID`, because its promised canonical identity
+cannot be established. Missing evidence is not invented: other cross-reference checks requiring an
+absent input are deferred and return `UNKNOWN`.
 Complete empty valid development evidence returns `NONE`; incomplete adequacy or independence proof
 returns `UNKNOWN`; contradictory independent evidence returns `AMBIGUOUS`; malformed evidence or OOS
 contact returns `INVALID`.
@@ -531,19 +578,23 @@ any private run require their own later authority.
 The logical case count is exactly 48; parameterization may expand collected tests without changing
 this matrix:
 
-1. All four context inputs absent with a valid exact plan returns `UNKNOWN` and publishes nothing.
+1. All six proof/context inputs absent with a valid exact plan returns `UNKNOWN` and publishes
+   nothing.
 2. Complete valid empty upstream evidence and empty registry returns `NONE`.
-3. Missing one top-level input still fully validates independently determinable supplied evidence.
+3. Missing one top-level input still fully validates independently determinable supplied evidence;
+   a supplied dataset missing config or calendar proof is `INVALID`.
 4. Malformed supplied counterpart outranks missing-context `UNKNOWN` and returns `INVALID`.
-5. Exact VALID dataset result and canonical DATASET/SEGMENT identities reconcile.
-6. Dataset status, manifest, count, volume, source, segment, calendar, tzdata, or identity mismatch
-   is `INVALID`; exposed OOS bars are forbidden.
+5. Exact dataset config, canonical ordered calendar tuple, VALID dataset result, recomputed
+   calendar/evidence/bar digests, and canonical DATASET/SEGMENT identities reconcile.
+6. Dataset config, calendar normalization/digest, status, manifest, count, volume, source, segment,
+   tzdata, evidence digest, or identity mismatch is `INVALID`; exposed OOS bars are forbidden.
 7. Exact VALID candidate result, detector versions, segment-result order, references, BUNDLE, and
    MANIFEST reconcile.
 8. Exact VALID feature/label result, schemas, horizon, equal histories, FEATURE_ROW, LABEL, and
    MANIFEST reconcile.
-9. Wrong type/subclass, non-tuple, mutable look-alike, boolean integer, naive timestamp, malformed
-   Decimal, enum, hash, nested value, or contained exception is `INVALID`.
+9. Wrong config/calendar/result type or subclass, non-tuple calendar/context, mutable look-alike,
+   boolean integer, naive timestamp, malformed Decimal, enum, hash, nested value, or contained
+   exception is `INVALID`.
 10. Source registry exact fields, frozen state, ordering, uniqueness, audit-completeness, and
     dataset/calendar/tzdata reconciliation pass; no silent sort occurs.
 11. All five source roles are exact; unknown roles and role/source contradictions are `INVALID`.
@@ -553,7 +604,8 @@ this matrix:
     `CLOSED_RESEARCH_ONLY` and never admitted.
 15. Exact frozen GCQ26 30-day hash is sealed metadata; full/superseded GCQ26 cannot substitute.
 16. Any final-OOS payload access or nonzero access count is `INVALID` with no promotion.
-17. Exact plan fields/defaults and all eight date boundaries are enforced.
+17. Exact plan fields/defaults and all eight date boundaries are enforced independently of the
+    exact dataset config/calendar proof inputs.
 18. TRAIN exact half-open interval and boundary equality behavior pass.
 19. VALIDATION exact half-open interval and boundary equality behavior pass.
 20. CALIBRATION exact half-open interval and boundary equality behavior pass.
@@ -580,17 +632,19 @@ this matrix:
 39. PARTITION_PLAN identity enforces all bounds, horizon, embargo, and forbidden fields.
 40. CORPUS identity enforces all lineage, exclusion, count, authority, and sealed-OOS metadata.
 41. MANIFEST identity mirrors corpus/partition/record histories and rejects malformed hashes.
-42. Exact keyword-only builder parameter names/kinds/defaults, constants, enums, frozen dataclass
-    fields/annotations/defaults, exports, and unknown identity behavior pass.
+42. Exact seven keyword-only builder parameter names/kinds/defaults, constants, enums, frozen
+    dataclass fields/annotations/defaults, non-exported proof imports, exports, and unknown identity
+    behavior pass.
 43. Exact reason tokens and `INVALID > AMBIGUOUS > UNKNOWN > VALID > NONE` precedence pass.
 44. Determinably later invalid/ambiguous/unknown group preserves only strictly prior immutable
     evidence and promotes no failing-or-later group.
 45. Strictly-later complete append is prefix-invariant and deterministic multi-contract output uses
     exact canonical order.
-46. Same-effective append, insertion, repair, reorder, role/contamination/version/plan mutation is
-    prefix-ineligible and fail-closed.
-47. Conservation, byte-repeatability, Decimal-context independence, zero filesystem/network/clock/
-    randomness, and nested exception containment pass.
+46. Same-effective append, insertion, repair, reorder, role/contamination/config/calendar/version/
+    plan mutation is prefix-ineligible and fail-closed.
+47. Calendar, evidence, and bar-digest repeatability, conservation, byte-repeatability,
+    Decimal-context independence, zero filesystem/network/clock/randomness, and nested exception
+    containment pass.
 48. Exact three-path implementation scope, inline fixtures, no package export, no private run,
     training, OOS, model, integration, trading, stage, commit, or push surface pass.
 
@@ -606,10 +660,10 @@ Fresh cache-disabled regression evidence for this decision is:
 
 ```text
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_gc_dataset_builder.py tests/test_gc_feature_label_builder.py tests/test_gc_candidate_evidence_builder.py tests/test_gc_cross_segment_continuity.py
-402 passed in 2.37s
+402 passed in 4.05s
 
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
-2453 passed in 23.60s
+2453 passed in 24.02s
 ```
 
 The final decision-file SHA-256, byte count, and line count are reported after exact-path cached
@@ -627,7 +681,8 @@ STOP immediately and preserve the last valid evidence if:
 - any final-OOS payload is touched or a sealed source must be replaced;
 - a threshold fails or would need tuning;
 - a feature/label must be recomputed, repaired, or enriched;
-- implementation needs a new dependency, a broader API, or any fourth path;
+- implementation needs a dependency beyond the locked public dataset/calendar surface, any API
+  parameter beyond the exact seven, or any fourth path;
 - regression, determinism, formatting, hash, diff, or scope audit fails.
 
 Before staging, rollback is deletion of the three newly created future implementation files only.
