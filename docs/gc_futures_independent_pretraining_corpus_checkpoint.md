@@ -47,6 +47,14 @@ precedence, empty-evidence NONE behavior, plan boundaries, immutable contracts, 
 status containment, no-promotion behavior, repeatability, Decimal-context independence, and the
 forbidden IO/training surface.
 
+A post-push independent audit found that the sealed FINAL_OOS source hash constant did not match
+the accepted private raw-intake manifest. A public-builder regression was added first: the actual
+normalized manifest hash `15e2b3cb47e96988a1a623712e3347438e47b19d8d154d213aecc81c52a50111`
+must pass independently determinable source validation, while the previously encoded nonexistent
+`15e2f672457176749c4143baa4bb00c30d1ae913c82333cb8e8e8f79592ff46e`
+must fail closed. The regression failed before the source correction and passed after the constant
+was reconciled. No sealed payload was opened; the test and correction use manifest metadata only.
+
 Focused command:
 
 ```text
@@ -58,7 +66,7 @@ Accepted repository regression command:
 
 ```text
 .\venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
-2519 passed in 22.80s
+2519 passed in 24.28s
 ```
 
 A root-wide invocation was also attempted and stopped during collection on two ACL-protected
@@ -72,8 +80,8 @@ directories prevent root-wide collection.
 
 | Artifact | SHA-256 | Bytes | Lines |
 |---|---:|---:|---:|
-| `analysis/gc_pretraining_corpus.py` | `F7D11ADBD7BC4FFCC9574B338D95AB52301BA3C3BA730BCFD0DF1CAC217D9FE5` | 53,683 | 1,069 |
-| `tests/test_gc_pretraining_corpus.py` | `7BC68E0F73544E1EB8F9DA13C56F5F94D426C066B8B7572FACA7E7CA36C65CEE` | 12,862 | 307 |
+| `analysis/gc_pretraining_corpus.py` | `84B56393A2C8406EAFF451E04D685992037D8ED99519CE710954D9C401C0A46B` | 53,683 | 1,069 |
+| `tests/test_gc_pretraining_corpus.py` | `AA758ED9E935947419B46E88808E1E65966FF8C1E1BA13A37505A7D9927C5B36` | 14,339 | 342 |
 
 Decision dependency SHA-256:
 `556EC81E093117DFB2F710D7A7B00DB731BEA299B65BE47ACA585D8FE9421303`.

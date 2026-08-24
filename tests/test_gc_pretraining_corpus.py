@@ -1,7 +1,7 @@
 """Contract tests for the independent GC pretraining corpus builder."""
 
 from dataclasses import FrozenInstanceError, fields, is_dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, localcontext
 from inspect import Parameter, signature
 from pathlib import Path
@@ -133,6 +133,41 @@ def test_case_14_closed_research_is_not_admitted_by_empty_input() -> None:
 
 def test_case_15_oos_hash_is_private_and_authority_is_absent() -> None:
     assert "_FINAL_OOS_SHA256" not in subject.__all__
+
+    def result_for(source_sha256: str) -> subject.GCPretrainingCorpusResult:
+        source = subject.GCPretrainingSourceRecord(
+            source_id="a" * 64,
+            source_name="GCQ26_COMEX_5m_30d_export_20260803.txt",
+            source_sha256=source_sha256,
+            contract="GCQ26",
+            role=subject.GCPretrainingSourceRole.SEALED_FINAL_OOS_CANDIDATE,
+            dataset_id="b" * 64,
+            first_trade_date=date(2026, 7, 6),
+            last_trade_date=date(2026, 8, 3),
+            acquisition_timestamp=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            calendar_version="CME-GC-2026",
+            timezone_data_version="2026a",
+            prior_run_manifest_ids=(),
+            contaminated_evidence_ids=(),
+            contamination_audit_complete=True,
+            final_oos_payload_accessed=False,
+        )
+        return subject.build_gc_pretraining_corpus(
+            dataset_config=None,
+            dataset_calendar_entries=None,
+            dataset_result=None,
+            candidate_result=None,
+            feature_label_result=None,
+            source_registry=(source,),
+            partition_plan=_plan(),
+        )
+
+    assert result_for(
+        "15e2b3cb47e96988a1a623712e3347438e47b19d8d154d213aecc81c52a50111"
+    ).status is SMCV2PrimitiveStatus.UNKNOWN
+    assert result_for(
+        "15e2f672457176749c4143baa4bb00c30d1ae913c82333cb8e8e8f79592ff46e"
+    ).status is SMCV2PrimitiveStatus.INVALID
 
 
 def test_case_16_oos_payload_authority_is_never_exported() -> None:
