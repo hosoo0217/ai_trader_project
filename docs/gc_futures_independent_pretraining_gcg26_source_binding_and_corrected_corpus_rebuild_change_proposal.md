@@ -70,7 +70,7 @@ This proposal preserves without reinterpretation:
   SHA-256 `3579157ED51FF4A6EC9894E4E92A2AA5E31103C84E4D4F84DF7E2C83C6C5E5D5`.
 
 The current dataset builder remains version
-`GC-DATASET-BUILDER-V4-SOURCE-DOMAIN`. Its public API, roll rule, calendar rule,
+`GC-DATASET-BUILDER-V5-CALENDAR-PARTITION`. Its public API, roll rule, calendar rule,
 partition rule, identity payloads, and status precedence remain unchanged. This proposal permits
 only additional immutable source and coverage objects through the existing API.
 
