@@ -23,7 +23,7 @@ from core.gc_chronological_backtest import GCChronologicalBar
 from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
 
 
-GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
 _GC_DATASET_SOURCE_COVERAGE_IDENTITY_VERSION = "GC-DATASET-BUILDER-V2"
 GC_DATASET_INSTRUMENT = "GC"
 GC_DATASET_TIMEFRAME = "5M"
@@ -263,6 +263,7 @@ class _MergedRow:
     bid_volume: int
     ask_volume: int
     source_ids: tuple[str, ...]
+    source_row_numbers: tuple[int, ...]
     roles: tuple[GCSourceRole, ...]
     capture_timestamps: tuple[datetime, ...]
     instance_count: int
@@ -807,8 +808,42 @@ def _assemble(
         )
         for source in exports
     }
+    outer_domain = _calendar_outer_domain(calendars)
+    if merged and outer_domain is None:
+        issues.append(
+            _Issue(
+                GCDatasetBuildStatus.INVALID,
+                "CALENDAR_OUTER_DOMAIN_EMPTY",
+                merged[0].close_utc,
+            )
+        )
 
     for item in merged:
+        if outer_domain is None:
+            continue
+        domain_start, domain_end = outer_domain
+        if item.close_utc <= domain_start:
+            base_exclusions[(item.contract, item.start_utc)] = (
+                "BEFORE_CALENDAR_DOMAIN"
+            )
+            continue
+        if item.start_utc >= domain_end:
+            base_exclusions[(item.contract, item.start_utc)] = (
+                "AFTER_CALENDAR_DOMAIN"
+            )
+            continue
+        if (
+            item.start_utc < domain_start < item.close_utc
+            or item.start_utc < domain_end < item.close_utc
+        ):
+            issues.append(
+                _Issue(
+                    GCDatasetBuildStatus.INVALID,
+                    "CALENDAR_DOMAIN_BOUNDARY_STRADDLE",
+                    item.close_utc,
+                )
+            )
+            continue
         interval_matches = tuple(
             (entry, interval_start)
             for entry in calendars
@@ -1057,6 +1092,34 @@ def _assemble(
     attested_no_trade_count = missing_count + _attested_official_gap_count(
         tuple(selected), calendar_map
     )
+    exclusion_ledger: list[tuple[object, ...]] = []
+    for item in merged:
+        key = (item.contract, item.start_utc)
+        selected_item = key in selected_keys
+        primary_reason = base_exclusions.get(key, "ROLL_EVIDENCE_ONLY")
+        for member_index, (source_id, source_row_number) in enumerate(
+            zip(item.source_ids, item.source_row_numbers, strict=True)
+        ):
+            if selected_item and member_index == 0:
+                continue
+            reason = (
+                primary_reason
+                if member_index == 0
+                else "DUPLICATE_RECONCILED"
+            )
+            exclusion_ledger.append(
+                (
+                    source_id,
+                    source_row_number,
+                    item.contract,
+                    _timestamp_text(item.start_utc),
+                    _timestamp_text(item.close_utc),
+                    item.volume,
+                    reason,
+                )
+            )
+    if len(exclusion_ledger) != excluded_row_count:
+        raise _ValidationError("manifest exclusion ledger conservation failed")
     dev_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.DEVELOPMENT)
     oos_count = sum(len(segment.bars) for segment in segments if segment.partition is GCSegmentPartition.OOS_HOLDOUT)
     evidence = {
@@ -1067,6 +1130,8 @@ def _assemble(
         "segment_ids": segment_ids,
         "calendar_version": calendars[0].calendar_version if calendars else "",
         "timezone_data_version": config.timezone_data_version,
+        "calendar_domain_start_timestamp": _timestamp_text(outer_domain[0]),
+        "calendar_domain_end_timestamp": _timestamp_text(outer_domain[1]),
         "raw_start_timestamp": _timestamp_text(min(raw_moments)),
         "raw_end_timestamp": _timestamp_text(max(raw_moments)),
         "usable_start_timestamp": _timestamp_text(min(usable_moments)) if usable_moments else None,
@@ -1086,6 +1151,7 @@ def _assemble(
             for contract, trade_date, volume in promoted_completed_volumes
         ),
         "exclusion_counts": exclusion_counts,
+        "exclusion_ledger": tuple(exclusion_ledger),
         "roll_trade_dates": tuple(item.isoformat() for item in roll_dates),
     }
     evidence_digest = _hash_payload(evidence)
@@ -1734,12 +1800,32 @@ def _merge_rows(
                 bid_volume=reference.row.bid_volume,
                 ask_volume=reference.row.ask_volume,
                 source_ids=tuple(member.source.source_id for member in ordered_members),
+                source_row_numbers=tuple(
+                    member.row.source_row_number for member in ordered_members
+                ),
                 roles=tuple(member.source.role for member in ordered_members),
                 capture_timestamps=tuple(member.source.capture_timestamp for member in ordered_members),
                 instance_count=len(members),
             )
         )
     return tuple(merged), tuple(issues)
+
+
+def _calendar_outer_domain(
+    calendars: tuple[_NormalizedCalendar, ...],
+) -> tuple[datetime, datetime] | None:
+    intervals = tuple(
+        interval
+        for calendar in calendars
+        for interval in calendar.intervals
+    )
+    if not intervals:
+        return None
+    domain_start = min(start for start, _ in intervals)
+    domain_end = max(end for _, end in intervals)
+    if domain_start >= domain_end:
+        return None
+    return domain_start, domain_end
 
 
 def _completed_session_volumes(

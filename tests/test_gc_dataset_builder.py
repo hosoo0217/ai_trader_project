@@ -774,6 +774,79 @@ def _manual_scope(
     return ordered_exports, coverage, calendars, selected_config
 
 
+def _outer_domain_scope(
+    *,
+    before_start: datetime | None = None,
+    after_start: datetime | None = None,
+) -> tuple[
+    tuple[GCSierraChartExport, ...],
+    tuple[GCSierraChartCoverageEvidence, ...],
+    tuple[KillZoneCalendarEntry, ...],
+    GCDatasetBuildConfig,
+]:
+    """Return a complete public-builder scope with optional outer-domain rows."""
+
+    selected_config = _config()
+    prior_dates = _prior_eligible_dates(selected_config.initial_trade_date)
+    calendars = tuple(_calendar(day) for day in prior_dates + (D1,))
+    domain_start = _calendar_intervals(calendars[0])[0][0]
+    domain_end = _calendar_intervals(calendars[-1])[-1][1]
+    current_starts: list[datetime] = []
+    current_volumes: list[int] = []
+    if before_start is not None:
+        current_starts.append(before_start)
+        current_volumes.append(7)
+    for day in prior_dates:
+        opening, _ = _bounds(day)
+        current_starts.extend((opening, opening + timedelta(minutes=5)))
+        current_volumes.extend((10, 10))
+    opening, _ = _bounds(D1)
+    current_starts.extend((opening, opening + timedelta(minutes=5)))
+    current_volumes.extend((5, 5))
+    if after_start is not None:
+        current_starts.append(after_start)
+        current_volumes.append(11)
+    current = _export(
+        selected_config.initial_contract,
+        tuple((day, 1) for day in prior_dates + (D1,)),
+        source_name="outer-domain-current.txt",
+        raw_bytes=_raw_starts(tuple(current_starts), tuple(current_volumes)),
+        capture_timestamp=max(current_starts) + timedelta(minutes=6),
+    )
+    predecessor = _export(
+        dataset._previous_contract(selected_config.initial_contract),
+        tuple((day, 10) for day in prior_dates),
+        source_name="outer-domain-predecessor.txt",
+    )
+    adjacent = _export(
+        dataset._next_contract(selected_config.initial_contract),
+        ((D1, 5),),
+        source_name="outer-domain-adjacent.txt",
+    )
+    exports = _sorted_exports((predecessor, current, adjacent))
+    evidence: list[GCSierraChartCoverageEvidence] = []
+    for export in exports:
+        if export is current:
+            base = _coverage(export, calendars)
+            coverage_start = before_start or domain_start
+            coverage_end = (
+                after_start + timedelta(minutes=5)
+                if after_start is not None
+                else domain_end
+            )
+            evidence.append(
+                _reidentify_coverage(
+                    base,
+                    coverage_start_timestamp=coverage_start,
+                    coverage_end_timestamp=coverage_end,
+                    acquisition_completed_timestamp=coverage_end,
+                )
+            )
+        else:
+            evidence.extend(_coverage_per_session(export, calendars))
+    return exports, _sorted_coverage(tuple(evidence)), calendars, selected_config
+
+
 def _segment_id(**changes: object) -> str:
     values: dict[str, object] = {
         "identity_kind": "SEGMENT",
@@ -889,6 +962,20 @@ def test_case_02_valid_empty_scope_is_none() -> None:
     assert result.segments == () and result.manifest is None
 
 
+def test_case_02_nonempty_source_with_empty_validated_calendar_is_invalid() -> None:
+    export = _export()
+    evidence = _coverage(export, (_calendar(D1),))
+    result = build_gc_futures_dataset(
+        exports=(export,),
+        coverage_evidence=(evidence,),
+        calendar_entries=(),
+        config=_config(),
+    )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert "CALENDAR_OUTER_DOMAIN_EMPTY" in result.blocking_reasons
+    assert result.segments == () and result.manifest is None
+
+
 # Case 3
 @pytest.mark.parametrize(
     "contract",
@@ -912,7 +999,7 @@ def test_case_04_runtime_timezone_binding(monkeypatch: pytest.MonkeyPatch) -> No
 def test_case_05_exact_constants() -> None:
     assert (
         GC_DATASET_BUILDER_VERSION
-        == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+        == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
     )
     assert GC_DATASET_INSTRUMENT == "GC"
     assert GC_DATASET_TIMEFRAME == "5M"
@@ -1215,6 +1302,82 @@ def test_case_20_calendar_boundaries_are_start_inclusive_end_exclusive() -> None
     assert len(result.segments[0].bars) == 2
 
 
+def test_case_20_outer_domain_equality_and_conservation() -> None:
+    prior_dates = _prior_eligible_dates(D1)
+    domain_start, _ = _bounds(prior_dates[0])
+    _, domain_end = _bounds(D1)
+    exports, coverage, calendars, config = _outer_domain_scope(
+        before_start=domain_start - timedelta(minutes=5),
+        after_start=domain_end,
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    assert ("BEFORE_CALENDAR_DOMAIN", 1) in result.manifest.exclusion_counts
+    assert ("AFTER_CALENDAR_DOMAIN", 1) in result.manifest.exclusion_counts
+    assert (
+        result.manifest.parsed_row_count
+        == result.manifest.eligible_row_count + result.manifest.excluded_row_count
+    )
+    assert (
+        result.manifest.raw_volume
+        == result.manifest.eligible_volume + result.manifest.excluded_volume
+    )
+
+
+@pytest.mark.parametrize("boundary", ["start", "end"])
+def test_case_20_outer_domain_straddle_is_invalid(boundary: str) -> None:
+    prior_dates = _prior_eligible_dates(D1)
+    domain_start, _ = _bounds(prior_dates[0])
+    _, domain_end = _bounds(D1)
+    if boundary == "start":
+        before_start = domain_start - timedelta(minutes=1)
+        after_start = None
+    else:
+        before_start = None
+        after_start = domain_end - timedelta(minutes=1)
+    exports, coverage, calendars, config = _outer_domain_scope(
+        before_start=before_start,
+        after_start=after_start,
+    )
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+    assert result.status is GCDatasetBuildStatus.INVALID
+    assert "CALENDAR_DOMAIN_BOUNDARY_STRADDLE" in result.blocking_reasons
+    assert result.manifest is None
+
+
+def test_case_20_in_domain_calendar_gap_remains_unknown() -> None:
+    missing_day = D2
+    export = _export(
+        contract="GCG26-COMEX",
+        sessions=((missing_day, 10),),
+        source_name="in-domain-gap.txt",
+    )
+    left = _calendar(D1)
+    right = _calendar(D3)
+    evidence = _coverage(export, (_calendar(missing_day),))
+    result = build_gc_futures_dataset(
+        exports=(export,),
+        coverage_evidence=(evidence,),
+        calendar_entries=(left, right),
+        config=_config(initial_trade_date=missing_day),
+    )
+    assert result.status is GCDatasetBuildStatus.UNKNOWN
+    assert "CALENDAR_COVERAGE_MISSING" in result.blocking_reasons
+    assert "BEFORE_CALENDAR_DOMAIN" not in result.blocking_reasons
+    assert "AFTER_CALENDAR_DOMAIN" not in result.blocking_reasons
+
+
 def test_case_20_split_session_maps_both_intervals_to_one_trade_date() -> None:
     opening, _ = _bounds(D1)
     starts = tuple(
@@ -1296,7 +1459,12 @@ def test_case_21_early_close_rejects_later_positive_row() -> None:
 
 # Case 22
 def test_case_22_closed_or_maintenance_positive_volume_is_invalid() -> None:
-    closed = _build(calendars=(_calendar(D1, status=KillZoneSessionStatus.SESSION_CLOSED),))
+    closed = _build(
+        calendars=(
+            _calendar(D1, status=KillZoneSessionStatus.SESSION_CLOSED),
+            _calendar(D2),
+        )
+    )
     assert closed.status is GCDatasetBuildStatus.INVALID
     opening, closing = _bounds(D1)
     maintenance_start = datetime.combine(D1, time(17), tzinfo=NY).astimezone(UTC)
@@ -1331,7 +1499,8 @@ def test_case_22_initial_contract_requires_exact_three_session_proof() -> None:
 # Case 23
 def test_case_23_missing_calendar_unknown_malformed_calendar_invalid() -> None:
     missing = _build(calendars=())
-    assert missing.status is GCDatasetBuildStatus.UNKNOWN
+    assert missing.status is GCDatasetBuildStatus.INVALID
+    assert "CALENDAR_OUTER_DOMAIN_EMPTY" in missing.blocking_reasons
     malformed = replace(_calendar(D1), session_close_timestamp=None)
     invalid = _build(calendars=(malformed,))
     assert invalid.status is GCDatasetBuildStatus.INVALID
@@ -1840,7 +2009,7 @@ def test_case_40_v2_manifest_binds_coverage_and_conserves_sparse_evidence() -> N
     result = _build(exports=(export,))
     manifest = result.manifest
     assert manifest is not None
-    assert manifest.version == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+    assert manifest.version == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
     assert manifest.coverage_ids
     assert len(manifest.coverage_digest) == 64
     assert manifest.attested_no_trade_interval_count == 1
@@ -2170,7 +2339,7 @@ def test_case_43_source_identity_forbids_non_source_fields(
 # Case 44
 def test_case_44_segment_identity_binds_gap_and_forbidden_fields() -> None:
     assert _segment_id() == (
-        "a16b6df9b3650b83cb8621878bb696694cf7f27221e52bc1ff09ea0bf68157b2"
+        "322fffa32c2f31554edc3fea9e92b02b9c873ce1ac985786af8bf488f823fdf8"
     )
     assert _segment_id(preceding_missing_bar_count=1) != _segment_id()
     with pytest.raises((TypeError, ValueError)):
@@ -2250,7 +2419,7 @@ def test_case_44_segment_identity_is_sensitive_to_every_payload_axis(
 # Case 45
 def test_case_45_dataset_identity_schema_and_sensitivity() -> None:
     assert _dataset_id() == (
-        "8846dcb65451269afc1b4b46d13bd0f7e65ee05dbe63ce7c0cd3dff2496f384b"
+        "ad66fe5e7272e2bc90c8a341ae9d38cb96d9188d2ff41cb2eb2bce2c69741369"
     )
     assert _dataset_id(calendar_digest="e" * 64) != _dataset_id()
     assert _dataset_id(roll_trade_dates=(D2,)) != _dataset_id()
@@ -2423,7 +2592,7 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
     assert [item.value for item in GCSourceRole] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert [item.value for item in GCSegmentPartition] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert GC_DELIVERY_MONTH_CODES == ("G", "J", "M", "Q", "V", "Z")
-    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
     assert issubclass(GCDatasetBuildStatus, (str, Enum))
 
 
