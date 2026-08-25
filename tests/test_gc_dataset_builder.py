@@ -999,7 +999,7 @@ def test_case_04_runtime_timezone_binding(monkeypatch: pytest.MonkeyPatch) -> No
 def test_case_05_exact_constants() -> None:
     assert (
         GC_DATASET_BUILDER_VERSION
-        == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
+        == "GC-DATASET-BUILDER-V5-CALENDAR-PARTITION"
     )
     assert GC_DATASET_INSTRUMENT == "GC"
     assert GC_DATASET_TIMEFRAME == "5M"
@@ -1980,6 +1980,115 @@ def test_case_38_roll_partition_and_gap_create_distinct_segments() -> None:
     assert len({segment.segment_id for segment in result.segments}) == len(result.segments)
 
 
+@pytest.mark.parametrize(
+    ("initial_day", "gap_day", "post_gap_day"),
+    [
+        (date(2025, 5, 30), date(2025, 6, 2), date(2025, 6, 16)),
+        (date(2025, 8, 22), date(2025, 8, 25), date(2025, 9, 8)),
+    ],
+)
+def test_case_38_calendar_coverage_does_not_grant_partition_eligibility(
+    initial_day: date,
+    gap_day: date,
+    post_gap_day: date,
+) -> None:
+    config = _config(
+        initial_contract="GCM25-COMEX",
+        initial_trade_date=initial_day,
+        oos_start_trade_date=date(2026, 7, 6),
+        oos_end_trade_date=date(2026, 7, 31),
+    )
+    exports, coverage, calendars, config = _manual_scope(
+        config=config,
+        current_dates=(initial_day, gap_day, post_gap_day),
+        current_volumes=(20, 20, 20),
+        adjacent_volumes=(5, 5, 5),
+    )
+
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    exclusions = dict(result.manifest.exclusion_counts)
+    assert exclusions["PARTITION_EMBARGO"] == 4
+    assert all(
+        dataset._trade_date_for_start(bar.timestamp) != gap_day
+        for segment in result.segments
+        for bar in segment.bars
+    )
+    assert (
+        config.initial_contract,
+        gap_day,
+        20,
+    ) in result.manifest.completed_session_volumes
+    assert result.manifest.parsed_row_count == (
+        result.manifest.eligible_row_count
+        + result.manifest.excluded_row_count
+    )
+    assert result.manifest.raw_volume == (
+        result.manifest.eligible_volume + result.manifest.excluded_volume
+    )
+
+
+def test_case_38_roll_confirmation_crosses_embargo_without_gap_promotion() -> None:
+    initial_day = date(2025, 5, 30)
+    gap_days = (
+        date(2025, 6, 2),
+        date(2025, 6, 3),
+        date(2025, 6, 4),
+    )
+    effective_day = date(2025, 6, 16)
+    config = _config(
+        initial_contract="GCM25-COMEX",
+        initial_trade_date=initial_day,
+        oos_start_trade_date=date(2026, 7, 6),
+        oos_end_trade_date=date(2026, 7, 31),
+    )
+    current_dates = (initial_day,) + gap_days + (effective_day,)
+    exports, coverage, calendars, config = _manual_scope(
+        config=config,
+        current_dates=current_dates,
+        current_volumes=(20, 10, 10, 10, 10),
+        adjacent_volumes=(5, 20, 20, 20, 20),
+    )
+    post_adjacent = _export(
+        "GCV25-COMEX",
+        ((effective_day, 5),),
+        source_name="manual-post-adjacent.txt",
+    )
+    exports = _sorted_exports(exports + (post_adjacent,))
+    coverage = _sorted_coverage(
+        coverage + _coverage_per_session(post_adjacent, calendars)
+    )
+
+    result = build_gc_futures_dataset(
+        exports=exports,
+        coverage_evidence=coverage,
+        calendar_entries=calendars,
+        config=config,
+    )
+
+    assert result.status is GCDatasetBuildStatus.VALID
+    assert result.manifest is not None
+    assert result.manifest.roll_trade_dates == (effective_day,)
+    assert dict(result.manifest.exclusion_counts)["PARTITION_EMBARGO"] == 12
+    assert all(
+        dataset._trade_date_for_start(bar.timestamp) not in gap_days
+        for segment in result.segments
+        for bar in segment.bars
+    )
+    assert any(
+        segment.contract == "GCQ25-COMEX"
+        and segment.first_trade_date == effective_day
+        for segment in result.segments
+    )
+
+
 # Case 39
 def test_case_39_canonical_bar_contract() -> None:
     bar = _build().segments[0].bars[0]
@@ -2009,7 +2118,7 @@ def test_case_40_v2_manifest_binds_coverage_and_conserves_sparse_evidence() -> N
     result = _build(exports=(export,))
     manifest = result.manifest
     assert manifest is not None
-    assert manifest.version == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
+    assert manifest.version == "GC-DATASET-BUILDER-V5-CALENDAR-PARTITION"
     assert manifest.coverage_ids
     assert len(manifest.coverage_digest) == 64
     assert manifest.attested_no_trade_interval_count == 1
@@ -2339,7 +2448,7 @@ def test_case_43_source_identity_forbids_non_source_fields(
 # Case 44
 def test_case_44_segment_identity_binds_gap_and_forbidden_fields() -> None:
     assert _segment_id() == (
-        "322fffa32c2f31554edc3fea9e92b02b9c873ce1ac985786af8bf488f823fdf8"
+        "76ed0512f4b8cd3da74a55ac3b096f0e85bfbbca05fde367f3ba9ca0191fb0cc"
     )
     assert _segment_id(preceding_missing_bar_count=1) != _segment_id()
     with pytest.raises((TypeError, ValueError)):
@@ -2419,7 +2528,7 @@ def test_case_44_segment_identity_is_sensitive_to_every_payload_axis(
 # Case 45
 def test_case_45_dataset_identity_schema_and_sensitivity() -> None:
     assert _dataset_id() == (
-        "ad66fe5e7272e2bc90c8a341ae9d38cb96d9188d2ff41cb2eb2bce2c69741369"
+        "697e2e4e4cb09b72b8ff0a998cc0c3cff9ae87e073d41363abeaf6a6d45f503b"
     )
     assert _dataset_id(calendar_digest="e" * 64) != _dataset_id()
     assert _dataset_id(roll_trade_dates=(D2,)) != _dataset_id()
@@ -2592,7 +2701,7 @@ def test_case_46_exact_public_surface_signatures_and_frozen_models() -> None:
     assert [item.value for item in GCSourceRole] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert [item.value for item in GCSegmentPartition] == ["DEVELOPMENT", "OOS_HOLDOUT"]
     assert GC_DELIVERY_MONTH_CODES == ("G", "J", "M", "Q", "V", "Z")
-    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
+    assert GC_DATASET_BUILDER_VERSION == "GC-DATASET-BUILDER-V5-CALENDAR-PARTITION"
     assert issubclass(GCDatasetBuildStatus, (str, Enum))
 
 

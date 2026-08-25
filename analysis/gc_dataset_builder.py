@@ -23,13 +23,17 @@ from core.gc_chronological_backtest import GCChronologicalBar
 from smc.kill_zones import KillZoneCalendarEntry, KillZoneSessionStatus
 
 
-GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V4-SOURCE-DOMAIN"
+GC_DATASET_BUILDER_VERSION = "GC-DATASET-BUILDER-V5-CALENDAR-PARTITION"
 _GC_DATASET_SOURCE_COVERAGE_IDENTITY_VERSION = "GC-DATASET-BUILDER-V2"
 GC_DATASET_INSTRUMENT = "GC"
 GC_DATASET_TIMEFRAME = "5M"
 GC_DATASET_SOURCE_TIMEZONE = "Asia/Tokyo"
 GC_DATASET_EXCHANGE_TIMEZONE = "America/New_York"
 GC_DATASET_TICK_SIZE = Decimal("0.1")
+_GC_PARTITION_EMBARGO_INTERVALS = (
+    (date(2025, 6, 2), date(2025, 6, 16)),
+    (date(2025, 8, 25), date(2025, 9, 8)),
+)
 GC_ROLL_CONFIRMATION_SESSIONS = 3
 GC_DELIVERY_MONTH_CODES = ("G", "J", "M", "Q", "V", "Z")
 
@@ -911,7 +915,13 @@ def _assemble(
             issues.append(_Issue(GCDatasetBuildStatus.INVALID, "ROW_OFF_FIVE_MINUTE_GRID", item.close_utc))
             continue
         scoped_partition = _partition_for_trade_date(trade_date, config)
-        partition = scoped_partition or GCSegmentPartition.DEVELOPMENT
+        # Covered embargo rows remain available to the internal completed-volume
+        # stream, but calendar coverage alone never grants output eligibility.
+        partition = (
+            scoped_partition
+            if scoped_partition is not None
+            else GCSegmentPartition.DEVELOPMENT
+        )
         required_role = (
             GCSourceRole.OOS_HOLDOUT
             if partition is GCSegmentPartition.OOS_HOLDOUT
@@ -964,6 +974,9 @@ def _assemble(
             continue
         if trade_date > config.oos_end_trade_date:
             base_exclusions[(item.contract, item.start_utc)] = "AFTER_OOS_BOUNDARY"
+            continue
+        if scoped_partition is None:
+            base_exclusions[(item.contract, item.start_utc)] = "PARTITION_EMBARGO"
             continue
         usable.append(candidate)
 
@@ -2321,6 +2334,11 @@ def _partition_for_trade_date(
     trade_date: date, config: GCDatasetBuildConfig
 ) -> GCSegmentPartition | None:
     if trade_date < config.initial_trade_date or trade_date > config.oos_end_trade_date:
+        return None
+    if any(
+        embargo_start <= trade_date < embargo_end
+        for embargo_start, embargo_end in _GC_PARTITION_EMBARGO_INTERVALS
+    ):
         return None
     if trade_date >= config.oos_start_trade_date:
         return GCSegmentPartition.OOS_HOLDOUT
