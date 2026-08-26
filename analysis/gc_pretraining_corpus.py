@@ -61,6 +61,8 @@ GC_PRETRAINING_MINIMUM_EMBARGO_BARS: Final = 12
 
 _UTC = timezone.utc
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_SOURCE_CONTRACT_RE = re.compile(r"^GC([GJMQVZ])(\d{2})$")
+_UPSTREAM_CONTRACT_RE = re.compile(r"^GC([GJMQVZ])(\d{2})-COMEX$")
 _FINAL_OOS_SHA256 = "15e2b3cb47e96988a1a623712e3347438e47b19d8d154d213aecc81c52a50111"
 _DEVELOPMENT_CONTRACTS = frozenset({"GCJ25", "GCM25", "GCQ25", "GCV25", "GCZ25"})
 _CLOSED_CONTRACTS = frozenset({"GCG26", "GCJ26", "GCM26"})
@@ -231,6 +233,22 @@ def _text(value: object, name: str, *, upper: bool = False) -> str:
 def _hash(value: object, name: str) -> str:
     if type(value) is not str or _HASH_RE.fullmatch(value) is None:
         raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _source_contract_as_upstream(value: object) -> str:
+    if type(value) is not str:
+        raise TypeError("source contract must be str")
+    if _SOURCE_CONTRACT_RE.fullmatch(value) is None:
+        raise ValueError("source contract has an invalid domain syntax")
+    return value + "-COMEX"
+
+
+def _upstream_contract(value: object) -> str:
+    if type(value) is not str:
+        raise TypeError("upstream contract must be str")
+    if _UPSTREAM_CONTRACT_RE.fullmatch(value) is None:
+        raise ValueError("upstream contract has an invalid domain syntax")
     return value
 
 
@@ -737,6 +755,7 @@ def _validate_sources(
     previous: tuple[str, date, date, str, str, str] | None = None
     seen_ids: set[str] = set()
     seen_hashes: set[str] = set()
+    seen_evidence: set[tuple[object, ...]] = set()
     sealed_count = 0
     for item in value:
         if type(item) is not GCPretrainingSourceRecord:
@@ -764,6 +783,19 @@ def _validate_sources(
             raise TypeError("source audit flags must be bool")
         if item.final_oos_payload_accessed:
             raise ValueError("final OOS payload was accessed")
+        evidence_key = (
+            item.role,
+            first,
+            last,
+            item.contract,
+            item.source_name,
+            item.dataset_id,
+            item.calendar_version,
+            item.timezone_data_version,
+        )
+        if evidence_key in seen_evidence:
+            raise ValueError("forked source evidence is invalid")
+        seen_evidence.add(evidence_key)
         if item.role is GCPretrainingSourceRole.PRETRAINING_DEVELOPMENT_CANDIDATE and item.contract not in _DEVELOPMENT_CONTRACTS:
             raise ValueError("invalid development source contract")
         if item.contract in _CLOSED_CONTRACTS and item.role is not GCPretrainingSourceRole.CLOSED_RESEARCH_ONLY:
@@ -948,8 +980,9 @@ def build_gc_pretraining_corpus(
     exclusions: dict[str, int] = {}
     contaminated = 0
     independence_unknown = False
-    try:
-        for candidate, row, label in zip(candidates, rows, labels):
+    cutoff_invalid = False
+    for candidate, row, label in zip(candidates, rows, labels):
+        try:
             inducement = candidate.evidence.inducement
             if row.candidate_id != inducement.inducement_id or label.candidate_id != row.candidate_id:
                 raise ValueError("candidate identity mismatch")
@@ -975,7 +1008,12 @@ def build_gc_pretraining_corpus(
             if not row_sources or any(source.role is not GCPretrainingSourceRole.PRETRAINING_DEVELOPMENT_CANDIDATE for source in row_sources):
                 exclusions["NON_DEVELOPMENT_SOURCE"] = exclusions.get("NON_DEVELOPMENT_SOURCE", 0) + 1
                 continue
-            if any(not (source.first_trade_date <= row.trade_date <= source.last_trade_date) or source.contract != row.contract for source in row_sources):
+            upstream_contract = _upstream_contract(row.contract)
+            if any(
+                not (source.first_trade_date <= row.trade_date <= source.last_trade_date)
+                or _source_contract_as_upstream(source.contract) != upstream_contract
+                for source in row_sources
+            ):
                 raise ValueError("source coverage mismatch")
             evidence_ids = {row.candidate_id, row.row_id, label.label_id, *row.lineage_ids}
             if any(evidence_ids.intersection(source.contaminated_evidence_ids) for source in row_sources):
@@ -988,10 +1026,16 @@ def build_gc_pretraining_corpus(
                 continue
             record_id = _record_identity(partition, inducement.direction, row, label)
             emitted.append(GCPretrainingCorpusRecord(record_id, partition, inducement.direction, row.contract, row.trade_date, row.effective_index, _moment(row.effective_timestamp, "effective_timestamp"), row.dataset_id, row.candidate_id, row.row_id, label.label_id, label.outcome, row.feature_values, row.source_ids, row.lineage_ids))
-    except (TypeError, ValueError):
-        return _reason_result(SMCV2PrimitiveStatus.INVALID, "INVALID_PRETRAINING_CORPUS_EVIDENCE")
-    except Exception:
-        return _reason_result(SMCV2PrimitiveStatus.INVALID, "INVALID_PRETRAINING_CORPUS_EVIDENCE")
+        except (TypeError, ValueError):
+            if not emitted:
+                return _reason_result(SMCV2PrimitiveStatus.INVALID, "INVALID_PRETRAINING_CORPUS_EVIDENCE")
+            cutoff_invalid = True
+            break
+        except Exception:
+            if not emitted:
+                return _reason_result(SMCV2PrimitiveStatus.INVALID, "INVALID_PRETRAINING_CORPUS_EVIDENCE")
+            cutoff_invalid = True
+            break
 
     emitted.sort(key=lambda record: (_PARTITION_ORDER[record.partition.value], record.trade_date, record.effective_index, record.effective_timestamp, record.contract, record.direction.value, record.candidate_id, record.feature_row_id, record.label_id))
     if len({record.record_id for record in emitted}) != len(emitted):
@@ -1041,6 +1085,8 @@ def build_gc_pretraining_corpus(
         "timezone_data_version": dataset_manifest.timezone_data_version,
     }
     manifest = GCPretrainingCorpusManifest(_sha(manifest_material), corpus_id, GC_PRETRAINING_CORPUS_VERSION, GC_PRETRAINING_INSTRUMENT, GC_PRETRAINING_TIMEFRAME, GC_PRETRAINING_TICK_SIZE, dataset_manifest.dataset_id, candidate_manifest.manifest_id, feature_manifest.manifest_id, feature_manifest.feature_schema_id, feature_manifest.label_schema_id, feature_manifest.horizon_bars, dataset_manifest.calendar_version, dataset_manifest.timezone_data_version, plan_id, source_ids, prior_ids, corpus_material["partition_ids"], corpus_material["record_ids"], exclusion_counts, corpus_material["excluded_record_count"], contaminated, len(records), _FINAL_OOS_SHA256, plan.final_oos_start_trade_date, plan.final_oos_end_trade_date, 0, False, False, False, False)
+    if cutoff_invalid:
+        return _reason_result(SMCV2PrimitiveStatus.INVALID, "INVALID_PRETRAINING_CORPUS_EVIDENCE", records=records, partitions=summaries, manifest=manifest)
     if independence_unknown:
         return _reason_result(SMCV2PrimitiveStatus.UNKNOWN, "INDEPENDENCE_UNVERIFIED", records=records, partitions=summaries, manifest=manifest)
     if not records:
