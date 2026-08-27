@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import inspect
+import json
 import re
 from types import SimpleNamespace
 
@@ -40,12 +41,17 @@ from smc.fair_value_gap import (
 )
 from smc.inducement import (
     INDUCEMENT_DETECTOR_VERSION,
+    SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION,
     Inducement,
     InducementObservation,
+    InducementPendingHorizon,
+    InducementPendingHorizonResult,
     InducementResult,
     InducementSnapshot,
+    analyze_inducement_pending_horizons,
     analyze_inducements,
     make_inducement_id,
+    make_inducement_pending_horizon_id,
 )
 from smc.liquidity_map import (
     LiquidityMapSnapshot,
@@ -536,6 +542,54 @@ def _analyze(**overrides: object) -> InducementResult:
     values = _fixture()
     values.update(overrides)
     return analyze_inducements(**values)  # type: ignore[arg-type]
+
+
+def _analyze_pending(**overrides: object) -> InducementPendingHorizonResult:
+    values = _fixture()
+    values.update(
+        {
+            "structure_events": (),
+            "fair_value_gaps": (),
+            "fair_value_gap_transitions": (),
+            "fair_value_gap_snapshots": (),
+        }
+    )
+    values.update(overrides)
+    return analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+
+
+def _pending_fixture(
+    direction: SMCV2Direction = SMCV2Direction.BULLISH,
+    *,
+    observation_count: int | None = None,
+) -> dict[str, object]:
+    values = _fixture(direction)
+    values.update(
+        {
+            "structure_events": (),
+            "fair_value_gaps": (),
+            "fair_value_gap_transitions": (),
+            "fair_value_gap_snapshots": (),
+        }
+    )
+    if observation_count is not None:
+        values["observations"] = values["observations"][:observation_count]  # type: ignore[index]
+    return values
+
+
+def _pending_identity_kwargs(
+    item: InducementPendingHorizon,
+) -> dict[str, object]:
+    return {
+        "identity_kind": "PENDING_HORIZON",
+        "instrument": INSTRUMENT,
+        "timeframe": TIMEFRAME,
+        **{
+            field.name: getattr(item, field.name)
+            for field in fields(InducementPendingHorizon)
+            if field.name != "pending_horizon_id"
+        },
+    }
 
 
 def _malformed(instance: object, field_name: str) -> object:
@@ -1512,6 +1566,11 @@ def test_44b_version_status_and_exports_are_locked() -> None:
         "InducementResult",
         "make_inducement_id",
         "analyze_inducements",
+        "SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION",
+        "InducementPendingHorizon",
+        "InducementPendingHorizonResult",
+        "make_inducement_pending_horizon_id",
+        "analyze_inducement_pending_horizons",
     )
 
 
@@ -1996,6 +2055,422 @@ def test_48_exception_containment_and_forbidden_surface() -> None:
     assert result.inducements == result.snapshots == ()
     source = inspect.getsource(inspect.getmodule(analyze_inducements)).lower()
     for forbidden in ("requests", "urllib", "socket", "subprocess", "broker"):
+        assert forbidden not in source
+
+
+def test_01_pending_complete_empty_inputs_are_none() -> None:
+    result = analyze_inducement_pending_horizons(
+        instrument=INSTRUMENT,
+        timeframe=TIMEFRAME,
+        dealing_range_snapshots=(),
+        liquidity_map_snapshots=(),
+        equal_liquidity_pools=(),
+        structure_events=(),
+        fair_value_gaps=(),
+        fair_value_gap_transitions=(),
+        fair_value_gap_snapshots=(),
+        observations=(),
+    )
+    assert result.status is SMCV2PrimitiveStatus.NONE
+    assert result.pending_horizons == ()
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "dealing_range_snapshots",
+        "liquidity_map_snapshots",
+        "equal_liquidity_pools",
+        "structure_events",
+        "fair_value_gaps",
+        "fair_value_gap_transitions",
+        "fair_value_gap_snapshots",
+        "observations",
+    ),
+)
+def test_02_pending_missing_required_top_level_input_is_unknown(name: str) -> None:
+    values = _pending_fixture(observation_count=6)
+    values[name] = None
+    result = analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+    assert result.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert result.pending_horizons == ()
+
+
+def test_03_pending_malformed_counterpart_outranks_missing_context() -> None:
+    values = _pending_fixture(observation_count=6)
+    values["structure_events"] = None
+    values["observations"] = (SimpleNamespace(index=0, timestamp=_time(0)),)
+    result = analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert result.pending_horizons == ()
+
+
+@pytest.mark.parametrize(
+    "direction,observation_count,available_count,missing_count",
+    (
+        (SMCV2Direction.BULLISH, 6, 0, 3),
+        (SMCV2Direction.BEARISH, 6, 0, 3),
+        (SMCV2Direction.BULLISH, 7, 1, 2),
+        (SMCV2Direction.BEARISH, 7, 1, 2),
+        (SMCV2Direction.BULLISH, 8, 2, 1),
+        (SMCV2Direction.BEARISH, 8, 2, 1),
+    ),
+)
+def test_04_to_08_pending_prefix_boundary_is_exact(
+    direction: SMCV2Direction,
+    observation_count: int,
+    available_count: int,
+    missing_count: int,
+) -> None:
+    result = analyze_inducement_pending_horizons(
+        **_pending_fixture(direction, observation_count=observation_count)  # type: ignore[arg-type]
+    )
+    assert result.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert len(result.pending_horizons) == 1
+    pending = result.pending_horizons[0]
+    assert pending.direction is direction
+    assert pending.available_confirmation_indices == tuple(
+        range(6, 6 + available_count)
+    )
+    assert pending.available_confirmation_timestamps == tuple(
+        _time(index) for index in range(6, 6 + available_count)
+    )
+    assert pending.missing_confirmation_bar_count == missing_count
+    expected_first_known = 5 + available_count
+    assert (pending.first_known_index, pending.first_known_timestamp) == (
+        expected_first_known,
+        _time(expected_first_known),
+    )
+    assert pending.reason_token == "NEXT_THREE_CLOSED_BARS_INCOMPLETE"
+
+
+def test_09_complete_unconfirmed_three_bar_horizon_is_not_pending() -> None:
+    result = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=9)  # type: ignore[arg-type]
+    )
+    assert result.status is SMCV2PrimitiveStatus.NONE
+    assert result.pending_horizons == ()
+
+
+def test_10_confirmed_v1_sequence_is_not_pending_and_v1_is_unchanged() -> None:
+    fixture = _fixture()
+    before = analyze_inducements(**fixture)  # type: ignore[arg-type]
+    pending = analyze_inducement_pending_horizons(**fixture)  # type: ignore[arg-type]
+    after = analyze_inducements(**fixture)  # type: ignore[arg-type]
+    assert before == after
+    assert before.status is SMCV2PrimitiveStatus.VALID
+    assert pending.status is SMCV2PrimitiveStatus.NONE
+    assert pending.pending_horizons == ()
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "direction",
+        "active_range_lineage_id",
+        "active_range_snapshot_id",
+        "liquidity_map_snapshot_id",
+        "external_target_classification_id",
+        "internal_pool_classification_id",
+        "internal_pool_id",
+        "sweep_index",
+        "sweep_timestamp",
+        "sweep_extreme_tick",
+        "reclaim_close_tick",
+        "available_confirmation_indices",
+        "available_confirmation_timestamps",
+        "missing_confirmation_bar_count",
+        "first_known_index",
+        "first_known_timestamp",
+        "reason_token",
+    ),
+)
+def test_27_pending_identity_requires_every_source_field(name: str) -> None:
+    item = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    ).pending_horizons[0]
+    kwargs = _pending_identity_kwargs(item)
+    kwargs[name] = None
+    with pytest.raises((TypeError, ValueError)):
+        make_inducement_pending_horizon_id(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"identity_kind": "CONTEXT"},
+        {"available_confirmation_indices": [6]},
+        {"available_confirmation_timestamps": [_time(6)]},
+        {"available_confirmation_indices": (6, 7, 8)},
+        {"available_confirmation_indices": (6,), "available_confirmation_timestamps": ()},
+        {"missing_confirmation_bar_count": 0},
+        {"missing_confirmation_bar_count": 4},
+        {"missing_confirmation_bar_count": True},
+        {"first_known_index": True},
+        {"reason_token": "next_three_closed_bars_incomplete"},
+    ),
+)
+def test_21_to_28_pending_identity_malformed_schema_fails_closed(
+    updates: dict[str, object],
+) -> None:
+    item = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    ).pending_horizons[0]
+    kwargs = {**_pending_identity_kwargs(item), **updates}
+    with pytest.raises((TypeError, ValueError)):
+        make_inducement_pending_horizon_id(**kwargs)  # type: ignore[arg-type]
+
+
+def test_29_to_33_pending_identity_payload_and_sensitivity_are_exact() -> None:
+    item = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    ).pending_horizons[0]
+    kwargs = _pending_identity_kwargs(item)
+    identity = make_inducement_pending_horizon_id(**kwargs)  # type: ignore[arg-type]
+    payload = {
+        "version": SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION,
+        "identity_kind": "PENDING_HORIZON",
+        "instrument": INSTRUMENT,
+        "timeframe": TIMEFRAME,
+        "direction": item.direction.value,
+        "active_range_lineage_id": item.active_range_lineage_id,
+        "active_range_snapshot_id": item.active_range_snapshot_id,
+        "liquidity_map_snapshot_id": item.liquidity_map_snapshot_id,
+        "external_target_classification_id": item.external_target_classification_id,
+        "internal_pool_classification_id": item.internal_pool_classification_id,
+        "internal_pool_id": item.internal_pool_id,
+        "sweep_index": item.sweep_index,
+        "sweep_timestamp": item.sweep_timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "sweep_extreme_tick": item.sweep_extreme_tick,
+        "reclaim_close_tick": item.reclaim_close_tick,
+        "available_confirmation_indices": list(item.available_confirmation_indices),
+        "available_confirmation_timestamps": [
+            value.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            for value in item.available_confirmation_timestamps
+        ],
+        "missing_confirmation_bar_count": item.missing_confirmation_bar_count,
+        "first_known_index": item.first_known_index,
+        "first_known_timestamp": item.first_known_timestamp.strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        ),
+        "reason_token": item.reason_token,
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    assert identity == item.pending_horizon_id == hashlib.sha256(encoded).hexdigest()
+    assert make_inducement_pending_horizon_id(
+        **{**kwargs, "instrument": "gc", "timeframe": "m5"}  # type: ignore[arg-type]
+    ) == identity
+    for name in (
+        "active_range_lineage_id",
+        "active_range_snapshot_id",
+        "liquidity_map_snapshot_id",
+        "external_target_classification_id",
+        "internal_pool_classification_id",
+        "internal_pool_id",
+    ):
+        assert make_inducement_pending_horizon_id(
+            **{**kwargs, name: _hash(f"changed-{name}")}  # type: ignore[arg-type]
+        ) != identity
+    assert make_inducement_pending_horizon_id(
+        **{**kwargs, "sweep_index": item.sweep_index - 1}  # type: ignore[arg-type]
+    ) != identity
+    assert make_inducement_pending_horizon_id(
+        **{
+            **kwargs,
+            "sweep_timestamp": item.sweep_timestamp - timedelta(seconds=1),
+        }  # type: ignore[arg-type]
+    ) != identity
+
+
+def test_34_pending_identity_is_repeatable_and_nested_exceptions_are_contained() -> None:
+    result = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    )
+    item = result.pending_horizons[0]
+    kwargs = _pending_identity_kwargs(item)
+    assert make_inducement_pending_horizon_id(**kwargs) == item.pending_horizon_id  # type: ignore[arg-type]
+    malformed = _malformed(item, "internal_pool_id")
+    values = _pending_fixture(observation_count=7)
+    values["equal_liquidity_pools"] = (malformed,)
+    contained = analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+    assert contained.status is SMCV2PrimitiveStatus.INVALID
+    assert contained.pending_horizons == ()
+
+
+def test_37_opposing_pending_first_known_group_is_ambiguous_without_promotion() -> None:
+    values = _combined_fixture()
+    values.update(
+        {
+            "structure_events": (),
+            "fair_value_gaps": (),
+            "fair_value_gap_transitions": (),
+            "fair_value_gap_snapshots": (),
+            "observations": values["observations"][:6],
+        }
+    )
+    result = analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+    assert result.status is SMCV2PrimitiveStatus.AMBIGUOUS
+    assert result.pending_horizons == ()
+
+
+def test_38_later_malformed_observation_preserves_strictly_prior_pending() -> None:
+    first_values = _pending_fixture(observation_count=7)
+    first = analyze_inducement_pending_horizons(**first_values)  # type: ignore[arg-type]
+    observations = _fixture()["observations"]
+    malformed = _malformed(observations[7], "close_tick")  # type: ignore[index]
+    second_values = _pending_fixture(observation_count=8)
+    second_values["observations"] = (*observations[:7], malformed)  # type: ignore[index]
+    second = analyze_inducement_pending_horizons(**second_values)  # type: ignore[arg-type]
+    assert second.status is SMCV2PrimitiveStatus.INVALID
+    assert second.pending_horizons == first.pending_horizons
+
+
+def test_42_pending_public_api_is_exact_keyword_only() -> None:
+    analyzer = inspect.signature(analyze_inducement_pending_horizons)
+    builder = inspect.signature(make_inducement_pending_horizon_id)
+    assert tuple(analyzer.parameters) == (
+        "instrument",
+        "timeframe",
+        "dealing_range_snapshots",
+        "liquidity_map_snapshots",
+        "equal_liquidity_pools",
+        "structure_events",
+        "fair_value_gaps",
+        "fair_value_gap_transitions",
+        "fair_value_gap_snapshots",
+        "observations",
+    )
+    assert tuple(builder.parameters) == (
+        "identity_kind",
+        "instrument",
+        "timeframe",
+        "direction",
+        "active_range_lineage_id",
+        "active_range_snapshot_id",
+        "liquidity_map_snapshot_id",
+        "external_target_classification_id",
+        "internal_pool_classification_id",
+        "internal_pool_id",
+        "sweep_index",
+        "sweep_timestamp",
+        "sweep_extreme_tick",
+        "reclaim_close_tick",
+        "available_confirmation_indices",
+        "available_confirmation_timestamps",
+        "missing_confirmation_bar_count",
+        "first_known_index",
+        "first_known_timestamp",
+        "reason_token",
+    )
+    assert all(
+        value.kind is inspect.Parameter.KEYWORD_ONLY
+        for value in (*analyzer.parameters.values(), *builder.parameters.values())
+    )
+    assert all(
+        value.default is inspect.Parameter.empty
+        for value in analyzer.parameters.values()
+    )
+    assert all(
+        builder.parameters[name].default is None
+        for name in tuple(builder.parameters)[3:]
+    )
+
+
+def test_43_pending_public_dataclasses_are_exact_frozen_and_defaulted() -> None:
+    assert SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION == (
+        "SMC_V2_INDUCEMENT_PENDING_HORIZON_V1"
+    )
+    assert tuple(InducementPendingHorizon.__annotations__) == (
+        "pending_horizon_id",
+        "direction",
+        "active_range_lineage_id",
+        "active_range_snapshot_id",
+        "liquidity_map_snapshot_id",
+        "external_target_classification_id",
+        "internal_pool_classification_id",
+        "internal_pool_id",
+        "sweep_index",
+        "sweep_timestamp",
+        "sweep_extreme_tick",
+        "reclaim_close_tick",
+        "available_confirmation_indices",
+        "available_confirmation_timestamps",
+        "missing_confirmation_bar_count",
+        "first_known_index",
+        "first_known_timestamp",
+        "reason_token",
+    )
+    assert tuple(InducementPendingHorizonResult.__annotations__) == (
+        "status",
+        "pending_horizons",
+        "reasons",
+        "blocking_reasons",
+    )
+    assert InducementPendingHorizon.__dataclass_params__.frozen
+    assert InducementPendingHorizonResult.__dataclass_params__.frozen
+    result_fields = {
+        field.name: field for field in fields(InducementPendingHorizonResult)
+    }
+    assert result_fields["pending_horizons"].default == ()
+    assert result_fields["reasons"].default == ()
+    assert result_fields["blocking_reasons"].default == ()
+    item = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    ).pending_horizons[0]
+    with pytest.raises(FrozenInstanceError):
+        item.missing_confirmation_bar_count = 1  # type: ignore[misc]
+
+
+def test_44_pending_exports_are_module_only_and_v1_exports_remain_compatible() -> None:
+    import smc
+    import smc.inducement as module
+
+    for name in (
+        "SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION",
+        "InducementPendingHorizon",
+        "InducementPendingHorizonResult",
+        "make_inducement_pending_horizon_id",
+        "analyze_inducement_pending_horizons",
+    ):
+        assert name in module.__all__
+        assert not hasattr(smc, name)
+
+
+def test_45_pending_prefixes_are_deterministic_and_same_effective_is_invalid() -> None:
+    first = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    )
+    repeat = analyze_inducement_pending_horizons(
+        **_pending_fixture(observation_count=7)  # type: ignore[arg-type]
+    )
+    assert first == repeat
+    values = _pending_fixture(observation_count=7)
+    observations = values["observations"]
+    duplicate = replace(observations[-1], close_tick=observations[-1].close_tick - 1)  # type: ignore[index]
+    values["observations"] = (*observations, duplicate)  # type: ignore[arg-type]
+    result = analyze_inducement_pending_horizons(**values)  # type: ignore[arg-type]
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_47_pending_surface_has_no_candidate_private_or_trading_authority() -> None:
+    source = "\n".join(
+        (
+            inspect.getsource(analyze_inducement_pending_horizons),
+            inspect.getsource(make_inducement_pending_horizon_id),
+        )
+    ).lower()
+    for forbidden in (
+        "decision_candidate",
+        "candidate_evidence",
+        "private_data",
+        "training",
+        "final_oos",
+        "buy",
+        "sell",
+        "order_entry",
+    ):
         assert forbidden not in source
 
 

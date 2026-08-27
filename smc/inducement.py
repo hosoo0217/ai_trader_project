@@ -49,10 +49,17 @@ from smc.smc_v2_primitives import (
 
 
 INDUCEMENT_DETECTOR_VERSION = "SMC-V2-INDUCEMENT-1"
+SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION = (
+    "SMC_V2_INDUCEMENT_PENDING_HORIZON_V1"
+)
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _RECOVERING_PRIOR_EVIDENCE: ContextVar[bool] = ContextVar(
     "inducement_recovering_prior_evidence",
+    default=False,
+)
+_RECOVERING_PENDING_EVIDENCE: ContextVar[bool] = ContextVar(
+    "inducement_recovering_pending_evidence",
     default=False,
 )
 _FORMATION_REASON = "FORMATION_CONFIRMED"
@@ -138,6 +145,36 @@ class InducementResult:
     status: SMCV2PrimitiveStatus
     inducements: tuple[Inducement, ...] = ()
     snapshots: tuple[InducementSnapshot, ...] = ()
+    reasons: tuple[str, ...] = ()
+    blocking_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class InducementPendingHorizon:
+    pending_horizon_id: str
+    direction: SMCV2Direction
+    active_range_lineage_id: str
+    active_range_snapshot_id: str
+    liquidity_map_snapshot_id: str
+    external_target_classification_id: str
+    internal_pool_classification_id: str
+    internal_pool_id: str
+    sweep_index: int
+    sweep_timestamp: datetime
+    sweep_extreme_tick: int
+    reclaim_close_tick: int
+    available_confirmation_indices: tuple[int, ...]
+    available_confirmation_timestamps: tuple[datetime, ...]
+    missing_confirmation_bar_count: int
+    first_known_index: int
+    first_known_timestamp: datetime
+    reason_token: str
+
+
+@dataclass(frozen=True)
+class InducementPendingHorizonResult:
+    status: SMCV2PrimitiveStatus
+    pending_horizons: tuple[InducementPendingHorizon, ...] = ()
     reasons: tuple[str, ...] = ()
     blocking_reasons: tuple[str, ...] = ()
 
@@ -290,6 +327,114 @@ def make_inducement_id(
             "effective_timestamp": _timestamp_text(effective_time),
             "inducement_ids": list(inducement_ids),
         }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def make_inducement_pending_horizon_id(
+    *,
+    identity_kind: str,
+    instrument: str,
+    timeframe: str,
+    direction: SMCV2Direction | None = None,
+    active_range_lineage_id: str | None = None,
+    active_range_snapshot_id: str | None = None,
+    liquidity_map_snapshot_id: str | None = None,
+    external_target_classification_id: str | None = None,
+    internal_pool_classification_id: str | None = None,
+    internal_pool_id: str | None = None,
+    sweep_index: int | None = None,
+    sweep_timestamp: datetime | None = None,
+    sweep_extreme_tick: int | None = None,
+    reclaim_close_tick: int | None = None,
+    available_confirmation_indices: tuple[int, ...] | None = None,
+    available_confirmation_timestamps: tuple[datetime, ...] | None = None,
+    missing_confirmation_bar_count: int | None = None,
+    first_known_index: int | None = None,
+    first_known_timestamp: datetime | None = None,
+    reason_token: str | None = None,
+) -> str:
+    kind = _text(identity_kind, "identity_kind")
+    if kind != "PENDING_HORIZON":
+        raise ValueError("identity_kind must be PENDING_HORIZON")
+    if direction not in (SMCV2Direction.BULLISH, SMCV2Direction.BEARISH):
+        raise ValueError("direction must be BULLISH or BEARISH")
+    hashes = {
+        "active_range_lineage_id": active_range_lineage_id,
+        "active_range_snapshot_id": active_range_snapshot_id,
+        "liquidity_map_snapshot_id": liquidity_map_snapshot_id,
+        "external_target_classification_id": external_target_classification_id,
+        "internal_pool_classification_id": internal_pool_classification_id,
+        "internal_pool_id": internal_pool_id,
+    }
+    for name, value in hashes.items():
+        _hash_value(value, name)
+    _nonnegative(sweep_index, "sweep_index")
+    sweep_time = _timestamp(sweep_timestamp, "sweep_timestamp")
+    _tick(sweep_extreme_tick, "sweep_extreme_tick")
+    _tick(reclaim_close_tick, "reclaim_close_tick")
+    if direction is SMCV2Direction.BULLISH:
+        if sweep_extreme_tick >= reclaim_close_tick:
+            raise ValueError("bullish sweep extreme must be below reclaim close")
+    elif sweep_extreme_tick <= reclaim_close_tick:
+        raise ValueError("bearish sweep extreme must be above reclaim close")
+    if type(available_confirmation_indices) is not tuple:
+        raise ValueError("available_confirmation_indices must be an exact tuple")
+    if type(available_confirmation_timestamps) is not tuple:
+        raise ValueError("available_confirmation_timestamps must be an exact tuple")
+    if len(available_confirmation_indices) != len(available_confirmation_timestamps):
+        raise ValueError("available confirmation tuples must have equal length")
+    if len(available_confirmation_indices) > 2:
+        raise ValueError("at most two confirmation bars may be available")
+    normalized_times: list[datetime] = []
+    previous = (sweep_index, sweep_time)
+    for index, timestamp in zip(
+        available_confirmation_indices, available_confirmation_timestamps, strict=True
+    ):
+        _nonnegative(index, "available_confirmation_indices")
+        normalized = _timestamp(timestamp, "available_confirmation_timestamps")
+        if (index, normalized) <= previous:
+            raise ValueError("available confirmation moments must be strictly ordered")
+        previous = index, normalized
+        normalized_times.append(normalized)
+    if (
+        type(missing_confirmation_bar_count) is not int
+        or missing_confirmation_bar_count not in (1, 2, 3)
+        or missing_confirmation_bar_count
+        != 3 - len(available_confirmation_indices)
+    ):
+        raise ValueError("missing_confirmation_bar_count must equal three minus available")
+    _nonnegative(first_known_index, "first_known_index")
+    first_known_time = _timestamp(first_known_timestamp, "first_known_timestamp")
+    expected_first_known = (
+        previous if available_confirmation_indices else (sweep_index, sweep_time)
+    )
+    if (first_known_index, first_known_time) != expected_first_known:
+        raise ValueError("first-known moment must equal the final supplied observation moment")
+    if reason_token != "NEXT_THREE_CLOSED_BARS_INCOMPLETE":
+        raise ValueError("reason_token must be NEXT_THREE_CLOSED_BARS_INCOMPLETE")
+    payload = {
+        "version": SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION,
+        "identity_kind": kind,
+        "instrument": _text(instrument, "instrument").upper(),
+        "timeframe": _text(timeframe, "timeframe").upper(),
+        "direction": direction.value,
+        **hashes,
+        "sweep_index": sweep_index,
+        "sweep_timestamp": _timestamp_text(sweep_time),
+        "sweep_extreme_tick": sweep_extreme_tick,
+        "reclaim_close_tick": reclaim_close_tick,
+        "available_confirmation_indices": list(available_confirmation_indices),
+        "available_confirmation_timestamps": [
+            _timestamp_text(item) for item in normalized_times
+        ],
+        "missing_confirmation_bar_count": missing_confirmation_bar_count,
+        "first_known_index": first_known_index,
+        "first_known_timestamp": _timestamp_text(first_known_time),
+        "reason_token": reason_token,
+    }
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
@@ -485,6 +630,313 @@ def analyze_inducements(
         )
 
 
+def analyze_inducement_pending_horizons(
+    *,
+    instrument: str,
+    timeframe: str,
+    dealing_range_snapshots: tuple[DealingRangeSnapshot, ...] | None,
+    liquidity_map_snapshots: tuple[LiquidityMapSnapshot, ...] | None,
+    equal_liquidity_pools: tuple[EqualLiquidityPool, ...] | None,
+    structure_events: tuple[DealingRangeStructureEvent, ...] | None,
+    fair_value_gaps: tuple[FairValueGap, ...] | None,
+    fair_value_gap_transitions: tuple[FairValueGapTransition, ...] | None,
+    fair_value_gap_snapshots: tuple[FairValueGapSnapshot, ...] | None,
+    observations: tuple[InducementObservation, ...] | None,
+) -> InducementPendingHorizonResult:
+    try:
+        base = analyze_inducements(
+            instrument=instrument,
+            timeframe=timeframe,
+            dealing_range_snapshots=dealing_range_snapshots,
+            liquidity_map_snapshots=liquidity_map_snapshots,
+            equal_liquidity_pools=equal_liquidity_pools,
+            structure_events=structure_events,
+            fair_value_gaps=fair_value_gaps,
+            fair_value_gap_transitions=fair_value_gap_transitions,
+            fair_value_gap_snapshots=fair_value_gap_snapshots,
+            observations=observations,
+        )
+        if base.status is SMCV2PrimitiveStatus.INVALID:
+            raise ValueError(base.reasons[0] if base.reasons else "invalid inducement evidence")
+        supplied = (
+            dealing_range_snapshots,
+            liquidity_map_snapshots,
+            equal_liquidity_pools,
+            structure_events,
+            fair_value_gaps,
+            fair_value_gap_transitions,
+            fair_value_gap_snapshots,
+            observations,
+        )
+        if any(value is None for value in supplied):
+            return InducementPendingHorizonResult(
+                status=base.status,
+                reasons=base.reasons,
+                blocking_reasons=base.blocking_reasons,
+            )
+        if base.status is SMCV2PrimitiveStatus.AMBIGUOUS:
+            return InducementPendingHorizonResult(
+                status=SMCV2PrimitiveStatus.AMBIGUOUS,
+                reasons=base.reasons,
+                blocking_reasons=base.blocking_reasons,
+            )
+        canonical_instrument = _text(instrument, "instrument").upper()
+        canonical_timeframe = _text(timeframe, "timeframe").upper()
+        obs = _validate_observations(observations or ())
+        ranges = _validate_ranges(
+            dealing_range_snapshots or (), canonical_instrument, canonical_timeframe
+        )
+        pools = _validate_pools(
+            equal_liquidity_pools or (), canonical_instrument, canonical_timeframe
+        )
+        maps = _validate_maps(
+            liquidity_map_snapshots or (), canonical_instrument, canonical_timeframe
+        )
+        obs_by_index = {item.index: item for item in obs}
+        events = _validate_events(structure_events or (), obs_by_index)
+        gaps, gap_transitions, gap_snapshots = _validate_gaps(
+            fair_value_gaps or (),
+            fair_value_gap_transitions or (),
+            fair_value_gap_snapshots or (),
+            obs_by_index,
+            canonical_instrument,
+            canonical_timeframe,
+        )
+        _validate_cross_references(ranges, pools, maps, events, gaps)
+        sweeps = _discover_sweeps(
+            ranges=ranges, maps=maps, pools=pools, observations=obs
+        )
+        candidates: list[InducementPendingHorizon] = []
+        for sweep in sweeps:
+            available = obs[sweep.observation_position + 1 : sweep.observation_position + 4]
+            if len(available) >= 3:
+                continue
+            if _sweep_has_confirmation(
+                sweep=sweep,
+                observations=obs,
+                events=events,
+                gaps=gaps,
+                gap_transitions=gap_transitions,
+                gap_snapshots=gap_snapshots,
+                ranges=ranges,
+                maps=maps,
+                pools=pools,
+            ):
+                continue
+            indices = tuple(item.index for item in available)
+            timestamps = tuple(item.timestamp for item in available)
+            first_known = available[-1] if available else sweep.observation
+            kwargs = {
+                "identity_kind": "PENDING_HORIZON",
+                "instrument": canonical_instrument,
+                "timeframe": canonical_timeframe,
+                "direction": sweep.direction,
+                "active_range_lineage_id": sweep.active_range.lineage_id,
+                "active_range_snapshot_id": sweep.active_range.snapshot_id,
+                "liquidity_map_snapshot_id": sweep.map_snapshot.snapshot_id,
+                "external_target_classification_id": sweep.external_target.classification_id,
+                "internal_pool_classification_id": sweep.internal_classification.classification_id,
+                "internal_pool_id": sweep.active_pool.lineage_id,
+                "sweep_index": sweep.observation.index,
+                "sweep_timestamp": sweep.observation.timestamp,
+                "sweep_extreme_tick": (
+                    sweep.observation.low_tick
+                    if sweep.direction is SMCV2Direction.BULLISH
+                    else sweep.observation.high_tick
+                ),
+                "reclaim_close_tick": sweep.observation.close_tick,
+                "available_confirmation_indices": indices,
+                "available_confirmation_timestamps": timestamps,
+                "missing_confirmation_bar_count": 3 - len(available),
+                "first_known_index": first_known.index,
+                "first_known_timestamp": first_known.timestamp,
+                "reason_token": "NEXT_THREE_CLOSED_BARS_INCOMPLETE",
+            }
+            candidates.append(
+                InducementPendingHorizon(
+                    pending_horizon_id=make_inducement_pending_horizon_id(**kwargs),
+                    **{key: value for key, value in kwargs.items() if key not in {"identity_kind", "instrument", "timeframe"}},
+                )
+            )
+        candidates.sort(key=_pending_horizon_order_key)
+        if len({item.pending_horizon_id for item in candidates}) != len(candidates):
+            raise ValueError("pending horizon identities must be unique")
+        emitted: list[InducementPendingHorizon] = []
+        position = 0
+        while position < len(candidates):
+            moment = (
+                candidates[position].first_known_index,
+                candidates[position].first_known_timestamp,
+            )
+            group: list[InducementPendingHorizon] = []
+            while position < len(candidates) and (
+                candidates[position].first_known_index,
+                candidates[position].first_known_timestamp,
+            ) == moment:
+                group.append(candidates[position])
+                position += 1
+            if len({item.direction for item in group}) > 1:
+                return InducementPendingHorizonResult(
+                    status=SMCV2PrimitiveStatus.AMBIGUOUS,
+                    pending_horizons=tuple(emitted),
+                    reasons=("opposing pending horizons share one first-known group",),
+                    blocking_reasons=("same-group directional ambiguity",),
+                )
+            emitted.extend(group)
+        if emitted:
+            return InducementPendingHorizonResult(
+                status=SMCV2PrimitiveStatus.UNKNOWN,
+                pending_horizons=tuple(emitted),
+                reasons=("one or more confirmation horizons are incomplete",),
+                blocking_reasons=("NEXT_THREE_CLOSED_BARS_INCOMPLETE",),
+            )
+        return InducementPendingHorizonResult(
+            status=SMCV2PrimitiveStatus.NONE,
+            reasons=("complete evidence contains no pending confirmation horizon",),
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+        recovered = None
+        if not _RECOVERING_PENDING_EVIDENCE.get():
+            recovered = _recover_pending_prior_evidence(
+                instrument=instrument,
+                timeframe=timeframe,
+                dealing_range_snapshots=dealing_range_snapshots,
+                liquidity_map_snapshots=liquidity_map_snapshots,
+                equal_liquidity_pools=equal_liquidity_pools,
+                structure_events=structure_events,
+                fair_value_gaps=fair_value_gaps,
+                fair_value_gap_transitions=fair_value_gap_transitions,
+                fair_value_gap_snapshots=fair_value_gap_snapshots,
+                observations=observations,
+            )
+        return InducementPendingHorizonResult(
+            status=SMCV2PrimitiveStatus.INVALID,
+            pending_horizons=(recovered.pending_horizons if recovered is not None else ()),
+            reasons=(str(exc) or type(exc).__name__,),
+            blocking_reasons=("malformed or contradictory supplied evidence",),
+        )
+
+
+def _sweep_has_confirmation(
+    *,
+    sweep: _Sweep,
+    observations: tuple[InducementObservation, ...],
+    events: tuple[DealingRangeStructureEvent, ...],
+    gaps: tuple[FairValueGap, ...],
+    gap_transitions: tuple[FairValueGapTransition, ...],
+    gap_snapshots: tuple[FairValueGapSnapshot, ...],
+    ranges: tuple[DealingRangeSnapshot, ...],
+    maps: tuple[LiquidityMapSnapshot, ...],
+    pools: tuple[EqualLiquidityPool, ...],
+) -> bool:
+    for observation in observations[
+        sweep.observation_position + 1 : sweep.observation_position + 4
+    ]:
+        matched_events = tuple(
+            event
+            for event in events
+            if event.direction is sweep.direction
+            and event.provenance.confirmation_index == observation.index
+            and _timestamp(event.provenance.confirmation_timestamp, "event timestamp")
+            == observation.timestamp
+        )
+        if len(matched_events) > 1:
+            raise ValueError("multiple same-direction events occupy one confirmation group")
+        if not matched_events:
+            continue
+        event = matched_events[0]
+        matched_gaps = tuple(
+            gap
+            for gap in gaps
+            if gap.direction is sweep.direction
+            and gap.formation_end_index == observation.index
+            and _timestamp(gap.formation_end_timestamp, "gap timestamp")
+            == observation.timestamp
+            and gap.structure_event_id == event.event_id
+            and gap.structure_event_type is event.event_type
+        )
+        if len(matched_gaps) > 1:
+            raise ValueError("confirmation event has duplicate or forked linked FVGs")
+        if not matched_gaps:
+            continue
+        _validate_event_gap_binding(event, matched_gaps[0])
+        _validate_gap_formation_history(
+            matched_gaps[0], gap_transitions, gap_snapshots
+        )
+        try:
+            _validate_retention(sweep, observation, ranges, maps, pools)
+        except _NoCandidate:
+            continue
+        return True
+    return False
+
+
+def _pending_horizon_order_key(
+    item: InducementPendingHorizon,
+) -> tuple[object, ...]:
+    return (
+        item.first_known_index,
+        item.first_known_timestamp,
+        item.sweep_index,
+        item.sweep_timestamp,
+        item.direction.value,
+        item.internal_pool_id,
+        item.pending_horizon_id,
+    )
+
+
+def _recover_pending_prior_evidence(
+    **arguments: object,
+) -> InducementPendingHorizonResult | None:
+    if type(arguments.get("instrument")) is not str or type(arguments.get("timeframe")) is not str:
+        return None
+    stream_names = (
+        "dealing_range_snapshots",
+        "liquidity_map_snapshots",
+        "equal_liquidity_pools",
+        "structure_events",
+        "fair_value_gaps",
+        "fair_value_gap_transitions",
+        "fair_value_gap_snapshots",
+        "observations",
+    )
+    if any(type(arguments.get(name)) is not tuple for name in stream_names):
+        return None
+    streams = {name: arguments[name] for name in stream_names}
+    moments = sorted(
+        {
+            moment
+            for values in streams.values()
+            for item in values  # type: ignore[union-attr]
+            if (moment := _safe_effective_pair(item)) is not None
+        },
+        reverse=True,
+    )
+    for cutoff in moments:
+        reduced = {
+            name: tuple(
+                item
+                for item in values  # type: ignore[union-attr]
+                if (moment := _safe_effective_pair(item)) is None or moment < cutoff
+            )
+            for name, values in streams.items()
+        }
+        if all(reduced[name] == streams[name] for name in stream_names):
+            continue
+        token = _RECOVERING_PENDING_EVIDENCE.set(True)
+        try:
+            result = analyze_inducement_pending_horizons(
+                instrument=arguments["instrument"],  # type: ignore[arg-type]
+                timeframe=arguments["timeframe"],  # type: ignore[arg-type]
+                **reduced,  # type: ignore[arg-type]
+            )
+        finally:
+            _RECOVERING_PENDING_EVIDENCE.reset(token)
+        if result.pending_horizons:
+            return result
+    return None
+
+
 def _recover_prior_evidence(
     *,
     instrument: object,
@@ -590,19 +1042,13 @@ def _safe_effective_pair(value: object) -> tuple[int, datetime] | None:
         return None
 
 
-def _analyze_valid(
+def _discover_sweeps(
     *,
-    instrument: str,
-    timeframe: str,
     ranges: tuple[DealingRangeSnapshot, ...],
     maps: tuple[LiquidityMapSnapshot, ...],
     pools: tuple[EqualLiquidityPool, ...],
-    events: tuple[DealingRangeStructureEvent, ...],
-    gaps: tuple[FairValueGap, ...],
-    gap_transitions: tuple[FairValueGapTransition, ...],
-    gap_snapshots: tuple[FairValueGapSnapshot, ...],
     observations: tuple[InducementObservation, ...],
-) -> InducementResult:
+) -> tuple[_Sweep, ...]:
     observation_positions = {item.index: position for position, item in enumerate(observations)}
     pool_by_lineage: dict[str, list[EqualLiquidityPool]] = {}
     for pool in pools:
@@ -689,6 +1135,28 @@ def _analyze_valid(
                     raise ValueError(
                         "qualifying sweep observation lacks required SWEPT lifecycle evidence"
                     )
+    return tuple(sweeps)
+
+
+def _analyze_valid(
+    *,
+    instrument: str,
+    timeframe: str,
+    ranges: tuple[DealingRangeSnapshot, ...],
+    maps: tuple[LiquidityMapSnapshot, ...],
+    pools: tuple[EqualLiquidityPool, ...],
+    events: tuple[DealingRangeStructureEvent, ...],
+    gaps: tuple[FairValueGap, ...],
+    gap_transitions: tuple[FairValueGapTransition, ...],
+    gap_snapshots: tuple[FairValueGapSnapshot, ...],
+    observations: tuple[InducementObservation, ...],
+) -> InducementResult:
+    sweeps = _discover_sweeps(
+        ranges=ranges,
+        maps=maps,
+        pools=pools,
+        observations=observations,
+    )
     if not sweeps:
         return InducementResult(
             status=SMCV2PrimitiveStatus.NONE,
@@ -2114,4 +2582,9 @@ __all__ = (
     "InducementResult",
     "make_inducement_id",
     "analyze_inducements",
+    "SMC_V2_INDUCEMENT_PENDING_HORIZON_VERSION",
+    "InducementPendingHorizon",
+    "InducementPendingHorizonResult",
+    "make_inducement_pending_horizon_id",
+    "analyze_inducement_pending_horizons",
 )
