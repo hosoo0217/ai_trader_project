@@ -340,7 +340,11 @@ def test_case_01_exact_dataset_binding(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_case_02_missing_top_level_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = _fixture()
     for name in ("dataset", "boundary_calendar_entries", "candidate_calendar_entries", "structural_seed", "canonical_candidate_evidence"):
-        assert _run(monkeypatch, fixture, **{name: None}).status is SMCV2PrimitiveStatus.UNKNOWN
+        result = _run(monkeypatch, fixture, **{name: None})
+        assert result.status is SMCV2PrimitiveStatus.UNKNOWN
+        assert result.manifest is None
+        assert result.reasons == ("MISSING_TOP_LEVEL_CONTEXT",)
+        assert result.blocking_reasons == result.reasons
 
 
 def test_case_03_invalid_supplied_counterpart_outranks_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -707,11 +711,48 @@ def test_case_36_repeat_execution_is_object_equal(monkeypatch: pytest.MonkeyPatc
 
 
 def test_case_37_status_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    fixture = _fixture()
-    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.VALID
+    fixture = _fixture(receiving_group=True)
+    complete = _run(monkeypatch, fixture)
+    assert complete.status is SMCV2PrimitiveStatus.VALID
+    assert complete.manifest is not None
     control = fixture["canonical_candidate_evidence"]
     assert isinstance(control, GCCandidateEvidenceResult)
-    assert _run(monkeypatch, fixture, canonical_candidate_evidence=replace(control, status=SMCV2PrimitiveStatus.UNKNOWN)).status is SMCV2PrimitiveStatus.UNKNOWN
+    unknown_control = replace(control, status=SMCV2PrimitiveStatus.UNKNOWN)
+    unknown = _run(
+        monkeypatch,
+        fixture,
+        canonical_candidate_evidence=unknown_control,
+    )
+    assert unknown.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert unknown.reasons == ("CANONICAL_CONTROL_UNKNOWN",)
+    assert unknown.blocking_reasons == unknown.reasons
+    assert unknown.boundaries == complete.boundaries
+    assert unknown.receiving_groups == complete.receiving_groups
+    manifest = unknown.manifest
+    assert manifest is not None
+    assert manifest.canonical_control_digest == continuity._sha(unknown_control)
+    assert manifest.canonical_control_digest != complete.manifest.canonical_control_digest
+    assert replace(
+        manifest,
+        manifest_id=complete.manifest.manifest_id,
+        canonical_control_digest=complete.manifest.canonical_control_digest,
+    ) == complete.manifest
+    assert manifest.boundary_ids == tuple(item.boundary_id for item in unknown.boundaries)
+    assert manifest.receiving_group_ids == tuple(item.group_id for item in unknown.receiving_groups)
+    assert manifest.manifest_id == continuity.make_gc_cross_segment_continuity_id(
+        identity_kind=continuity.GCCrossSegmentContinuityIdentityKind.MANIFEST,
+        instrument=manifest.instrument,
+        timeframe=manifest.timeframe,
+        dataset_id=manifest.dataset_id,
+        calendar_version=manifest.calendar_version,
+        boundary_calendar_digest=manifest.boundary_calendar_digest,
+        candidate_calendar_digest=manifest.candidate_calendar_digest,
+        timezone_data_version=manifest.timezone_data_version,
+        seed_id=manifest.seed_id,
+        canonical_control_digest=manifest.canonical_control_digest,
+        boundary_ids=manifest.boundary_ids,
+        receiving_group_ids=manifest.receiving_group_ids,
+    )
 
 
 def test_case_38_later_invalid_preserves_prior_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -724,7 +765,6 @@ def test_case_38_later_invalid_preserves_prior_boundary(monkeypatch: pytest.Monk
     for status in (
         SMCV2PrimitiveStatus.INVALID,
         SMCV2PrimitiveStatus.AMBIGUOUS,
-        SMCV2PrimitiveStatus.UNKNOWN,
     ):
         blocked = _run(
             monkeypatch,
@@ -735,6 +775,19 @@ def test_case_38_later_invalid_preserves_prior_boundary(monkeypatch: pytest.Monk
         assert blocked.boundaries == complete.boundaries
         assert blocked.receiving_groups == complete.receiving_groups
         assert blocked.manifest is None
+
+    unknown_control = replace(control, status=SMCV2PrimitiveStatus.UNKNOWN)
+    unknown = _run(monkeypatch, fixture, canonical_candidate_evidence=unknown_control)
+    repeated = _run(
+        monkeypatch,
+        fixture,
+        canonical_candidate_evidence=unknown_control,
+    )
+    assert unknown.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert unknown.boundaries == complete.boundaries
+    assert unknown.receiving_groups == complete.receiving_groups
+    assert unknown.manifest is not None
+    assert unknown == repeated
 
 
 def test_case_39_boundary_identity_schema_is_exhaustive() -> None:

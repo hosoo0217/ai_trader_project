@@ -467,13 +467,15 @@ def _blocked(
     reason: str,
     boundaries: tuple[GCCrossSegmentBoundary, ...] = (),
     groups: tuple[GCContinuityReceivingGroup, ...] = (),
+    *,
+    manifest: GCCrossSegmentContinuityManifest | None = None,
 ) -> GCCrossSegmentContinuityResult:
     blocking = (reason,) if status in {
         SMCV2PrimitiveStatus.INVALID,
         SMCV2PrimitiveStatus.AMBIGUOUS,
         SMCV2PrimitiveStatus.UNKNOWN,
     } else ()
-    return GCCrossSegmentContinuityResult(status, boundaries, groups, None, (reason,), blocking)
+    return GCCrossSegmentContinuityResult(status, boundaries, groups, manifest, (reason,), blocking)
 
 
 def _validate_bar(value: object, prior: tuple[int, datetime] | None) -> tuple[int, datetime]:
@@ -1103,7 +1105,13 @@ def analyze_gc_cross_segment_continuity(
     if canonical_control.status is SMCV2PrimitiveStatus.AMBIGUOUS:
         return _blocked(SMCV2PrimitiveStatus.AMBIGUOUS, "CANONICAL_CONTROL_AMBIGUOUS", tuple(boundaries), tuple(groups))
     if canonical_control.status is SMCV2PrimitiveStatus.UNKNOWN:
-        return _blocked(SMCV2PrimitiveStatus.UNKNOWN, "CANONICAL_CONTROL_UNKNOWN", tuple(boundaries), tuple(groups))
+        return _blocked(
+            SMCV2PrimitiveStatus.UNKNOWN,
+            "CANONICAL_CONTROL_UNKNOWN",
+            tuple(boundaries),
+            tuple(groups),
+            manifest=manifest,
+        )
     status = SMCV2PrimitiveStatus.VALID if has_eligible else SMCV2PrimitiveStatus.NONE
     reason = "ELIGIBLE_BOUNDARY_PRESENT" if has_eligible else "NO_ELIGIBLE_BOUNDARY"
     return GCCrossSegmentContinuityResult(status, tuple(boundaries), tuple(groups), manifest, (reason,), ())
