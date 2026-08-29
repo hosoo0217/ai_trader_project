@@ -56,6 +56,11 @@ from smc.smc_v2_primitives import (
 
 GC_STRUCTURAL_SEED_VERSION = "GC-STRUCTURAL-SEED-V1"
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+_LEGACY_V3_SEGMENT_IDENTITY_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+_SUPPORTED_SEGMENT_IDENTITY_VERSIONS = (
+    _LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+    GC_DATASET_BUILDER_VERSION,
+)
 
 
 class GCStructuralSeedIdentityKind(str, Enum):
@@ -367,13 +372,40 @@ def _dataset_config_payload(config: GCDatasetBuildConfig) -> dict[str, object]:
     }
 
 
+def _legacy_v3_segment_id(
+    *,
+    config: GCDatasetBuildConfig,
+    contract: str,
+    partition: GCSegmentPartition,
+    first_trade_date: date,
+    last_trade_date: date,
+    source_ids: tuple[str, ...],
+    bar_digest: str,
+    preceding_missing_bar_count: int,
+) -> str:
+    return _canonical_hash(
+        {
+            "version": _LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            "identity_kind": "SEGMENT",
+            "config": _dataset_config_payload(config),
+            "contract": _required_text(contract, "contract", uppercase=True),
+            "partition": partition.value,
+            "first_trade_date": first_trade_date.isoformat(),
+            "last_trade_date": last_trade_date.isoformat(),
+            "source_ids": source_ids,
+            "bar_digest": _require_hash(bar_digest, "bar_digest"),
+            "preceding_missing_bar_count": preceding_missing_bar_count,
+        }
+    )
+
+
 def _validate_manifest(manifest: object, dataset: GCDatasetBuildResult) -> GCDatasetManifest:
     if type(manifest) is not GCDatasetManifest:
         raise TypeError("VALID dataset requires a GCDatasetManifest")
     if manifest.dataset_id != dataset.dataset_id:
         raise ValueError("manifest dataset identity mismatch")
     _require_hash(manifest.dataset_id, "dataset_id")
-    if manifest.version != GC_DATASET_BUILDER_VERSION:
+    if manifest.version not in _SUPPORTED_SEGMENT_IDENTITY_VERSIONS:
         raise ValueError("dataset builder version mismatch")
     if type(manifest.source_ids) is not tuple or not manifest.source_ids:
         raise ValueError("manifest source_ids must be non-empty")
@@ -466,17 +498,30 @@ def _validate_valid_dataset(config: GCDatasetBuildConfig, dataset: GCDatasetBuil
         if prior_end is not None and prior_end >= moments[0]:
             raise ValueError("segment timestamps must be globally ordered and non-overlapping")
         prior_end = moments[-1]
-        expected_segment_id = make_gc_dataset_id(
-            identity_kind="SEGMENT",
-            config=config,
-            contract=contract,
-            partition=segment.partition,
-            first_trade_date=segment.first_trade_date,
-            last_trade_date=segment.last_trade_date,
-            source_ids=segment.source_ids,
-            bar_digest=_bar_digest(segment.bars),
-            preceding_missing_bar_count=segment.preceding_missing_bar_count,
-        )
+        bar_digest = _bar_digest(segment.bars)
+        if manifest.version == _LEGACY_V3_SEGMENT_IDENTITY_VERSION:
+            expected_segment_id = _legacy_v3_segment_id(
+                config=config,
+                contract=contract,
+                partition=segment.partition,
+                first_trade_date=segment.first_trade_date,
+                last_trade_date=segment.last_trade_date,
+                source_ids=segment.source_ids,
+                bar_digest=bar_digest,
+                preceding_missing_bar_count=segment.preceding_missing_bar_count,
+            )
+        else:
+            expected_segment_id = make_gc_dataset_id(
+                identity_kind="SEGMENT",
+                config=config,
+                contract=contract,
+                partition=segment.partition,
+                first_trade_date=segment.first_trade_date,
+                last_trade_date=segment.last_trade_date,
+                source_ids=segment.source_ids,
+                bar_digest=bar_digest,
+                preceding_missing_bar_count=segment.preceding_missing_bar_count,
+            )
         if segment.segment_id != expected_segment_id:
             raise ValueError("segment_id does not match canonical segment evidence")
         total_count += len(segment.bars)

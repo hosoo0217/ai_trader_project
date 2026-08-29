@@ -56,6 +56,7 @@ SOURCE_ID = hashlib.sha256(b"structural-source").hexdigest()
 COVERAGE_ID = hashlib.sha256(b"structural-coverage").hexdigest()
 COVERAGE_DIGEST = hashlib.sha256(b"structural-coverage-digest").hexdigest()
 CALENDAR_DIGEST = hashlib.sha256(b"structural-calendar").hexdigest()
+LEGACY_V3_SEGMENT_IDENTITY_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
 
 
 def _sha(value: object) -> str:
@@ -219,6 +220,56 @@ def _dataset(
         GCDatasetBuildStatus.VALID, dataset_id, tuple(segments), manifest,
         ("CANONICAL_DATASET_BUILT",), (),
     )
+
+
+def _legacy_v3_segment_id(
+    *,
+    config: GCDatasetBuildConfig,
+    segment: GCCanonicalContractSegment,
+) -> str:
+    config_payload = {
+        "instrument": config.instrument.upper(),
+        "timeframe": config.timeframe.upper(),
+        "source_timezone": config.source_timezone,
+        "exchange_timezone": config.exchange_timezone,
+        "timezone_data_version": config.timezone_data_version,
+        "tick_size": str(config.tick_size),
+        "initial_contract": config.initial_contract.upper(),
+        "initial_trade_date": config.initial_trade_date.isoformat(),
+        "roll_confirmation_sessions": config.roll_confirmation_sessions,
+        "oos_start_trade_date": config.oos_start_trade_date.isoformat(),
+        "oos_end_trade_date": config.oos_end_trade_date.isoformat(),
+    }
+    return _sha({
+        "version": LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        "identity_kind": "SEGMENT",
+        "config": config_payload,
+        "contract": segment.contract.upper(),
+        "partition": segment.partition.value,
+        "first_trade_date": segment.first_trade_date.isoformat(),
+        "last_trade_date": segment.last_trade_date.isoformat(),
+        "source_ids": segment.source_ids,
+        "bar_digest": _bar_digest(segment.bars),
+        "preceding_missing_bar_count": segment.preceding_missing_bar_count,
+    })
+
+
+def _legacy_v3_dataset(
+    *,
+    second_bars: tuple[GCChronologicalBar, ...] | None = None,
+) -> tuple[GCDatasetBuildConfig, GCDatasetBuildResult]:
+    config, current = _dataset(second_bars=second_bars)
+    assert current.manifest is not None
+    segments = tuple(
+        replace(segment, segment_id=_legacy_v3_segment_id(config=config, segment=segment))
+        for segment in current.segments
+    )
+    manifest = replace(
+        current.manifest,
+        version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        segment_ids=tuple(segment.segment_id for segment in segments),
+    )
+    return config, replace(current, segments=segments, manifest=manifest)
 
 
 def _build(bars: tuple[GCChronologicalBar, ...] | None = None, **kwargs: object) -> GCStructuralSeedResult:
@@ -799,3 +850,84 @@ def test_case_48_segment_local_output_is_downstream_compatible() -> None:
         ),
     )
     assert replacement_downstream.status is SMCV2PrimitiveStatus.VALID
+
+
+def test_case_49_exact_legacy_v3_seed_rebuild_and_validation_are_stable() -> None:
+    config, dataset = _legacy_v3_dataset()
+
+    first = build_gc_structural_seed_evidence(dataset_config=config, dataset=dataset)
+    second = build_gc_structural_seed_evidence(dataset_config=config, dataset=dataset)
+
+    assert first.status is SMCV2PrimitiveStatus.VALID
+    assert first == second
+    assert first.seed is not None
+    assert validate_gc_structural_seed_evidence(
+        dataset_config=config,
+        dataset=dataset,
+        structural_seed=first.seed,
+    ) == first
+
+
+def test_case_50_every_legacy_v3_segment_is_verified_without_mutation() -> None:
+    config, dataset = _legacy_v3_dataset(second_bars=_bullish_bars())
+    before = dataset
+
+    result = build_gc_structural_seed_evidence(dataset_config=config, dataset=dataset)
+
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert dataset == before
+    assert len(dataset.segments) == 2
+    for segment in dataset.segments:
+        assert segment.segment_id == _legacy_v3_segment_id(config=config, segment=segment)
+
+
+def test_case_51_manifest_version_selects_one_exact_segment_identity_contract() -> None:
+    config, v3 = _legacy_v3_dataset(second_bars=_empty_bars())
+    _, v5 = _dataset(second_bars=_empty_bars())
+    assert v3.manifest is not None and v5.manifest is not None
+
+    v3_with_v5 = (v5.segments[0], *v3.segments[1:])
+    v5_with_v3 = (v3.segments[0], *v5.segments[1:])
+    mixed_v3 = (v3.segments[0], v5.segments[1])
+
+    assert build_gc_structural_seed_evidence(
+        dataset_config=config,
+        dataset=replace(
+            v3,
+            segments=v3_with_v5,
+            manifest=replace(v3.manifest, segment_ids=tuple(s.segment_id for s in v3_with_v5)),
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
+    assert build_gc_structural_seed_evidence(
+        dataset_config=config,
+        dataset=replace(
+            v5,
+            segments=v5_with_v3,
+            manifest=replace(v5.manifest, segment_ids=tuple(s.segment_id for s in v5_with_v3)),
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
+    assert build_gc_structural_seed_evidence(
+        dataset_config=config,
+        dataset=replace(
+            v3,
+            segments=mixed_v3,
+            manifest=replace(v3.manifest, segment_ids=tuple(s.segment_id for s in mixed_v3)),
+        ),
+    ).status is SMCV2PrimitiveStatus.INVALID
+
+
+@pytest.mark.parametrize(
+    "version",
+    ("", "GC-DATASET-BUILDER-V3", "gc-dataset-builder-v3-split-session", "FUTURE"),
+)
+def test_case_52_unsupported_manifest_versions_fail_closed(version: str) -> None:
+    config, dataset = _legacy_v3_dataset()
+    assert dataset.manifest is not None
+
+    result = build_gc_structural_seed_evidence(
+        dataset_config=config,
+        dataset=replace(dataset, manifest=replace(dataset.manifest, version=version)),
+    )
+
+    assert result.status is SMCV2PrimitiveStatus.INVALID
+    assert result.seed is None
