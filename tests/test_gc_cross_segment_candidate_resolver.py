@@ -40,6 +40,7 @@ import test_gc_cross_segment_continuity as continuity_base  # noqa: E402
 
 UTC = timezone.utc
 PENDING_REASON = "NEXT_THREE_CLOSED_BARS_INCOMPLETE"
+PENDING_HUMAN_REASON = "one or more confirmation horizons are incomplete"
 
 
 def _h(value: str) -> str:
@@ -192,7 +193,7 @@ def _canonical_inputs(
         InducementPendingHorizonResult(
             SMCV2PrimitiveStatus.UNKNOWN,
             (pending,),
-            (PENDING_REASON,),
+            (PENDING_HUMAN_REASON,),
             (PENDING_REASON,),
         ),
     )
@@ -278,7 +279,7 @@ def _pending_result(
     wrapper: resolver.GCSegmentPendingHorizonEvidence,
     horizons: tuple[InducementPendingHorizon, ...],
     *,
-    reasons: tuple[str, ...] = (PENDING_REASON,),
+    reasons: tuple[str, ...] = (PENDING_HUMAN_REASON,),
     blocking_reasons: tuple[str, ...] = (PENDING_REASON,),
 ) -> tuple[resolver.GCSegmentPendingHorizonEvidence, ...]:
     ordered = tuple(
@@ -460,8 +461,11 @@ def test_case_10_pending_wrapper_order_and_identity_are_exact(
     ("reasons", "blocking"),
     [
         ((), (PENDING_REASON,)),
+        ((PENDING_REASON,), (PENDING_REASON,)),
         (("next_three_closed_bars_incomplete",), (PENDING_REASON,)),
-        ((PENDING_REASON,), ("NEXT_THREE_CLOSED_BARS_INCOMPLETE ",)),
+        (("One or more confirmation horizons are incomplete",), (PENDING_REASON,)),
+        ((PENDING_HUMAN_REASON, "extra"), (PENDING_REASON,)),
+        ((PENDING_HUMAN_REASON,), ("NEXT_THREE_CLOSED_BARS_INCOMPLETE ",)),
     ],
 )
 def test_case_11_pending_reason_token_is_exact(

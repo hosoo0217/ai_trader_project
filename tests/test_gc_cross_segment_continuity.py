@@ -1,4 +1,4 @@
-"""Exact 48-case acceptance matrix for GC continuity feasibility."""
+"""Exact 56-case acceptance matrix for GC continuity feasibility."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from decimal import Decimal
 import hashlib
 import importlib.metadata
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from analysis.gc_candidate_evidence_builder import (
     GCCandidateEvidenceSegmentResult,
 )
 from analysis.gc_dataset_builder import (
+    GC_DATASET_BUILDER_VERSION,
     GCCanonicalContractSegment,
     GCDatasetBuildConfig,
     GCDatasetBuildResult,
@@ -60,6 +62,7 @@ from smc.smc_v2_primitives import (
 UTC = timezone.utc
 ROOT = Path(__file__).resolve().parents[1]
 TZDATA_VERSION = importlib.metadata.version("tzdata")
+LEGACY_V3_SEGMENT_IDENTITY_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
 
 
 def _h(value: str) -> str:
@@ -68,6 +71,54 @@ def _h(value: str) -> str:
 
 def _dt(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(year, month, day, hour, minute, tzinfo=UTC)
+
+
+def _decimal_text(value: Decimal) -> str:
+    if value.is_zero():
+        return "0.0"
+    output = format(value, "f")
+    if "." in output:
+        output = output.rstrip("0").rstrip(".")
+    return output if "." in output else output + ".0"
+
+
+def _legacy_v3_segment_id(
+    *,
+    config: GCDatasetBuildConfig,
+    contract: str,
+    partition: GCSegmentPartition,
+    first_trade_date: date,
+    last_trade_date: date,
+    source_ids: tuple[str, ...],
+    bars: tuple[GCChronologicalBar, ...],
+    preceding_missing_bar_count: int,
+) -> str:
+    payload = {
+        "version": LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        "identity_kind": "SEGMENT",
+        "config": {
+            "instrument": config.instrument,
+            "timeframe": config.timeframe,
+            "source_timezone": config.source_timezone,
+            "exchange_timezone": config.exchange_timezone,
+            "timezone_data_version": config.timezone_data_version,
+            "tick_size": _decimal_text(config.tick_size),
+            "initial_contract": config.initial_contract,
+            "initial_trade_date": config.initial_trade_date.isoformat(),
+            "roll_confirmation_sessions": config.roll_confirmation_sessions,
+            "oos_start_trade_date": config.oos_start_trade_date.isoformat(),
+            "oos_end_trade_date": config.oos_end_trade_date.isoformat(),
+        },
+        "contract": contract,
+        "partition": partition.value,
+        "first_trade_date": first_trade_date.isoformat(),
+        "last_trade_date": last_trade_date.isoformat(),
+        "source_ids": source_ids,
+        "bar_digest": _digest_bars(bars),
+        "preceding_missing_bar_count": preceding_missing_bar_count,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _config() -> GCDatasetBuildConfig:
@@ -104,20 +155,35 @@ def _segment(
     partition: GCSegmentPartition = GCSegmentPartition.DEVELOPMENT,
     missing: int = 0,
     bars: tuple[GCChronologicalBar, ...] | None = None,
+    identity_version: str = GC_DATASET_BUILDER_VERSION,
 ) -> GCCanonicalContractSegment:
     selected = bars or _bars(opening, closing, 1000 + ordinal * 10)
     source_ids = (_h(f"source-{ordinal}"),)
-    segment_id = make_gc_dataset_id(
-        identity_kind="SEGMENT",
-        config=_config(),
-        contract=contract,
-        partition=partition,
-        first_trade_date=trade_date,
-        last_trade_date=trade_date,
-        source_ids=source_ids,
-        bar_digest=_digest_bars(selected),
-        preceding_missing_bar_count=missing,
-    )
+    if identity_version == LEGACY_V3_SEGMENT_IDENTITY_VERSION:
+        segment_id = _legacy_v3_segment_id(
+            config=_config(),
+            contract=contract,
+            partition=partition,
+            first_trade_date=trade_date,
+            last_trade_date=trade_date,
+            source_ids=source_ids,
+            bars=selected,
+            preceding_missing_bar_count=missing,
+        )
+    elif identity_version == GC_DATASET_BUILDER_VERSION:
+        segment_id = make_gc_dataset_id(
+            identity_kind="SEGMENT",
+            config=_config(),
+            contract=contract,
+            partition=partition,
+            first_trade_date=trade_date,
+            last_trade_date=trade_date,
+            source_ids=source_ids,
+            bar_digest=_digest_bars(selected),
+            preceding_missing_bar_count=missing,
+        )
+    else:
+        raise ValueError("test helper requires an exact supported identity version")
     return GCCanonicalContractSegment(
         segment_id, contract, partition, trade_date, trade_date, source_ids, selected, missing
     )
@@ -183,7 +249,7 @@ def _fixture(*, receiving_group: bool = False) -> dict[str, object]:
     dataset_id = _h("dataset")
     manifest = GCDatasetManifest(
         dataset_id,
-        "GC-DATASET-V1",
+        GC_DATASET_BUILDER_VERSION,
         source.source_ids + receiving.source_ids,
         (_h("coverage"),),
         _h("coverage-digest"),
@@ -259,6 +325,73 @@ def _fixture(*, receiving_group: bool = False) -> dict[str, object]:
         "event": event,
         "gap": gap,
     }
+
+
+def _with_segment_identity_versions(
+    fixture: dict[str, object],
+    *,
+    manifest_version: str,
+    segment_versions: tuple[str, ...],
+) -> dict[str, object]:
+    dataset = fixture["dataset"]
+    control = fixture["canonical_candidate_evidence"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    assert isinstance(control, GCCandidateEvidenceResult)
+    assert len(segment_versions) == len(dataset.segments) == len(control.segment_results)
+    rebuilt = tuple(
+        replace(
+            segment,
+            segment_id=(
+                _legacy_v3_segment_id(
+                    config=_config(),
+                    contract=segment.contract,
+                    partition=segment.partition,
+                    first_trade_date=segment.first_trade_date,
+                    last_trade_date=segment.last_trade_date,
+                    source_ids=segment.source_ids,
+                    bars=segment.bars,
+                    preceding_missing_bar_count=segment.preceding_missing_bar_count,
+                )
+                if version == LEGACY_V3_SEGMENT_IDENTITY_VERSION
+                else make_gc_dataset_id(
+                    identity_kind="SEGMENT",
+                    config=_config(),
+                    contract=segment.contract,
+                    partition=segment.partition,
+                    first_trade_date=segment.first_trade_date,
+                    last_trade_date=segment.last_trade_date,
+                    source_ids=segment.source_ids,
+                    bar_digest=_digest_bars(segment.bars),
+                    preceding_missing_bar_count=segment.preceding_missing_bar_count,
+                )
+            ),
+        )
+        for segment, version in zip(dataset.segments, segment_versions, strict=True)
+    )
+    rebuilt_ids = tuple(segment.segment_id for segment in rebuilt)
+    updated = dict(fixture)
+    updated["dataset"] = replace(
+        dataset,
+        segments=rebuilt,
+        manifest=replace(
+            dataset.manifest,
+            version=manifest_version,
+            segment_ids=rebuilt_ids,
+        ),
+    )
+    updated["canonical_candidate_evidence"] = replace(
+        control,
+        segment_results=tuple(
+            replace(result, segment_id=segment_id)
+            for result, segment_id in zip(
+                control.segment_results,
+                rebuilt_ids,
+                strict=True,
+            )
+        ),
+    )
+    updated["source"], updated["receiving"] = rebuilt
+    return updated
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, fixture: dict[str, object], **changes: object) -> continuity.GCCrossSegmentContinuityResult:
@@ -1145,3 +1278,158 @@ def test_case_48_exact_scope_and_no_authority_surface() -> None:
     assert (ROOT / "tests" / "test_gc_cross_segment_continuity.py").is_file()
     assert "open(" not in source and "requests." not in source and "subprocess" not in source
     assert all(token not in continuity.__all__ for token in ("train", "predict", "execute", "order", "pnl"))
+
+
+def test_case_49_exact_legacy_v3_multi_segment_identity_is_accepted_and_immutable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _with_segment_identity_versions(
+        _fixture(),
+        manifest_version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        segment_versions=(
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        ),
+    )
+    dataset_before = fixture["dataset"]
+    control_before = fixture["canonical_candidate_evidence"]
+    result = _run(monkeypatch, fixture)
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert fixture["dataset"] == dataset_before
+    assert fixture["canonical_candidate_evidence"] == control_before
+
+
+def test_case_50_legacy_v3_one_segment_identity_drift_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _with_segment_identity_versions(
+        _fixture(),
+        manifest_version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        segment_versions=(
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        ),
+    )
+    dataset = fixture["dataset"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    drifted = replace(dataset.segments[0], segment_id="0" * 64)
+    fixture["dataset"] = replace(
+        dataset,
+        segments=(drifted, dataset.segments[1]),
+        manifest=replace(
+            dataset.manifest,
+            segment_ids=(drifted.segment_id, dataset.segments[1].segment_id),
+        ),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID
+
+
+@pytest.mark.parametrize(
+    "version",
+    ("", "GC-DATASET-BUILDER-V2", "GC-DATASET-BUILDER-V4", "legacy-v3"),
+)
+def test_case_51_unrecognized_or_noncanonical_manifest_version_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+) -> None:
+    fixture = _fixture()
+    dataset = fixture["dataset"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    fixture["dataset"] = replace(
+        dataset,
+        manifest=replace(dataset.manifest, version=version),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_case_52_legacy_v3_manifest_rejects_current_v5_segment_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture()
+    dataset = fixture["dataset"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    fixture["dataset"] = replace(
+        dataset,
+        manifest=replace(
+            dataset.manifest,
+            version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        ),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_case_53_current_v5_manifest_rejects_legacy_v3_segment_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _with_segment_identity_versions(
+        _fixture(),
+        manifest_version=GC_DATASET_BUILDER_VERSION,
+        segment_versions=(
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        ),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_case_54_mixed_v3_v5_segment_identity_graph_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _with_segment_identity_versions(
+        _fixture(),
+        manifest_version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        segment_versions=(
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            GC_DATASET_BUILDER_VERSION,
+        ),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID
+
+
+def test_case_55_current_v5_identity_path_remains_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture()
+    dataset = fixture["dataset"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    assert dataset.manifest.version == GC_DATASET_BUILDER_VERSION
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.VALID
+
+
+def test_case_56_oos_segment_remains_forbidden_under_legacy_v3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _with_segment_identity_versions(
+        _fixture(),
+        manifest_version=LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        segment_versions=(
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+            LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        ),
+    )
+    dataset = fixture["dataset"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    source = dataset.segments[0]
+    oos = replace(
+        source,
+        partition=GCSegmentPartition.OOS_HOLDOUT,
+        segment_id=_legacy_v3_segment_id(
+            config=_config(),
+            contract=source.contract,
+            partition=GCSegmentPartition.OOS_HOLDOUT,
+            first_trade_date=source.first_trade_date,
+            last_trade_date=source.last_trade_date,
+            source_ids=source.source_ids,
+            bars=source.bars,
+            preceding_missing_bar_count=source.preceding_missing_bar_count,
+        ),
+    )
+    fixture["dataset"] = replace(
+        dataset,
+        segments=(oos, dataset.segments[1]),
+        manifest=replace(
+            dataset.manifest,
+            segment_ids=(oos.segment_id, dataset.segments[1].segment_id),
+        ),
+    )
+    assert _run(monkeypatch, fixture).status is SMCV2PrimitiveStatus.INVALID

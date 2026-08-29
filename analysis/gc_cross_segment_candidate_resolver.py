@@ -57,6 +57,7 @@ GC_CROSS_SEGMENT_CANDIDATE_RESOLVER_VERSION = (
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _PENDING_REASON = "NEXT_THREE_CLOSED_BARS_INCOMPLETE"
+_PENDING_HUMAN_REASON = "one or more confirmation horizons are incomplete"
 _RESOLUTION_REASON = "NEXT_THREE_CLOSED_BARS_CONFIRMED_ACROSS_ADJACENT_SEGMENT"
 _VALID_REASON = "CROSS_SEGMENT_CONFIRMATION_RESOLVED"
 _NONE_REASON = "NO_APPLICABLE_CROSS_SEGMENT_HORIZON"
@@ -647,7 +648,7 @@ def _validate_pending(
         raise TypeError("pending_horizons must be a tuple")
     if type(value.reasons) is not tuple or type(value.blocking_reasons) is not tuple:
         raise TypeError("pending result reasons must be tuples")
-    if value.reasons != (_PENDING_REASON,):
+    if value.reasons != (_PENDING_HUMAN_REASON,):
         raise ValueError("pending result reason mismatch")
     if value.blocking_reasons != (_PENDING_REASON,):
         raise ValueError("pending result blocker mismatch")

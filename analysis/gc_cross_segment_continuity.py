@@ -22,6 +22,7 @@ from analysis.gc_candidate_evidence_builder import (
     build_gc_candidate_evidence,
 )
 from analysis.gc_dataset_builder import (
+    GC_DATASET_BUILDER_VERSION,
     GCCanonicalContractSegment,
     GCDatasetBuildConfig,
     GCDatasetBuildResult,
@@ -67,6 +68,11 @@ _UTC = timezone.utc
 _FIVE_MINUTES = timedelta(minutes=5)
 _STANDARD_SESSION = timedelta(hours=23)
 _DETECTOR_ORDER = {"EQUAL_LIQUIDITY": 0, "DEALING_RANGE": 1, "LIQUIDITY_MAP": 2}
+_LEGACY_V3_SEGMENT_IDENTITY_VERSION = "GC-DATASET-BUILDER-V3-SPLIT-SESSION"
+_SUPPORTED_SEGMENT_IDENTITY_VERSIONS = (
+    _LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+    GC_DATASET_BUILDER_VERSION,
+)
 
 
 class GCCrossSegmentContinuityIdentityKind(str, Enum):
@@ -514,7 +520,79 @@ def _bar_digest(bars: tuple[GCChronologicalBar, ...]) -> str:
     )
 
 
-def _validate_segment(value: object, ordinal: int, config: GCDatasetBuildConfig) -> GCCanonicalContractSegment:
+def _legacy_v3_segment_id(
+    *,
+    config: GCDatasetBuildConfig,
+    contract: str,
+    partition: GCSegmentPartition,
+    first_trade_date: date,
+    last_trade_date: date,
+    source_ids: tuple[str, ...],
+    bar_digest: str,
+    preceding_missing_bar_count: int,
+) -> str:
+    config_payload = {
+        "instrument": _text(config.instrument, "config instrument", upper=True),
+        "timeframe": _text(config.timeframe, "config timeframe", upper=True),
+        "source_timezone": _text(config.source_timezone, "config source_timezone"),
+        "exchange_timezone": _text(config.exchange_timezone, "config exchange_timezone"),
+        "timezone_data_version": _text(
+            config.timezone_data_version,
+            "config timezone_data_version",
+        ),
+        "tick_size": _decimal_text(config.tick_size),
+        "initial_contract": _text(
+            config.initial_contract,
+            "config initial_contract",
+            upper=True,
+        ),
+        "initial_trade_date": _date(
+            config.initial_trade_date,
+            "config initial_trade_date",
+        ).isoformat(),
+        "roll_confirmation_sessions": _integer(
+            config.roll_confirmation_sessions,
+            "config roll_confirmation_sessions",
+        ),
+        "oos_start_trade_date": _date(
+            config.oos_start_trade_date,
+            "config oos_start_trade_date",
+        ).isoformat(),
+        "oos_end_trade_date": _date(
+            config.oos_end_trade_date,
+            "config oos_end_trade_date",
+        ).isoformat(),
+    }
+    payload = {
+        "version": _LEGACY_V3_SEGMENT_IDENTITY_VERSION,
+        "identity_kind": "SEGMENT",
+        "config": config_payload,
+        "contract": _text(contract, "segment contract", upper=True),
+        "partition": partition.value,
+        "first_trade_date": _date(
+            first_trade_date,
+            "segment first_trade_date",
+        ).isoformat(),
+        "last_trade_date": _date(
+            last_trade_date,
+            "segment last_trade_date",
+        ).isoformat(),
+        "source_ids": source_ids,
+        "bar_digest": _hash(bar_digest, "segment bar_digest"),
+        "preceding_missing_bar_count": _integer(
+            preceding_missing_bar_count,
+            "segment preceding_missing_bar_count",
+        ),
+    }
+    return _sha(payload)
+
+
+def _validate_segment(
+    value: object,
+    ordinal: int,
+    config: GCDatasetBuildConfig,
+    identity_version: str,
+) -> GCCanonicalContractSegment:
     if type(value) is not GCCanonicalContractSegment:
         raise TypeError("segment has an invalid type")
     _hash(value.segment_id, "segment_id")
@@ -534,7 +612,8 @@ def _validate_segment(value: object, ordinal: int, config: GCDatasetBuildConfig)
         if bar.index != position:
             raise ValueError("segment bar indices must start at zero and be contiguous")
     missing = _integer(value.preceding_missing_bar_count, "preceding_missing_bar_count")
-    expected = make_gc_dataset_id(
+    bar_digest = _bar_digest(value.bars)
+    current_expected = make_gc_dataset_id(
         identity_kind="SEGMENT",
         config=config,
         contract=value.contract,
@@ -542,9 +621,24 @@ def _validate_segment(value: object, ordinal: int, config: GCDatasetBuildConfig)
         first_trade_date=value.first_trade_date,
         last_trade_date=value.last_trade_date,
         source_ids=source_ids,
-        bar_digest=_bar_digest(value.bars),
+        bar_digest=bar_digest,
         preceding_missing_bar_count=missing,
     )
+    if identity_version == _LEGACY_V3_SEGMENT_IDENTITY_VERSION:
+        expected = _legacy_v3_segment_id(
+            config=config,
+            contract=value.contract,
+            partition=value.partition,
+            first_trade_date=value.first_trade_date,
+            last_trade_date=value.last_trade_date,
+            source_ids=source_ids,
+            bar_digest=bar_digest,
+            preceding_missing_bar_count=missing,
+        )
+    elif identity_version == GC_DATASET_BUILDER_VERSION:
+        expected = current_expected
+    else:  # pragma: no cover - guarded once per dataset
+        raise ValueError("unsupported segment identity version")
     if value.segment_id != expected:
         raise ValueError(f"segment {ordinal} identity mismatch")
     return value
@@ -661,6 +755,12 @@ def _validate_dataset(value: object, config: GCDatasetBuildConfig) -> GCDatasetB
     dataset_id = _hash(value.dataset_id, "dataset_id")
     if _hash(value.manifest.dataset_id, "manifest dataset_id") != dataset_id:
         raise ValueError("dataset identity mismatch")
+    identity_version = value.manifest.version
+    if (
+        type(identity_version) is not str
+        or identity_version not in _SUPPORTED_SEGMENT_IDENTITY_VERSIONS
+    ):
+        raise ValueError("unsupported dataset segment identity version")
     if value.manifest.oos_bar_count != 0:
         raise ValueError("OOS exposure is forbidden")
     if value.manifest.calendar_version.strip() == "" or value.manifest.timezone_data_version != config.timezone_data_version:
@@ -668,7 +768,7 @@ def _validate_dataset(value: object, config: GCDatasetBuildConfig) -> GCDatasetB
     if type(value.manifest.segment_ids) is not tuple or value.manifest.segment_ids != tuple(item.segment_id for item in value.segments):
         raise ValueError("manifest segment order mismatch")
     for ordinal, segment in enumerate(value.segments):
-        _validate_segment(segment, ordinal, config)
+        _validate_segment(segment, ordinal, config, identity_version)
         if segment.partition is not GCSegmentPartition.DEVELOPMENT:
             raise ValueError("OOS segment exposure is forbidden")
     return value
