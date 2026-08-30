@@ -24,27 +24,38 @@ from analysis.gc_structural_seed_evidence import (
 
 from analysis.gc_candidate_evidence_builder import (
     GC_CANDIDATE_EVIDENCE_VERSION,
+    GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION,
     GCCandidateEvidenceConfig,
     GCCandidateEvidenceIdentityKind,
     GCCandidateEvidenceManifest,
     GCCandidateEvidenceResult,
     GCCandidateEvidenceSegmentResult,
+    GCCandidateFrontierEvidence,
+    GCCandidateFrontierEvidenceResult,
+    GCCandidateFrontierIdentityKind,
+    GCCandidateFrontierSegmentEvidence,
     GCSegmentCandidateEvidence,
+    analyze_gc_candidate_frontier_evidence,
     build_gc_candidate_evidence,
     make_gc_candidate_evidence_id,
+    make_gc_candidate_frontier_evidence_id,
 )
 from smc.dealing_range import DealingRangeConfig
 from smc.dealing_range import DealingRangeResult
 from smc.equal_liquidity import EqualLiquidityConfig, EqualLiquidityResult
 from smc.fair_value_gap import FairValueGapContextLink, FairValueGapResult
-from smc.inducement import InducementResult
+from smc.inducement import (
+    InducementPendingHorizon,
+    InducementPendingHorizonResult,
+    InducementResult,
+)
 from smc.kill_zones import (
     KillZoneCalendarEntry,
     KillZoneResult,
     KillZoneSessionStatus,
 )
 from smc.liquidity_map import LiquidityMapResult
-from smc.smc_v2_primitives import SMCV2PrimitiveStatus
+from smc.smc_v2_primitives import SMCV2Direction, SMCV2PrimitiveStatus
 from smc.smc_v2_primitives import SMCV2EventProvenance
 from tests.test_gc_structural_seed_evidence import (
     _bullish_bars as _structural_bars,
@@ -966,6 +977,39 @@ def test_case_42_public_functions_are_exactly_keyword_only() -> None:
     )
     assert identity.parameters["bundle_id"].default is None
 
+    frontier = inspect.signature(analyze_gc_candidate_frontier_evidence)
+    assert tuple(frontier.parameters) == (
+        "dataset_config",
+        "dataset",
+        "calendar_entries",
+        "structural_seed",
+        "canonical_candidate_evidence",
+        "config",
+    )
+    assert all(
+        item.kind is inspect.Parameter.KEYWORD_ONLY
+        for item in frontier.parameters.values()
+    )
+    assert frontier.parameters["config"].default == GCCandidateEvidenceConfig()
+
+    frontier_identity = inspect.signature(make_gc_candidate_frontier_evidence_id)
+    assert tuple(frontier_identity.parameters) == (
+        "identity_kind",
+        "instrument",
+        "timeframe",
+        "dataset_id",
+        "seed_id",
+        "canonical_control_digest",
+        "frontier_ordinal",
+        "source_segment",
+        "source_pending_result",
+        "receiving_segment",
+    )
+    assert all(
+        item.kind is inspect.Parameter.KEYWORD_ONLY
+        for item in frontier_identity.parameters.values()
+    )
+
 
 def test_case_43_public_dataclasses_are_frozen_with_exact_fields() -> None:
     expected = {
@@ -1013,6 +1057,34 @@ def test_case_43_public_dataclasses_are_frozen_with_exact_fields() -> None:
             "reasons",
             "blocking_reasons",
         ),
+        GCCandidateFrontierSegmentEvidence: (
+            "segment_ordinal",
+            "segment_id",
+            "equal_liquidity_result",
+            "dealing_range_result",
+            "liquidity_map_result",
+            "fair_value_gap_result",
+            "result_ids",
+        ),
+        GCCandidateFrontierEvidence: (
+            "frontier_id",
+            "version",
+            "instrument",
+            "timeframe",
+            "dataset_id",
+            "seed_id",
+            "canonical_control_digest",
+            "frontier_ordinal",
+            "source_segment",
+            "source_pending_result",
+            "receiving_segment",
+        ),
+        GCCandidateFrontierEvidenceResult: (
+            "status",
+            "frontier",
+            "reasons",
+            "blocking_reasons",
+        ),
     }
     for cls, names in expected.items():
         assert is_dataclass(cls)
@@ -1022,10 +1094,12 @@ def test_case_43_public_dataclasses_are_frozen_with_exact_fields() -> None:
 
 def test_case_44_public_versions_enums_defaults_and_exports() -> None:
     assert GC_CANDIDATE_EVIDENCE_VERSION == "GC-CANDIDATE-EVIDENCE-V1"
+    assert GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION == "GC-CANDIDATE-FRONTIER-EVIDENCE-V1"
     assert tuple(item.value for item in GCCandidateEvidenceIdentityKind) == (
         "BUNDLE",
         "MANIFEST",
     )
+    assert tuple(item.value for item in GCCandidateFrontierIdentityKind) == ("FRONTIER",)
     assert GCCandidateEvidenceConfig() == GCCandidateEvidenceConfig(
         equal_liquidity_config=EqualLiquidityConfig(2, 2, 3),
         dealing_range_config=DealingRangeConfig(2, 1),
@@ -1039,9 +1113,189 @@ def test_case_44_public_versions_enums_defaults_and_exports() -> None:
         "GCCandidateEvidenceSegmentResult",
         "GCCandidateEvidenceManifest",
         "GCCandidateEvidenceResult",
+        "GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION",
+        "GCCandidateFrontierIdentityKind",
+        "GCCandidateFrontierSegmentEvidence",
+        "GCCandidateFrontierEvidence",
+        "GCCandidateFrontierEvidenceResult",
         "make_gc_candidate_evidence_id",
+        "make_gc_candidate_frontier_evidence_id",
         "build_gc_candidate_evidence",
+        "analyze_gc_candidate_frontier_evidence",
     )
+
+
+def test_case_49_frontier_missing_context_is_unknown() -> None:
+    config, _dataset, _calendars, _seed = _valid_inputs()
+    result = analyze_gc_candidate_frontier_evidence(
+        dataset_config=config,
+        dataset=None,
+        calendar_entries=None,
+        structural_seed=None,
+        canonical_candidate_evidence=None,
+    )
+    assert result == GCCandidateFrontierEvidenceResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        reasons=("MISSING_TOP_LEVEL_CONTEXT",),
+        blocking_reasons=("MISSING_TOP_LEVEL_CONTEXT",),
+    )
+
+
+def test_case_50_frontier_identity_is_deterministic_and_typed() -> None:
+    base = GCCandidateFrontierSegmentEvidence(
+        2,
+        "1" * 64,
+        EqualLiquidityResult(SMCV2PrimitiveStatus.NONE),
+        DealingRangeResult(SMCV2PrimitiveStatus.NONE),
+        LiquidityMapResult(SMCV2PrimitiveStatus.NONE),
+        FairValueGapResult(SMCV2PrimitiveStatus.NONE),
+        tuple(str(value) * 64 for value in range(2, 6)),
+    )
+    receiving = replace(base, segment_ordinal=3, segment_id="6" * 64)
+    pending = InducementPendingHorizonResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        reasons=("one or more confirmation horizons are incomplete",),
+        blocking_reasons=("NEXT_THREE_CLOSED_BARS_INCOMPLETE",),
+    )
+    kwargs = {
+        "identity_kind": GCCandidateFrontierIdentityKind.FRONTIER,
+        "instrument": "gc",
+        "timeframe": "5m",
+        "dataset_id": "7" * 64,
+        "seed_id": "8" * 64,
+        "canonical_control_digest": "9" * 64,
+        "frontier_ordinal": 2,
+        "source_segment": base,
+        "source_pending_result": pending,
+        "receiving_segment": receiving,
+    }
+    first = make_gc_candidate_frontier_evidence_id(**kwargs)
+    assert first == make_gc_candidate_frontier_evidence_id(**kwargs)
+    assert len(first) == 64
+    with pytest.raises((TypeError, ValueError)):
+        make_gc_candidate_frontier_evidence_id(**{**kwargs, "identity_kind": "FRONTIER"})
+
+
+def test_case_51_frontier_analyzer_derives_one_repeatable_adjacent_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, dataset, calendars, seed = _valid_inputs(two_segments=True)
+    assert dataset.manifest is not None
+    first, source = dataset.segments
+    receiving = replace(
+        source,
+        segment_id="f" * 64,
+        first_trade_date=source.first_trade_date + timedelta(days=1),
+        last_trade_date=source.last_trade_date + timedelta(days=1),
+        bars=tuple(
+            replace(bar, timestamp=bar.timestamp + timedelta(days=1))
+            for bar in source.bars
+        ),
+    )
+    dataset = replace(
+        dataset,
+        segments=(first, source, receiving),
+        manifest=replace(
+            dataset.manifest,
+            segment_ids=(first.segment_id, source.segment_id, receiving.segment_id),
+        ),
+    )
+    calendars = calendars + (
+        replace(
+            calendars[-1],
+            trade_date=receiving.first_trade_date,
+            session_open_timestamp=calendars[-1].session_open_timestamp
+            + timedelta(days=1),
+            session_close_timestamp=calendars[-1].session_close_timestamp
+            + timedelta(days=1),
+        ),
+    )
+    prefix = GCCandidateEvidenceSegmentResult(
+        0,
+        first.segment_id,
+        EqualLiquidityResult(SMCV2PrimitiveStatus.NONE),
+        DealingRangeResult(SMCV2PrimitiveStatus.NONE),
+        LiquidityMapResult(SMCV2PrimitiveStatus.NONE),
+        FairValueGapResult(SMCV2PrimitiveStatus.NONE),
+        InducementResult(SMCV2PrimitiveStatus.NONE),
+        KillZoneResult(SMCV2PrimitiveStatus.NONE),
+        tuple(str(value) * 64 for value in range(1, 7)),
+    )
+    control = GCCandidateEvidenceResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        segment_results=(prefix,),
+        reasons=("a swept pool has a truncated confirmation horizon",),
+        blocking_reasons=("next three closed bars are incomplete",),
+    )
+    monkeypatch.setattr(candidate_module, "build_gc_candidate_evidence", lambda **_: control)
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_equal_liquidity",
+        lambda **_: EqualLiquidityResult(SMCV2PrimitiveStatus.NONE),
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_dealing_ranges",
+        lambda **_: DealingRangeResult(SMCV2PrimitiveStatus.NONE),
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_liquidity_map",
+        lambda **_: LiquidityMapResult(SMCV2PrimitiveStatus.NONE),
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_fair_value_gaps",
+        lambda **_: FairValueGapResult(SMCV2PrimitiveStatus.NONE),
+    )
+    horizon = InducementPendingHorizon(
+        "a" * 64,
+        SMCV2Direction.BULLISH,
+        "b" * 64,
+        "c" * 64,
+        "d" * 64,
+        "e" * 64,
+        "1" * 64,
+        "2" * 64,
+        source.bars[-1].index,
+        source.bars[-1].timestamp,
+        source.bars[-1].low_tick,
+        source.bars[-1].close_tick,
+        (),
+        (),
+        3,
+        source.bars[-1].index,
+        source.bars[-1].timestamp,
+        "NEXT_THREE_CLOSED_BARS_INCOMPLETE",
+    )
+    pending = InducementPendingHorizonResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        (horizon,),
+        ("one or more confirmation horizons are incomplete",),
+        ("NEXT_THREE_CLOSED_BARS_INCOMPLETE",),
+    )
+    monkeypatch.setattr(
+        candidate_module,
+        "analyze_inducement_pending_horizons",
+        lambda **_: pending,
+    )
+    kwargs = {
+        "dataset_config": config,
+        "dataset": dataset,
+        "calendar_entries": calendars,
+        "structural_seed": seed,
+        "canonical_candidate_evidence": control,
+    }
+    first_result = analyze_gc_candidate_frontier_evidence(**kwargs)
+    second_result = analyze_gc_candidate_frontier_evidence(**kwargs)
+    assert first_result == second_result
+    assert first_result.status is SMCV2PrimitiveStatus.VALID
+    assert first_result.frontier is not None
+    assert first_result.frontier.frontier_ordinal == 1
+    assert first_result.frontier.source_segment.segment_id == source.segment_id
+    assert first_result.frontier.receiving_segment.segment_id == receiving.segment_id
+    assert first_result.frontier.source_pending_result == pending
+    assert len(first_result.frontier.source_segment.result_ids) == 4
 
 
 @pytest.mark.parametrize(

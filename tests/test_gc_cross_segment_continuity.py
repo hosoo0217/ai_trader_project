@@ -15,9 +15,15 @@ import pytest
 
 import analysis.gc_cross_segment_continuity as continuity
 from analysis.gc_candidate_evidence_builder import (
+    GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION,
     GCCandidateEvidenceConfig,
     GCCandidateEvidenceResult,
     GCCandidateEvidenceSegmentResult,
+    GCCandidateFrontierEvidence,
+    GCCandidateFrontierEvidenceResult,
+    GCCandidateFrontierIdentityKind,
+    GCCandidateFrontierSegmentEvidence,
+    make_gc_candidate_frontier_evidence_id,
 )
 from analysis.gc_dataset_builder import (
     GC_DATASET_BUILDER_VERSION,
@@ -45,7 +51,7 @@ from smc.dealing_range import (
 )
 from smc.equal_liquidity import EqualLiquidityResult
 from smc.fair_value_gap import FairValueGap, FairValueGapResult
-from smc.inducement import InducementResult
+from smc.inducement import InducementPendingHorizonResult, InducementResult
 from smc.kill_zones import (
     KillZoneCalendarEntry,
     KillZoneResult,
@@ -319,12 +325,139 @@ def _fixture(*, receiving_group: bool = False) -> dict[str, object]:
         "candidate_calendar_entries": candidate_calendar,
         "structural_seed": seed,
         "canonical_candidate_evidence": control,
+        "frontier_evidence": None,
         "candidate_config": GCCandidateEvidenceConfig(),
         "source": source,
         "receiving": receiving,
         "event": event,
         "gap": gap,
     }
+
+
+def _frontier_fixture() -> dict[str, object]:
+    fixture = _fixture()
+    dataset = fixture["dataset"]
+    control = fixture["canonical_candidate_evidence"]
+    seed = fixture["structural_seed"]
+    assert isinstance(dataset, GCDatasetBuildResult) and dataset.manifest is not None
+    assert isinstance(control, GCCandidateEvidenceResult)
+    assert isinstance(seed, GCCanonicalSeedEvidence)
+    source = dataset.segments[1]
+    receiving_date = date(2026, 1, 7)
+    receiving_open = _dt(2026, 1, 6, 18)
+    receiving_close = _dt(2026, 1, 7, 17)
+    receiving = _segment(2, receiving_date, receiving_open, receiving_close)
+    dataset = replace(
+        dataset,
+        segments=dataset.segments + (receiving,),
+        manifest=replace(
+            dataset.manifest,
+            source_ids=dataset.manifest.source_ids + receiving.source_ids,
+            segment_ids=dataset.manifest.segment_ids + (receiving.segment_id,),
+            raw_end_timestamp=receiving.bars[-1].timestamp,
+            usable_end_timestamp=receiving.bars[-1].timestamp,
+            parsed_row_count=9,
+            eligible_row_count=9,
+            development_bar_count=9,
+            raw_volume=108,
+            eligible_volume=108,
+            completed_session_volumes=dataset.manifest.completed_session_volumes
+            + ((receiving.contract, receiving_date, 36),),
+        ),
+    )
+    control = GCCandidateEvidenceResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        segment_results=(control.segment_results[0],),
+        reasons=("one or more confirmation horizons are incomplete",),
+        blocking_reasons=("next three closed bars are incomplete",),
+    )
+    source_full = _detector_result(1, source.segment_id)
+    receiving_full = _detector_result(2, receiving.segment_id)
+    source_evidence = GCCandidateFrontierSegmentEvidence(
+        source_full.segment_ordinal,
+        source_full.segment_id,
+        source_full.equal_liquidity_result,
+        source_full.dealing_range_result,
+        source_full.liquidity_map_result,
+        source_full.fair_value_gap_result,
+        source_full.result_ids[:4],
+    )
+    receiving_evidence = GCCandidateFrontierSegmentEvidence(
+        receiving_full.segment_ordinal,
+        receiving_full.segment_id,
+        receiving_full.equal_liquidity_result,
+        receiving_full.dealing_range_result,
+        receiving_full.liquidity_map_result,
+        receiving_full.fair_value_gap_result,
+        receiving_full.result_ids[:4],
+    )
+    pending = InducementPendingHorizonResult(
+        SMCV2PrimitiveStatus.UNKNOWN,
+        reasons=("one or more confirmation horizons are incomplete",),
+        blocking_reasons=("NEXT_THREE_CLOSED_BARS_INCOMPLETE",),
+    )
+    control_digest = continuity._sha(control)
+    frontier_id = make_gc_candidate_frontier_evidence_id(
+        identity_kind=GCCandidateFrontierIdentityKind.FRONTIER,
+        instrument="GC",
+        timeframe="5M",
+        dataset_id=dataset.dataset_id or "",
+        seed_id=seed.seed_id,
+        canonical_control_digest=control_digest,
+        frontier_ordinal=1,
+        source_segment=source_evidence,
+        source_pending_result=pending,
+        receiving_segment=receiving_evidence,
+    )
+    frontier = GCCandidateFrontierEvidenceResult(
+        SMCV2PrimitiveStatus.VALID,
+        GCCandidateFrontierEvidence(
+            frontier_id,
+            GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION,
+            "GC",
+            "5M",
+            dataset.dataset_id or "",
+            seed.seed_id,
+            control_digest,
+            1,
+            source_evidence,
+            pending,
+            receiving_evidence,
+        ),
+        ("CONTROL_FRONTIER_CONTINUATION_EVIDENCE_COMPLETE",),
+    )
+    boundary_calendar = fixture["boundary_calendar_entries"]
+    candidate_calendar = fixture["candidate_calendar_entries"]
+    assert isinstance(boundary_calendar, tuple) and isinstance(candidate_calendar, tuple)
+    updated = dict(fixture)
+    updated.update(
+        dataset=dataset,
+        boundary_calendar_entries=boundary_calendar
+        + (
+            GCSplitSessionCalendarEntry(
+                "gc-calendar-v1",
+                receiving_date,
+                (GCDatasetSessionInterval(receiving_open, receiving_close),),
+                (_h("calendar-frontier-receiver"),),
+                (_h("calendar-frontier-receiver-sha"),),
+            ),
+        ),
+        candidate_calendar_entries=candidate_calendar
+        + (
+            KillZoneCalendarEntry(
+                "gc-calendar-v1",
+                receiving_date,
+                KillZoneSessionStatus.OPEN,
+                receiving_open,
+                receiving_close,
+            ),
+        ),
+        canonical_candidate_evidence=control,
+        frontier_evidence=frontier,
+        source=source,
+        receiving=receiving,
+    )
+    return updated
 
 
 def _with_segment_identity_versions(
@@ -397,10 +530,16 @@ def _with_segment_identity_versions(
 def _run(monkeypatch: pytest.MonkeyPatch, fixture: dict[str, object], **changes: object) -> continuity.GCCrossSegmentContinuityResult:
     supplied = {key: fixture[key] for key in (
         "dataset_config", "dataset", "boundary_calendar_entries", "candidate_calendar_entries",
-        "structural_seed", "canonical_candidate_evidence", "candidate_config",
+        "structural_seed", "canonical_candidate_evidence", "frontier_evidence", "candidate_config",
     )}
     supplied.update(changes)
     monkeypatch.setattr(continuity, "build_gc_candidate_evidence", lambda **_: supplied["canonical_candidate_evidence"])
+    if supplied["frontier_evidence"] is not None:
+        monkeypatch.setattr(
+            continuity,
+            "analyze_gc_candidate_frontier_evidence",
+            lambda **_: supplied["frontier_evidence"],
+        )
     return continuity.analyze_gc_cross_segment_continuity(**supplied)  # type: ignore[arg-type]
 
 
@@ -1140,7 +1279,7 @@ def test_case_43_public_signatures_are_exact_keyword_only() -> None:
     )
     assert tuple(analyzer.parameters) == (
         "dataset_config", "dataset", "boundary_calendar_entries", "candidate_calendar_entries",
-        "structural_seed", "canonical_candidate_evidence", "candidate_config",
+        "structural_seed", "canonical_candidate_evidence", "frontier_evidence", "candidate_config",
     )
     builder_annotations = (
         "GCCrossSegmentContinuityIdentityKind", "str", "str", "str", "str", "str", "str",
@@ -1157,7 +1296,8 @@ def test_case_43_public_signatures_are_exact_keyword_only() -> None:
         "GCDatasetBuildConfig", "GCDatasetBuildResult | None",
         "tuple[GCSplitSessionCalendarEntry, ...] | None",
         "tuple[KillZoneCalendarEntry, ...] | None", "GCCanonicalSeedEvidence | None",
-        "GCCandidateEvidenceResult | None", "GCCandidateEvidenceConfig",
+        "GCCandidateEvidenceResult | None", "GCCandidateFrontierEvidenceResult | None",
+        "GCCandidateEvidenceConfig",
     )
     assert analyzer.return_annotation == "GCCrossSegmentContinuityResult"
     required_builder = tuple(builder.parameters)[:10]
@@ -1168,9 +1308,36 @@ def test_case_43_public_signatures_are_exact_keyword_only() -> None:
         assert builder.parameters[name].default == ()
     assert all(
         analyzer.parameters[name].default is inspect.Parameter.empty
-        for name in tuple(analyzer.parameters)[:-1]
+        for name in tuple(analyzer.parameters)[:6]
     )
+    assert analyzer.parameters["frontier_evidence"].default is None
     assert analyzer.parameters["candidate_config"].default == GCCandidateEvidenceConfig()
+
+
+def test_case_57_explicit_none_frontier_is_legacy_object_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(receiving_group=True)
+    implicit = _run(monkeypatch, fixture)
+    explicit = _run(monkeypatch, fixture, frontier_evidence=None)
+    assert explicit == implicit
+
+
+def test_case_58_valid_frontier_appends_one_boundary_and_preserves_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _frontier_fixture()
+    first = _run(monkeypatch, fixture)
+    second = _run(monkeypatch, fixture)
+    assert first == second
+    assert first.status is SMCV2PrimitiveStatus.UNKNOWN
+    assert first.reasons == first.blocking_reasons == ("CANONICAL_CONTROL_UNKNOWN",)
+    assert first.manifest is not None
+    assert len(first.boundaries) == 1
+    boundary = first.boundaries[0]
+    assert (boundary.source_segment_ordinal, boundary.receiving_segment_ordinal) == (1, 2)
+    assert boundary.decision is continuity.GCCrossSegmentContinuityDecision.ELIGIBLE
+    assert first.manifest.boundary_ids == (boundary.boundary_id,)
 
 
 def test_case_44_public_dataclasses_enums_version_and_exports_are_exact() -> None:

@@ -19,6 +19,9 @@ from analysis.gc_candidate_evidence_builder import (
     GCCandidateEvidenceConfig,
     GCCandidateEvidenceResult,
     GCCandidateEvidenceSegmentResult,
+    GCCandidateFrontierEvidenceResult,
+    GCCandidateFrontierSegmentEvidence,
+    analyze_gc_candidate_frontier_evidence,
     build_gc_candidate_evidence,
 )
 from analysis.gc_dataset_builder import (
@@ -790,7 +793,7 @@ def _source_digest(segment: GCCanonicalContractSegment, indices: tuple[int, ...]
 
 
 def _dependency_references(
-    segment_result: GCCandidateEvidenceSegmentResult,
+    segment_result: GCCandidateEvidenceSegmentResult | GCCandidateFrontierSegmentEvidence,
     segment: GCCanonicalContractSegment,
 ) -> tuple[GCContinuityDependencyReference, ...]:
     references: list[GCContinuityDependencyReference] = []
@@ -942,7 +945,7 @@ def _receiving_groups(
     *,
     boundary: GCCrossSegmentBoundary,
     segment: GCCanonicalContractSegment,
-    segment_result: GCCandidateEvidenceSegmentResult,
+    segment_result: GCCandidateEvidenceSegmentResult | GCCandidateFrontierSegmentEvidence,
     events: tuple[DealingRangeStructureEvent, ...],
     common: dict[str, object],
 ) -> tuple[GCContinuityReceivingGroup, ...]:
@@ -1023,6 +1026,7 @@ def analyze_gc_cross_segment_continuity(
     candidate_calendar_entries: tuple[KillZoneCalendarEntry, ...] | None,
     structural_seed: GCCanonicalSeedEvidence | None,
     canonical_candidate_evidence: GCCandidateEvidenceResult | None,
+    frontier_evidence: GCCandidateFrontierEvidenceResult | None = None,
     candidate_config: GCCandidateEvidenceConfig = GCCandidateEvidenceConfig(),
 ) -> GCCrossSegmentContinuityResult:
     """Assess immutable continuity references without creating trading evidence."""
@@ -1063,6 +1067,8 @@ def analyze_gc_cross_segment_continuity(
             canonical_control = _validate_result_shape(canonical_candidate_evidence)
         else:
             canonical_control = None
+        if frontier_evidence is not None and type(frontier_evidence) is not GCCandidateFrontierEvidenceResult:
+            raise TypeError("frontier_evidence has an invalid type")
     except (TypeError, ValueError, IndexError):
         return _blocked(SMCV2PrimitiveStatus.INVALID, "INVALID_SUPPLIED_CONTEXT")
     except Exception:
@@ -1099,6 +1105,37 @@ def analyze_gc_cross_segment_continuity(
         return _blocked(SMCV2PrimitiveStatus.INVALID, "CANONICAL_REBUILD_EXCEPTION")
     if rebuilt != canonical_control:
         return _blocked(SMCV2PrimitiveStatus.INVALID, "CANONICAL_CONTROL_DRIFT")
+
+    validated_frontier = None
+    if frontier_evidence is not None:
+        try:
+            recomputed_frontier = analyze_gc_candidate_frontier_evidence(
+                dataset_config=dataset_config,
+                dataset=validated_dataset,
+                calendar_entries=candidate_calendar,
+                structural_seed=structural_seed,
+                canonical_candidate_evidence=canonical_control,
+                config=candidate_config,
+            )
+        except Exception:
+            return _blocked(SMCV2PrimitiveStatus.INVALID, "FRONTIER_REBUILD_EXCEPTION")
+        if recomputed_frontier != frontier_evidence:
+            return _blocked(SMCV2PrimitiveStatus.INVALID, "FRONTIER_EVIDENCE_DRIFT")
+        if (
+            frontier_evidence.status is not SMCV2PrimitiveStatus.VALID
+            or frontier_evidence.frontier is None
+        ):
+            return _blocked(SMCV2PrimitiveStatus.INVALID, "INVALID_FRONTIER_EVIDENCE")
+        validated_frontier = frontier_evidence.frontier
+        if (
+            validated_frontier.canonical_control_digest != _sha(canonical_control)
+            or validated_frontier.dataset_id != validated_dataset.dataset_id
+            or validated_frontier.seed_id != structural_seed.seed_id
+            or validated_frontier.frontier_ordinal != len(canonical_control.segment_results)
+            or validated_frontier.source_segment.segment_ordinal != validated_frontier.frontier_ordinal
+            or validated_frontier.receiving_segment.segment_ordinal != validated_frontier.frontier_ordinal + 1
+        ):
+            return _blocked(SMCV2PrimitiveStatus.INVALID, "FRONTIER_BINDING_MISMATCH")
 
     boundary_digest = _sha(boundary_calendar)
     candidate_digest = _sha(candidate_calendar)
@@ -1177,6 +1214,99 @@ def analyze_gc_cross_segment_continuity(
                     "canonical_control_digest": _sha(segment_results[: position + 2]),
                 }
                 groups.extend(_receiving_groups(boundary=boundary, segment=receiving, segment_result=receiving_result, events=receiving_events, common=group_common))
+        if validated_frontier is not None:
+            source_result = validated_frontier.source_segment
+            receiving_result = validated_frontier.receiving_segment
+            if source_result.segment_ordinal >= len(validated_dataset.segments) or receiving_result.segment_ordinal >= len(validated_dataset.segments):
+                raise ValueError("frontier segment ordinal is outside dataset")
+            source = validated_dataset.segments[source_result.segment_ordinal]
+            receiving = validated_dataset.segments[receiving_result.segment_ordinal]
+            if source.segment_id != source_result.segment_id or receiving.segment_id != receiving_result.segment_id:
+                raise ValueError("frontier segment identity mismatch")
+            decision, reason_tokens = _boundary_decision(
+                source,
+                receiving,
+                boundary_calendar,
+                candidate_calendar,
+            )
+            dependencies = (
+                _dependency_references(source_result, source)
+                if decision is GCCrossSegmentContinuityDecision.ELIGIBLE
+                else ()
+            )
+            frontier_boundary_common = {
+                **common,
+                "canonical_control_digest": _sha(
+                    {
+                        "canonical_control_digest": control_digest,
+                        "frontier_id": validated_frontier.frontier_id,
+                        "source_segment_evidence_digest": _sha(source_result),
+                    }
+                ),
+            }
+            boundary_id = make_gc_cross_segment_continuity_id(
+                identity_kind=GCCrossSegmentContinuityIdentityKind.BOUNDARY,
+                **frontier_boundary_common,
+                source_segment_ordinal=source_result.segment_ordinal,
+                source_segment_id=source.segment_id,
+                receiving_segment_ordinal=receiving_result.segment_ordinal,
+                receiving_segment_id=receiving.segment_id,
+                contract=source.contract,
+                source_trade_date=source.last_trade_date,
+                receiving_trade_date=receiving.first_trade_date,
+                source_end_timestamp=source.bars[-1].timestamp,
+                receiving_start_timestamp=receiving.bars[0].timestamp,
+                decision=decision,
+                reason_tokens=reason_tokens,
+                dependency_references=dependencies,
+            )
+            boundary = GCCrossSegmentBoundary(
+                boundary_id,
+                source_result.segment_ordinal,
+                source.segment_id,
+                receiving_result.segment_ordinal,
+                receiving.segment_id,
+                source.contract,
+                source.last_trade_date,
+                receiving.first_trade_date,
+                _timestamp(source.bars[-1].timestamp, "source end"),
+                _timestamp(receiving.bars[0].timestamp, "receiving start"),
+                decision,
+                reason_tokens,
+                dependencies,
+            )
+            boundaries.append(boundary)
+            if decision is GCCrossSegmentContinuityDecision.ELIGIBLE:
+                receiving_events = tuple(
+                    event
+                    for event in structural_seed.structure_events
+                    if any(
+                        bar.index == event.provenance.confirmation_index
+                        and _timestamp(bar.timestamp, "bar timestamp")
+                        == _timestamp(event.provenance.confirmation_timestamp, "event timestamp")
+                        for bar in receiving.bars
+                    )
+                )
+                frontier_group_common = {
+                    **frontier_boundary_common,
+                    "canonical_control_digest": _sha(
+                        {
+                            "frontier_boundary_digest": frontier_boundary_common[
+                                "canonical_control_digest"
+                            ],
+                            "receiving_segment_evidence_digest": _sha(receiving_result),
+                        }
+                    ),
+                }
+                groups.extend(
+                    _receiving_groups(
+                        boundary=boundary,
+                        segment=receiving,
+                        segment_result=receiving_result,
+                        events=receiving_events,
+                        common=frontier_group_common,
+                    )
+                )
     except LookupError:
         return _blocked(SMCV2PrimitiveStatus.UNKNOWN, "BOUNDARY_CALENDAR_UNAVAILABLE", tuple(boundaries), tuple(groups))
     except (TypeError, ValueError):

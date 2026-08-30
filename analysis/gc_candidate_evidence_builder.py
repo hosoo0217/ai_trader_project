@@ -66,7 +66,10 @@ from smc.inducement import (
     INDUCEMENT_DETECTOR_VERSION,
     Inducement,
     InducementObservation,
+    InducementPendingHorizon,
+    InducementPendingHorizonResult,
     InducementResult,
+    analyze_inducement_pending_horizons,
     analyze_inducements,
 )
 from smc.kill_zones import (
@@ -93,6 +96,7 @@ from smc.smc_v2_primitives import SMCV2Direction, SMCV2PrimitiveStatus
 
 
 GC_CANDIDATE_EVIDENCE_VERSION = "GC-CANDIDATE-EVIDENCE-V1"
+GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION = "GC-CANDIDATE-FRONTIER-EVIDENCE-V1"
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _UTC = timezone.utc
@@ -109,6 +113,10 @@ _DETECTOR_VERSIONS = (
 class GCCandidateEvidenceIdentityKind(str, Enum):
     BUNDLE = "BUNDLE"
     MANIFEST = "MANIFEST"
+
+
+class GCCandidateFrontierIdentityKind(str, Enum):
+    FRONTIER = "FRONTIER"
 
 
 @dataclass(frozen=True)
@@ -176,6 +184,40 @@ class GCCandidateEvidenceResult:
     candidates: tuple[GCSegmentCandidateEvidence, ...] = ()
     segment_results: tuple[GCCandidateEvidenceSegmentResult, ...] = ()
     manifest: GCCandidateEvidenceManifest | None = None
+    reasons: tuple[str, ...] = ()
+    blocking_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class GCCandidateFrontierSegmentEvidence:
+    segment_ordinal: int
+    segment_id: str
+    equal_liquidity_result: EqualLiquidityResult
+    dealing_range_result: DealingRangeResult
+    liquidity_map_result: LiquidityMapResult
+    fair_value_gap_result: FairValueGapResult
+    result_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GCCandidateFrontierEvidence:
+    frontier_id: str
+    version: str
+    instrument: str
+    timeframe: str
+    dataset_id: str
+    seed_id: str
+    canonical_control_digest: str
+    frontier_ordinal: int
+    source_segment: GCCandidateFrontierSegmentEvidence
+    source_pending_result: InducementPendingHorizonResult
+    receiving_segment: GCCandidateFrontierSegmentEvidence
+
+
+@dataclass(frozen=True)
+class GCCandidateFrontierEvidenceResult:
+    status: SMCV2PrimitiveStatus
+    frontier: GCCandidateFrontierEvidence | None = None
     reasons: tuple[str, ...] = ()
     blocking_reasons: tuple[str, ...] = ()
 
@@ -371,6 +413,93 @@ def make_gc_candidate_evidence_id(
             candidate_references=candidate_references,
             bundle_id=bundle_id,
         )
+    )
+
+
+def _frontier_segment_material(
+    value: object,
+    name: str,
+) -> dict[str, object]:
+    if type(value) is not GCCandidateFrontierSegmentEvidence:
+        raise TypeError(f"{name} must be GCCandidateFrontierSegmentEvidence")
+    if type(value.segment_ordinal) is not int or value.segment_ordinal < 0:
+        raise ValueError(f"{name}.segment_ordinal must be a nonnegative integer")
+    _hash(value.segment_id, f"{name}.segment_id")
+    expected_types = (
+        EqualLiquidityResult,
+        DealingRangeResult,
+        LiquidityMapResult,
+        FairValueGapResult,
+    )
+    results = (
+        value.equal_liquidity_result,
+        value.dealing_range_result,
+        value.liquidity_map_result,
+        value.fair_value_gap_result,
+    )
+    if any(type(result) is not expected for result, expected in zip(results, expected_types, strict=True)):
+        raise TypeError(f"{name} contains an invalid detector result")
+    if type(value.result_ids) is not tuple or len(value.result_ids) != 4:
+        raise ValueError(f"{name}.result_ids must contain exactly four identities")
+    for item in value.result_ids:
+        _hash(item, f"{name}.result_id")
+    return {
+        "segment_ordinal": value.segment_ordinal,
+        "segment_id": value.segment_id,
+        "equal_liquidity_result": value.equal_liquidity_result,
+        "dealing_range_result": value.dealing_range_result,
+        "liquidity_map_result": value.liquidity_map_result,
+        "fair_value_gap_result": value.fair_value_gap_result,
+        "result_ids": value.result_ids,
+    }
+
+
+def make_gc_candidate_frontier_evidence_id(
+    *,
+    identity_kind: GCCandidateFrontierIdentityKind,
+    instrument: str,
+    timeframe: str,
+    dataset_id: str,
+    seed_id: str,
+    canonical_control_digest: str,
+    frontier_ordinal: int,
+    source_segment: GCCandidateFrontierSegmentEvidence,
+    source_pending_result: InducementPendingHorizonResult,
+    receiving_segment: GCCandidateFrontierSegmentEvidence,
+) -> str:
+    """Return the deterministic identity of one validated control frontier."""
+
+    if identity_kind is not GCCandidateFrontierIdentityKind.FRONTIER:
+        raise TypeError("identity_kind must be GCCandidateFrontierIdentityKind.FRONTIER")
+    normalized_instrument = _text(instrument, "instrument", upper=True)
+    normalized_timeframe = _text(timeframe, "timeframe", upper=True)
+    normalized_dataset = _hash(dataset_id, "dataset_id")
+    normalized_seed = _hash(seed_id, "seed_id")
+    normalized_control = _hash(canonical_control_digest, "canonical_control_digest")
+    if type(frontier_ordinal) is not int or frontier_ordinal < 0:
+        raise ValueError("frontier_ordinal must be a nonnegative integer")
+    source = _frontier_segment_material(source_segment, "source_segment")
+    receiving = _frontier_segment_material(receiving_segment, "receiving_segment")
+    if source_segment.segment_ordinal != frontier_ordinal:
+        raise ValueError("source segment ordinal must equal the frontier ordinal")
+    if receiving_segment.segment_ordinal != frontier_ordinal + 1:
+        raise ValueError("receiving segment ordinal must immediately follow the frontier")
+    if type(source_pending_result) is not InducementPendingHorizonResult:
+        raise TypeError("source_pending_result must be InducementPendingHorizonResult")
+    return _sha(
+        {
+            "version": GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION,
+            "identity_kind": identity_kind.value,
+            "instrument": normalized_instrument,
+            "timeframe": normalized_timeframe,
+            "dataset_id": normalized_dataset,
+            "seed_id": normalized_seed,
+            "canonical_control_digest": normalized_control,
+            "frontier_ordinal": frontier_ordinal,
+            "source_segment": source,
+            "source_pending_result": source_pending_result,
+            "receiving_segment": receiving,
+        }
     )
 
 
@@ -607,6 +736,118 @@ def _blocked_detector_result(
         return None
     reason = reasons[0] if type(reasons) is tuple and reasons else "DETECTOR_CHAIN_BLOCKED"
     return _blocked(status, reason, candidates, segment_results)
+
+
+@dataclass(frozen=True)
+class _GCBaseSegmentAnalysis:
+    equal_liquidity_result: EqualLiquidityResult | None
+    dealing_range_result: DealingRangeResult | None
+    liquidity_map_result: LiquidityMapResult | None
+    fair_value_gap_result: FairValueGapResult | None
+    structure_events: tuple[DealingRangeStructureEvent, ...]
+    inducement_observations: tuple[InducementObservation, ...]
+    blocked_result: GCCandidateEvidenceResult | None = None
+
+
+def _analyze_gc_base_segment(
+    *,
+    instrument: str,
+    timeframe: str,
+    segment: GCCanonicalContractSegment,
+    structural_seed: GCCanonicalSeedEvidence,
+    config: GCCandidateEvidenceConfig,
+    candidates: tuple[GCSegmentCandidateEvidence, ...] = (),
+    segment_results: tuple[GCCandidateEvidenceSegmentResult, ...] = (),
+) -> _GCBaseSegmentAnalysis:
+    equal_observations, range_observations, candles, inducement_observations = _bar_projections(segment)
+    dealing_swings = tuple(
+        item
+        for item in structural_seed.dealing_range_swings
+        if _provenance_in_segment(item, segment)
+    )
+    equal_swings = tuple(
+        item
+        for item in structural_seed.equal_liquidity_swings
+        if _provenance_in_segment(item, segment)
+    )
+    events = tuple(
+        item
+        for item in structural_seed.structure_events
+        if _provenance_in_segment(item, segment)
+    )
+    links = tuple(
+        item
+        for item in structural_seed.fair_value_gap_context_links
+        if _link_in_segment(item, segment)
+    )
+    equal_result = analyze_equal_liquidity(
+        instrument=instrument,
+        timeframe=timeframe,
+        swings=equal_swings,
+        observations=equal_observations,
+        config=config.equal_liquidity_config,
+    )
+    blocked = _blocked_detector_result(
+        equal_result,
+        expected_type=EqualLiquidityResult,
+        candidates=candidates,
+        segment_results=segment_results,
+    )
+    if blocked is not None:
+        return _GCBaseSegmentAnalysis(None, None, None, None, events, inducement_observations, blocked)
+    range_result = analyze_dealing_ranges(
+        instrument=instrument,
+        timeframe=timeframe,
+        swings=dealing_swings,
+        observations=range_observations,
+        structure_events=events,
+        config=config.dealing_range_config,
+    )
+    blocked = _blocked_detector_result(
+        range_result,
+        expected_type=DealingRangeResult,
+        candidates=candidates,
+        segment_results=segment_results,
+    )
+    if blocked is not None:
+        return _GCBaseSegmentAnalysis(equal_result, None, None, None, events, inducement_observations, blocked)
+    liquidity_result = analyze_liquidity_map(
+        instrument=instrument,
+        timeframe=timeframe,
+        swings=dealing_swings,
+        equal_liquidity_pools=equal_result.pools,
+        dealing_ranges=range_result.ranges,
+    )
+    blocked = _blocked_detector_result(
+        liquidity_result,
+        expected_type=LiquidityMapResult,
+        candidates=candidates,
+        segment_results=segment_results,
+    )
+    if blocked is not None:
+        return _GCBaseSegmentAnalysis(equal_result, range_result, None, None, events, inducement_observations, blocked)
+    fvg_result = analyze_fair_value_gaps(
+        instrument=instrument,
+        timeframe=timeframe,
+        candles=candles,
+        context_links=links,
+    )
+    blocked = _blocked_detector_result(
+        fvg_result,
+        expected_type=FairValueGapResult,
+        candidates=candidates,
+        segment_results=segment_results,
+    )
+    if blocked is not None:
+        return _GCBaseSegmentAnalysis(equal_result, range_result, liquidity_result, None, events, inducement_observations, blocked)
+    return _GCBaseSegmentAnalysis(
+        equal_result,
+        range_result,
+        liquidity_result,
+        fvg_result,
+        events,
+        inducement_observations,
+    )
 
 
 def _assemble_candidate(
@@ -948,72 +1189,30 @@ def build_gc_candidate_evidence(
             if type(segment) is not GCCanonicalContractSegment or segment.partition is not GCSegmentPartition.DEVELOPMENT:
                 raise ValueError("candidate evidence accepts development segments only")
             _hash(segment.segment_id, "segment_id")
-            equal_observations, range_observations, candles, inducement_observations = _bar_projections(segment)
-            dealing_swings = tuple(item for item in structural_seed.dealing_range_swings if _provenance_in_segment(item, segment))
-            equal_swings = tuple(item for item in structural_seed.equal_liquidity_swings if _provenance_in_segment(item, segment))
-            events = tuple(item for item in structural_seed.structure_events if _provenance_in_segment(item, segment))
-            links = tuple(item for item in structural_seed.fair_value_gap_context_links if _link_in_segment(item, segment))
-
-            equal_result = analyze_equal_liquidity(
+            base = _analyze_gc_base_segment(
                 instrument=instrument,
                 timeframe=timeframe,
-                swings=equal_swings,
-                observations=equal_observations,
-                config=config.equal_liquidity_config,
-            )
-            blocked = _blocked_detector_result(
-                equal_result,
-                expected_type=EqualLiquidityResult,
+                segment=segment,
+                structural_seed=structural_seed,
+                config=config,
                 candidates=tuple(promoted_candidates),
                 segment_results=tuple(promoted_segments),
             )
-            if blocked is not None:
-                return blocked
-            range_result = analyze_dealing_ranges(
-                instrument=instrument,
-                timeframe=timeframe,
-                swings=dealing_swings,
-                observations=range_observations,
-                structure_events=events,
-                config=config.dealing_range_config,
-            )
-            blocked = _blocked_detector_result(
-                range_result,
-                expected_type=DealingRangeResult,
-                candidates=tuple(promoted_candidates),
-                segment_results=tuple(promoted_segments),
-            )
-            if blocked is not None:
-                return blocked
-            liquidity_result = analyze_liquidity_map(
-                instrument=instrument,
-                timeframe=timeframe,
-                swings=dealing_swings,
-                equal_liquidity_pools=equal_result.pools,
-                dealing_ranges=range_result.ranges,
-            )
-            blocked = _blocked_detector_result(
-                liquidity_result,
-                expected_type=LiquidityMapResult,
-                candidates=tuple(promoted_candidates),
-                segment_results=tuple(promoted_segments),
-            )
-            if blocked is not None:
-                return blocked
-            fvg_result = analyze_fair_value_gaps(
-                instrument=instrument,
-                timeframe=timeframe,
-                candles=candles,
-                context_links=links,
-            )
-            blocked = _blocked_detector_result(
-                fvg_result,
-                expected_type=FairValueGapResult,
-                candidates=tuple(promoted_candidates),
-                segment_results=tuple(promoted_segments),
-            )
-            if blocked is not None:
-                return blocked
+            if base.blocked_result is not None:
+                return base.blocked_result
+            equal_result = base.equal_liquidity_result
+            range_result = base.dealing_range_result
+            liquidity_result = base.liquidity_map_result
+            fvg_result = base.fair_value_gap_result
+            if not (
+                type(equal_result) is EqualLiquidityResult
+                and type(range_result) is DealingRangeResult
+                and type(liquidity_result) is LiquidityMapResult
+                and type(fvg_result) is FairValueGapResult
+            ):
+                raise TypeError("base detector chain did not return complete results")
+            events = base.structure_events
+            inducement_observations = base.inducement_observations
             inducement_ranges = tuple(
                 item
                 for item in range_result.ranges
@@ -1189,6 +1388,291 @@ def build_gc_candidate_evidence(
     )
 
 
+def _frontier_blocked(
+    status: SMCV2PrimitiveStatus,
+    reason: str,
+) -> GCCandidateFrontierEvidenceResult:
+    blocking = (reason,) if status in (
+        SMCV2PrimitiveStatus.INVALID,
+        SMCV2PrimitiveStatus.AMBIGUOUS,
+        SMCV2PrimitiveStatus.UNKNOWN,
+    ) else ()
+    return GCCandidateFrontierEvidenceResult(
+        status,
+        reasons=(reason,),
+        blocking_reasons=blocking,
+    )
+
+
+def _frontier_segment_evidence(
+    *,
+    ordinal: int,
+    segment: GCCanonicalContractSegment,
+    base: _GCBaseSegmentAnalysis,
+    config: GCCandidateEvidenceConfig,
+) -> GCCandidateFrontierSegmentEvidence:
+    equal = base.equal_liquidity_result
+    ranges = base.dealing_range_result
+    liquidity = base.liquidity_map_result
+    gaps = base.fair_value_gap_result
+    if not (
+        type(equal) is EqualLiquidityResult
+        and type(ranges) is DealingRangeResult
+        and type(liquidity) is LiquidityMapResult
+        and type(gaps) is FairValueGapResult
+    ):
+        raise TypeError("frontier base detector results are incomplete")
+    results = (equal, ranges, liquidity, gaps)
+    configs = (config.equal_liquidity_config, config.dealing_range_config, None, None)
+    result_ids = tuple(
+        _result_digest(ordinal, segment.segment_id, name, version, detector_config, result)
+        for (name, version), detector_config, result in zip(
+            _DETECTOR_VERSIONS[:4],
+            configs,
+            results,
+            strict=True,
+        )
+    )
+    return GCCandidateFrontierSegmentEvidence(
+        ordinal,
+        segment.segment_id,
+        equal,
+        ranges,
+        liquidity,
+        gaps,
+        result_ids,
+    )
+
+
+def analyze_gc_candidate_frontier_evidence(
+    *,
+    dataset_config: GCDatasetBuildConfig,
+    dataset: GCDatasetBuildResult | None,
+    calendar_entries: tuple[KillZoneCalendarEntry, ...] | None,
+    structural_seed: GCCanonicalSeedEvidence | None,
+    canonical_candidate_evidence: GCCandidateEvidenceResult | None,
+    config: GCCandidateEvidenceConfig = GCCandidateEvidenceConfig(),
+) -> GCCandidateFrontierEvidenceResult:
+    """Build immutable base evidence for the first unpromoted control pair."""
+
+    try:
+        if type(dataset_config) is not GCDatasetBuildConfig:
+            raise TypeError("dataset_config must be GCDatasetBuildConfig")
+        _config_payload(config)
+        if canonical_candidate_evidence is not None and type(canonical_candidate_evidence) is not GCCandidateEvidenceResult:
+            raise TypeError("canonical_candidate_evidence must be GCCandidateEvidenceResult")
+    except (TypeError, ValueError):
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "INVALID_SUPPLIED_CONTEXT")
+    except Exception:
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "VALIDATION_EXCEPTION")
+
+    if any(
+        item is None
+        for item in (
+            dataset,
+            calendar_entries,
+            structural_seed,
+            canonical_candidate_evidence,
+        )
+    ):
+        return _frontier_blocked(SMCV2PrimitiveStatus.UNKNOWN, "MISSING_TOP_LEVEL_CONTEXT")
+    assert dataset is not None
+    assert calendar_entries is not None
+    assert structural_seed is not None
+    assert canonical_candidate_evidence is not None
+
+    try:
+        rebuilt = build_gc_candidate_evidence(
+            dataset_config=dataset_config,
+            dataset=dataset,
+            calendar_entries=calendar_entries,
+            structural_seed=structural_seed,
+            config=config,
+        )
+    except Exception:
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "CANONICAL_REBUILD_EXCEPTION")
+    if rebuilt != canonical_candidate_evidence:
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "CANONICAL_CONTROL_DRIFT")
+    if canonical_candidate_evidence.status is SMCV2PrimitiveStatus.INVALID:
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "CANONICAL_CONTROL_INVALID")
+    if canonical_candidate_evidence.status is SMCV2PrimitiveStatus.AMBIGUOUS:
+        return _frontier_blocked(SMCV2PrimitiveStatus.AMBIGUOUS, "CANONICAL_CONTROL_AMBIGUOUS")
+    if canonical_candidate_evidence.status is not SMCV2PrimitiveStatus.UNKNOWN:
+        return _frontier_blocked(SMCV2PrimitiveStatus.NONE, "CONTROL_FRONTIER_NOT_APPLICABLE")
+
+    try:
+        if canonical_candidate_evidence.candidates or canonical_candidate_evidence.manifest is not None:
+            raise ValueError("UNKNOWN canonical control cannot contain candidates or a manifest")
+        if type(dataset) is not GCDatasetBuildResult or dataset.status is not GCDatasetBuildStatus.VALID:
+            raise ValueError("frontier analysis requires a VALID dataset")
+        if dataset.manifest is None or dataset.dataset_id is None:
+            raise ValueError("frontier dataset identity is incomplete")
+        calendars = _prevalidate_calendar(calendar_entries, dataset.manifest.calendar_version)
+        _prevalidate_seed(structural_seed)
+        segment_results = canonical_candidate_evidence.segment_results
+        if type(segment_results) is not tuple or not segment_results:
+            raise ValueError("canonical control prefix must be nonempty")
+        for ordinal, result in enumerate(segment_results):
+            if type(result) is not GCCandidateEvidenceSegmentResult:
+                raise TypeError("canonical control segment result has an invalid type")
+            if result.segment_ordinal != ordinal or ordinal >= len(dataset.segments):
+                raise ValueError("canonical control ordinals must be gapless and dataset-bound")
+            if dataset.segments[ordinal].segment_id != result.segment_id:
+                raise ValueError("canonical control segment identity mismatch")
+        frontier_ordinal = len(segment_results)
+        if frontier_ordinal + 1 >= len(dataset.segments):
+            return _frontier_blocked(SMCV2PrimitiveStatus.NONE, "NO_ADJACENT_CONTROL_FRONTIER")
+        source = dataset.segments[frontier_ordinal]
+        receiving = dataset.segments[frontier_ordinal + 1]
+        if type(source) is not GCCanonicalContractSegment or type(receiving) is not GCCanonicalContractSegment:
+            raise TypeError("frontier dataset segments have an invalid type")
+        if source.partition is not GCSegmentPartition.DEVELOPMENT or receiving.partition is not GCSegmentPartition.DEVELOPMENT:
+            raise ValueError("frontier segments must be DEVELOPMENT only")
+        if source.contract != receiving.contract:
+            raise ValueError("frontier segments cross a contract boundary")
+        if source.preceding_missing_bar_count or receiving.preceding_missing_bar_count:
+            raise ValueError("frontier segments cannot be partial")
+        _hash(source.segment_id, "source segment_id")
+        _hash(receiving.segment_id, "receiving segment_id")
+        calendar_dates = {item.trade_date for item in calendars}
+        required_dates = {
+            source.first_trade_date,
+            source.last_trade_date,
+            receiving.first_trade_date,
+            receiving.last_trade_date,
+        }
+        if not required_dates.issubset(calendar_dates):
+            return _frontier_blocked(SMCV2PrimitiveStatus.UNKNOWN, "FRONTIER_CALENDAR_UNAVAILABLE")
+        instrument = _text(dataset_config.instrument, "instrument", upper=True)
+        timeframe = _text(dataset_config.timeframe, "timeframe", upper=True)
+        source_base = _analyze_gc_base_segment(
+            instrument=instrument,
+            timeframe=timeframe,
+            segment=source,
+            structural_seed=structural_seed,
+            config=config,
+        )
+        if source_base.blocked_result is not None:
+            reason = source_base.blocked_result.reasons[0] if source_base.blocked_result.reasons else "SOURCE_BASE_EVIDENCE_BLOCKED"
+            return _frontier_blocked(source_base.blocked_result.status, reason)
+        receiving_base = _analyze_gc_base_segment(
+            instrument=instrument,
+            timeframe=timeframe,
+            segment=receiving,
+            structural_seed=structural_seed,
+            config=config,
+        )
+        if receiving_base.blocked_result is not None:
+            reason = receiving_base.blocked_result.reasons[0] if receiving_base.blocked_result.reasons else "RECEIVING_BASE_EVIDENCE_BLOCKED"
+            return _frontier_blocked(receiving_base.blocked_result.status, reason)
+        source_evidence = _frontier_segment_evidence(
+            ordinal=frontier_ordinal,
+            segment=source,
+            base=source_base,
+            config=config,
+        )
+        receiving_evidence = _frontier_segment_evidence(
+            ordinal=frontier_ordinal + 1,
+            segment=receiving,
+            base=receiving_base,
+            config=config,
+        )
+        source_ranges = tuple(
+            item
+            for item in source_evidence.dealing_range_result.ranges
+            if item.kind is DealingRangeKind.EXTERNAL
+        )
+        source_gaps = tuple(
+            item
+            for item in source_evidence.fair_value_gap_result.gaps
+            if item.displacement_id is not None
+        )
+        source_gap_ids = frozenset(item.gap_id for item in source_gaps)
+        pending = analyze_inducement_pending_horizons(
+            instrument=instrument,
+            timeframe=timeframe,
+            dealing_range_snapshots=source_ranges,
+            liquidity_map_snapshots=source_evidence.liquidity_map_result.snapshots,
+            equal_liquidity_pools=source_evidence.equal_liquidity_result.pools,
+            structure_events=source_base.structure_events,
+            fair_value_gaps=source_gaps,
+            fair_value_gap_transitions=tuple(
+                item
+                for item in source_evidence.fair_value_gap_result.transitions
+                if item.gap_id in source_gap_ids
+            ),
+            fair_value_gap_snapshots=tuple(
+                item
+                for item in source_evidence.fair_value_gap_result.snapshots
+                if item.gap_id in source_gap_ids
+            ),
+            observations=source_base.inducement_observations,
+        )
+        if type(pending) is not InducementPendingHorizonResult:
+            raise TypeError("pending producer returned an invalid result type")
+        if pending.status is SMCV2PrimitiveStatus.NONE:
+            return _frontier_blocked(SMCV2PrimitiveStatus.NONE, "NO_PENDING_CONTROL_FRONTIER")
+        if pending.status in (SMCV2PrimitiveStatus.INVALID, SMCV2PrimitiveStatus.AMBIGUOUS):
+            reason = pending.reasons[0] if pending.reasons else "PENDING_CONTROL_FRONTIER_BLOCKED"
+            return _frontier_blocked(pending.status, reason)
+        expected_reasons = ("one or more confirmation horizons are incomplete",)
+        expected_blockers = ("NEXT_THREE_CLOSED_BARS_INCOMPLETE",)
+        if (
+            pending.status is not SMCV2PrimitiveStatus.UNKNOWN
+            or pending.reasons != expected_reasons
+            or pending.blocking_reasons != expected_blockers
+        ):
+            return _frontier_blocked(SMCV2PrimitiveStatus.UNKNOWN, "UNRELATED_PENDING_CONTROL_FRONTIER")
+        if not pending.pending_horizons:
+            raise ValueError("pending frontier must contain at least one horizon")
+        for horizon in pending.pending_horizons:
+            if type(horizon) is not InducementPendingHorizon:
+                raise TypeError("pending horizon has an invalid type")
+            available_count = len(horizon.available_confirmation_indices)
+            if (
+                len(horizon.available_confirmation_timestamps) != available_count
+                or not 0 <= available_count < 3
+                or horizon.missing_confirmation_bar_count != 3 - available_count
+                or horizon.reason_token != "NEXT_THREE_CLOSED_BARS_INCOMPLETE"
+            ):
+                raise ValueError("pending horizon arithmetic is invalid")
+        control_digest = _sha(canonical_candidate_evidence)
+        frontier_id = make_gc_candidate_frontier_evidence_id(
+            identity_kind=GCCandidateFrontierIdentityKind.FRONTIER,
+            instrument=instrument,
+            timeframe=timeframe,
+            dataset_id=dataset.dataset_id,
+            seed_id=structural_seed.seed_id,
+            canonical_control_digest=control_digest,
+            frontier_ordinal=frontier_ordinal,
+            source_segment=source_evidence,
+            source_pending_result=pending,
+            receiving_segment=receiving_evidence,
+        )
+        frontier = GCCandidateFrontierEvidence(
+            frontier_id,
+            GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION,
+            instrument,
+            timeframe,
+            dataset.dataset_id,
+            structural_seed.seed_id,
+            control_digest,
+            frontier_ordinal,
+            source_evidence,
+            pending,
+            receiving_evidence,
+        )
+    except (TypeError, ValueError, IndexError):
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "INVALID_CONTROL_FRONTIER_EVIDENCE")
+    except Exception:
+        return _frontier_blocked(SMCV2PrimitiveStatus.INVALID, "CONTROL_FRONTIER_VALIDATION_EXCEPTION")
+    return GCCandidateFrontierEvidenceResult(
+        SMCV2PrimitiveStatus.VALID,
+        frontier,
+        ("CONTROL_FRONTIER_CONTINUATION_EVIDENCE_COMPLETE",),
+    )
+
+
 __all__ = (
     "GC_CANDIDATE_EVIDENCE_VERSION",
     "GCCandidateEvidenceIdentityKind",
@@ -1197,6 +1681,13 @@ __all__ = (
     "GCCandidateEvidenceSegmentResult",
     "GCCandidateEvidenceManifest",
     "GCCandidateEvidenceResult",
+    "GC_CANDIDATE_FRONTIER_EVIDENCE_VERSION",
+    "GCCandidateFrontierIdentityKind",
+    "GCCandidateFrontierSegmentEvidence",
+    "GCCandidateFrontierEvidence",
+    "GCCandidateFrontierEvidenceResult",
     "make_gc_candidate_evidence_id",
+    "make_gc_candidate_frontier_evidence_id",
     "build_gc_candidate_evidence",
+    "analyze_gc_candidate_frontier_evidence",
 )
