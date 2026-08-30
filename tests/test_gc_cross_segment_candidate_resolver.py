@@ -49,6 +49,9 @@ def _h(value: str) -> str:
 
 def _canonical_inputs(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    direction: SMCV2Direction = SMCV2Direction.BULLISH,
+    break_distance_ticks: int = 1,
 ) -> tuple[
     GCCrossSegmentContinuityResult,
     tuple[resolver.GCSegmentPendingHorizonEvidence, ...],
@@ -59,7 +62,17 @@ def _canonical_inputs(
     event = fixture["event"]
     gap = fixture["gap"]
     assert event is not None and gap is not None
+    if direction not in {SMCV2Direction.BULLISH, SMCV2Direction.BEARISH}:
+        raise ValueError("test direction must be directional")
+    if type(break_distance_ticks) is not int or break_distance_ticks <= 0:
+        raise ValueError("test break distance must be a positive integer")
     confirmation_bar = receiving.bars[2]
+    event = replace(event, direction=direction)
+    boundary_tick = (
+        confirmation_bar.close_tick - break_distance_ticks
+        if direction is SMCV2Direction.BULLISH
+        else confirmation_bar.close_tick + break_distance_ticks
+    )
     event_id = make_dealing_range_id(
         identity_kind="EVENT",
         instrument="GC",
@@ -69,12 +82,10 @@ def _canonical_inputs(
         event_type=event.event_type,
         broken_swing_id=event.broken_swing_id,
         confirmation_index=event.provenance.confirmation_index,
-        boundaries=SMCV2TickRange(
-            confirmation_bar.close_tick - 1,
-            confirmation_bar.close_tick - 1,
-        ),
+        boundaries=SMCV2TickRange(boundary_tick, boundary_tick),
     )
     event = replace(event, event_id=event_id)
+    gap = replace(gap, direction=direction)
     gap_id = make_fair_value_gap_id(
         identity_kind="GAP",
         instrument="GC",
@@ -162,7 +173,7 @@ def _canonical_inputs(
     boundary = continuity.boundaries[0]
     source = fixture["source"]
     pending_values = {
-        "direction": SMCV2Direction.BULLISH,
+        "direction": direction,
         "active_range_lineage_id": _h("active-range"),
         "active_range_snapshot_id": _h("range-snapshot"),
         "liquidity_map_snapshot_id": _h("map-snapshot"),
@@ -171,7 +182,9 @@ def _canonical_inputs(
         "internal_pool_id": _h("internal-pool"),
         "sweep_index": source.bars[-1].index,
         "sweep_timestamp": source.bars[-1].timestamp,
-        "sweep_extreme_tick": 999,
+        "sweep_extreme_tick": (
+            999 if direction is SMCV2Direction.BULLISH else 1001
+        ),
         "reclaim_close_tick": 1000,
         "available_confirmation_indices": (),
         "available_confirmation_timestamps": (),
@@ -366,6 +379,45 @@ def test_case_03_canonical_unknown_branch_resolves_valid(
     assert len(result.resolutions) == 1
     assert result.manifest is not None
     assert result.manifest.resolution_ids == (result.resolutions[0].resolution_id,)
+
+
+@pytest.mark.parametrize(
+    "direction",
+    [SMCV2Direction.BULLISH, SMCV2Direction.BEARISH],
+)
+def test_case_03a_canonical_multi_tick_event_identity_is_reference_bound(
+    monkeypatch: pytest.MonkeyPatch,
+    direction: SMCV2Direction,
+) -> None:
+    continuity, pending, receiving = _canonical_inputs(
+        monkeypatch,
+        direction=direction,
+        break_distance_ticks=3,
+    )
+    result = _call(continuity, pending, receiving)
+    assert result.status is SMCV2PrimitiveStatus.VALID
+    assert len(result.resolutions) == 1
+
+
+def test_case_03b_event_object_digest_must_match_continuity_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    continuity, pending, receiving = _canonical_inputs(monkeypatch)
+    group = continuity.receiving_groups[0]
+    event_reference, gap_reference = group.references
+    changed_reference = replace(
+        event_reference,
+        object_digest=_h("changed-event-object"),
+    )
+    changed_group = replace(
+        group,
+        references=(changed_reference, gap_reference),
+    )
+    changed_continuity = replace(
+        continuity,
+        receiving_groups=(changed_group,),
+    )
+    _assert_invalid(_call(changed_continuity, pending, receiving))
 
 
 @pytest.mark.parametrize(

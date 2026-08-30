@@ -28,7 +28,6 @@ from analysis.gc_cross_segment_continuity import (
 from smc.dealing_range import (
     DealingRangeEventType,
     DealingRangeStructureEvent,
-    make_dealing_range_id,
 )
 from smc.fair_value_gap import (
     FairValueGap,
@@ -739,16 +738,17 @@ def _observations(value: object) -> tuple[InducementObservation, ...]:
     return tuple(output)
 
 
-def _event_id(
+def _validate_event_reference(
     event: DealingRangeStructureEvent,
+    event_reference: GCContinuityReceivingReference,
     observation_by_moment: dict[tuple[int, datetime], InducementObservation],
-    instrument: str,
-    timeframe: str,
-) -> str:
+) -> None:
     if type(event) is not DealingRangeStructureEvent:
         raise TypeError("structure_event has an invalid type")
     if type(event.direction) is not SMCV2Direction or type(event.event_type) is not DealingRangeEventType:
         raise TypeError("structure event enums are invalid")
+    _hash(event.broken_swing_id, "broken_swing_id")
+    _hash(event.event_id, "event_id")
     provenance = event.provenance
     source_indices = _integer_tuple(provenance.source_indices, "event source_indices")
     source_timestamps = _timestamp_tuple(
@@ -765,19 +765,11 @@ def _event_id(
         raise ValueError("event sequence must end at confirmation")
     if any(moment not in observation_by_moment for moment in moments):
         raise ValueError("event source moment is absent from observations")
-    close_tick = observation_by_moment[confirmation].close_tick
-    boundary_tick = close_tick - 1 if event.direction is SMCV2Direction.BULLISH else close_tick + 1
-    return make_dealing_range_id(
-        identity_kind="EVENT",
-        instrument=instrument,
-        timeframe=timeframe,
-        direction=event.direction,
-        source_indices=source_indices,
-        event_type=event.event_type,
-        broken_swing_id=event.broken_swing_id,
-        confirmation_index=confirmation[0],
-        boundaries=SMCV2TickRange(boundary_tick, boundary_tick),
-    )
+    if (
+        event_reference.object_id != event.event_id
+        or event_reference.object_digest != _sha(event)
+    ):
+        raise ValueError("structure event does not match its continuity reference")
 
 
 def _validate_receiving(
@@ -809,10 +801,9 @@ def _validate_receiving(
         (item.index, _timestamp(item.timestamp, "observation timestamp")): item
         for item in observations
     }
+    event_ref, gap_ref = group.references
     event = wrapper.structure_event
-    expected_event_id = _event_id(event, by_moment, instrument, timeframe)
-    if expected_event_id != event.event_id:
-        raise ValueError("structure event identity mismatch")
+    _validate_event_reference(event, event_ref, by_moment)
     gap = wrapper.fair_value_gap
     if type(gap) is not FairValueGap:
         raise TypeError("fair_value_gap has an invalid type")
@@ -943,7 +934,6 @@ def _validate_receiving(
             raise ValueError("gap snapshot identity mismatch")
         prior_snapshot = moment
         snapshot_ids.append(snapshot.snapshot_id)
-    event_ref, gap_ref = group.references
     if event_ref.object_id != event.event_id or gap_ref.object_id != gap.gap_id:
         raise ValueError("receiving reference IDs mismatch")
     if event_ref.semantic_discriminator != event.event_type.value:
