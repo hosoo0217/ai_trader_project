@@ -1,0 +1,402 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "GC AI Training Readiness: Acquisition First",
+    "description": "A technical evidence audit of model-training readiness and the next bounded research direction.",
+    "generatedAt": "2026-08-31T08:17:34Z",
+    "charts": [
+      {
+        "id": "readiness_gate_chart",
+        "title": "Accepted evidence by training-readiness gate",
+        "subtitle": "1 = complete, 0.5 = partial, 0 = unavailable; this is an evidence-state score, not model performance",
+        "headerMarkdown": "The evidence chain stops before canonical candidate promotion. **No training metric is plotted.**",
+        "type": "bar",
+        "dataset": "readiness_gate_scores",
+        "sourceId": "gate_chart_sql",
+        "valueFormat": "number",
+        "encodings": {
+          "x": { "field": "gate", "type": "nominal", "label": "Gate" },
+          "y": { "field": "evidence_score", "type": "quantitative", "label": "Accepted evidence score" },
+          "tooltip": [
+            { "field": "status", "type": "nominal", "label": "Status" },
+            { "field": "meaning", "type": "nominal", "label": "Meaning" }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "readiness_gate_table",
+        "title": "Training-readiness gates",
+        "subtitle": "Current accepted state at 31 August 2026; no final-OOS outcomes inspected",
+        "dataset": "readiness_gates",
+        "sourceId": "readiness_table_sql",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "#", "format": "number" },
+          { "field": "stage", "label": "Gate", "type": "text" },
+          { "field": "required", "label": "Required evidence", "type": "text" },
+          { "field": "current", "label": "Accepted state", "type": "text" },
+          { "field": "status", "label": "Status", "type": "text" },
+          { "field": "severity", "label": "Severity", "type": "text" },
+          { "field": "impact", "label": "Modeling impact", "type": "text" }
+        ]
+      },
+      {
+        "id": "direction_table",
+        "title": "Next-direction decision",
+        "subtitle": "Options ranked by evidence integrity, selection-bias risk, and reversibility",
+        "dataset": "direction_options",
+        "sourceId": "direction_table_sql",
+        "defaultSort": {
+          "field": "order",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "Rank", "format": "number" },
+          { "field": "option", "label": "Option", "type": "text" },
+          { "field": "decision", "label": "Decision", "type": "text" },
+          { "field": "evidence", "label": "Evidence", "type": "text" },
+          { "field": "risk", "label": "Principal risk", "type": "text" },
+          { "field": "next_action", "label": "Bounded next action", "type": "text" }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "gate_chart_sql",
+        "label": "Readiness gate chart snapshot query",
+        "query": {
+          "engine": "artifact-snapshot",
+          "sql": "SELECT gate, evidence_score, status, meaning FROM readiness_gate_scores ORDER BY evidence_score DESC, gate",
+          "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+          "executed_at": "2026-08-31T08:17:34Z"
+        }
+      },
+      {
+        "id": "readiness_table_sql",
+        "label": "Readiness gate table snapshot query",
+        "query": {
+          "engine": "artifact-snapshot",
+          "sql": "SELECT \"order\", stage, required, current, status, severity, impact FROM readiness_gates ORDER BY \"order\"",
+          "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+          "executed_at": "2026-08-31T08:17:34Z"
+        }
+      },
+      {
+        "id": "direction_table_sql",
+        "label": "Next-direction table snapshot query",
+        "query": {
+          "engine": "artifact-snapshot",
+          "sql": "SELECT \"order\", option, decision, evidence, risk, next_action FROM direction_options ORDER BY \"order\"",
+          "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+          "executed_at": "2026-08-31T08:17:34Z"
+        }
+      },
+      {
+        "id": "post_resolver_readiness",
+        "label": "Post-resolver pretraining readiness decision",
+        "path": "docs/gc_futures_independent_pretraining_post_resolver_readiness_decision.md"
+      },
+      {
+        "id": "terminal_resolver",
+        "label": "Terminal cross-segment resolver outcome",
+        "path": "docs/gc_futures_phase_a_cross_segment_candidate_resolver_terminal_outcome_decision.md"
+      },
+      {
+        "id": "phase_b_closure",
+        "label": "Phase-B sweep-reclaim closure decision",
+        "path": "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_closure_decision.md"
+      },
+      {
+        "id": "training_authority",
+        "label": "GC AI strategy and training authority decision",
+        "path": "docs/gc_futures_ai_strategy_training_decision.md"
+      },
+      {
+        "id": "source_notes",
+        "label": "Readiness analysis source notes",
+        "path": "reports/gc_ai_training_readiness_2026_08_31/source_notes.md"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# GC AI Training Readiness: Acquisition First"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## Training is correctly blocked before model fitting\n\n- **AI training is not ready and has not started.** The accepted corpus root is absent, and no promoted feature matrix, target vector, or chronological training partitions exist.\n- **The blocker is upstream evidence, not software health.** The public corpus contract passes its focused tests, while the terminal resolver completed deterministically with zero resolutions.\n- **The evidence-safe next direction is acquisition first.** Freeze a new independent development cohort before selecting one new hypothesis; do not rerun or relax the closed Phase A/B rules."
+      },
+      {
+        "id": "gate_finding",
+        "type": "markdown",
+        "body": "## The evidence chain stops at canonical candidate promotion\n\nA model-ready corpus requires every gate below to pass in order. Public analyzers and builders are reproducible, but reproducibility cannot replace missing candidate evidence. The absence of downstream artifacts is therefore the correct fail-closed state, not a pipeline defect."
+      },
+      {
+        "id": "gate_chart_block",
+        "type": "chart",
+        "chartId": "readiness_gate_chart"
+      },
+      {
+        "id": "gate_table_block",
+        "type": "table",
+        "tableId": "readiness_gate_table"
+      },
+      {
+        "id": "quality_finding",
+        "type": "markdown",
+        "body": "## Data quality is sufficient to reject training, not to train\n\nCompleteness, identity, calendar, and deterministic-replay checks are strong enough to trust the negative readiness conclusion. They are not sufficient for fitting because the modeling grain—one accepted candidate row with a point-in-time feature vector and H=12 target—does not yet exist. Severity is critical for modeling but low for system safety because every downstream authority remains closed."
+      },
+      {
+        "id": "direction_finding",
+        "type": "markdown",
+        "body": "## Acquisition first is the only evidence-safe next direction\n\nTrying another setup on the same accepted development sample would increase multiple-hypothesis selection bias. Repeating the resolver would answer an already consumed question. A new independent cohort, frozen before another hypothesis is selected or run, creates genuinely new evidence without touching final OOS."
+      },
+      {
+        "id": "direction_table_block",
+        "type": "table",
+        "tableId": "direction_table"
+      },
+      {
+        "id": "scope_method",
+        "type": "markdown",
+        "body": "## Scope and method: metadata-only, no outcome contact\n\nThis assessment reconciled committed decision hashes, public contract hashes, final-root presence, authority flags, and cache-disabled public regressions. It did not inspect raw private rows, label outcomes, PnL, class balance, or sealed final OOS. The comparison baseline is the accepted post-resolver repository state at commit `6dff5d4ea6e0ebe015cb1fbb7365e6c0b9faa1ef`."
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## The audit does not estimate edge or future sample sufficiency\n\nThe result is descriptive and diagnostic, not predictive or causal. It establishes only that required modeling artifacts are absent and that current negative evidence must not be repaired into training data. A future acquisition proposal must define contract coverage, date intervals, calendar authority, source roles, leakage controls, and sealed-OOS metadata before any payload is processed."
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## Next steps: preregister acquisition before another setup\n\n1. Create one documentation-only independent development-cohort acquisition proposal.\n2. Lock exact GC contracts, fully closed 5-minute grain, calendar evidence, date intervals, source hashes, and immutable role assignments.\n3. Keep final OOS metadata-only and exclude every Phase A/B diagnostic artifact from candidate or label authority.\n4. After acquisition passes completeness and integrity gates, select exactly one new falsifiable hypothesis before reading its outcomes.\n5. Continue to block feature/label construction, model training, integration, and trading until a later accepted corpus manifest exists."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## Questions the acquisition proposal must resolve\n\n- Which previously unused GC contracts and trade-date intervals form the independent development cohort?\n- Which official calendar artifacts cover every requested session without inferred holiday hours?\n- How will source roles prevent overlap with closed Phase A/B evidence and sealed final OOS?\n- What minimum completeness and contract-breadth gates will stop the transaction before hypothesis selection?"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-31T08:17:34Z",
+    "status": "ready",
+    "datasets": {
+      "readiness_gate_scores": [
+        {
+          "gate": "Source/calendar",
+          "evidence_score": 0.5,
+          "status": "PARTIAL",
+          "meaning": "Accepted source evidence exists, but no independent modeling cohort is frozen"
+        },
+        {
+          "gate": "Candidates",
+          "evidence_score": 0,
+          "status": "BLOCKED",
+          "meaning": "No promoted canonical candidate population"
+        },
+        {
+          "gate": "Features/labels",
+          "evidence_score": 0,
+          "status": "BLOCKED",
+          "meaning": "No immutable feature matrix or H=12 target vector"
+        },
+        {
+          "gate": "Partitions",
+          "evidence_score": 0,
+          "status": "BLOCKED",
+          "meaning": "No chronological purge/embargo partitions"
+        },
+        {
+          "gate": "Corpus",
+          "evidence_score": 0,
+          "status": "BLOCKED",
+          "meaning": "Accepted corpus root and manifest are absent"
+        },
+        {
+          "gate": "Training",
+          "evidence_score": 0,
+          "status": "CORRECTLY STOPPED",
+          "meaning": "No authority and no model artifact"
+        }
+      ],
+      "readiness_gates": [
+        {
+          "order": 1,
+          "stage": "Source and calendar evidence",
+          "required": "Immutable GC 5-minute sources with authoritative session coverage",
+          "current": "Substantial accepted evidence exists; prior closed research remains immutable",
+          "status": "PARTIAL",
+          "severity": "High",
+          "impact": "Useful for audit, insufficient alone for modeling"
+        },
+        {
+          "order": 2,
+          "stage": "Canonical candidate evidence",
+          "required": "Promoted point-in-time candidates from one preregistered hypothesis",
+          "current": "No promoted population; terminal resolver has 0 resolutions",
+          "status": "BLOCKED",
+          "severity": "Critical",
+          "impact": "No modeling grain exists"
+        },
+        {
+          "order": 3,
+          "stage": "Features and H=12 labels",
+          "required": "One immutable feature row and target per accepted candidate",
+          "current": "Absent",
+          "status": "BLOCKED",
+          "severity": "Critical",
+          "impact": "No feature matrix or target vector"
+        },
+        {
+          "order": 4,
+          "stage": "Chronological partitions",
+          "required": "TRAIN, VALIDATION, CALIBRATION with purge and embargo",
+          "current": "Absent",
+          "status": "BLOCKED",
+          "severity": "Critical",
+          "impact": "No leakage-safe fitting or selection population"
+        },
+        {
+          "order": 5,
+          "stage": "Independent corpus manifest",
+          "required": "Accepted deterministic corpus root and manifest",
+          "current": "gc_independent_pretraining_corpus_v1 is absent",
+          "status": "BLOCKED",
+          "severity": "Critical",
+          "impact": "Training input cannot be identified or reproduced"
+        },
+        {
+          "order": 6,
+          "stage": "Model training",
+          "required": "Later explicit authority after all upstream gates pass",
+          "current": "Not started; authority false",
+          "status": "CORRECTLY STOPPED",
+          "severity": "None for safety",
+          "impact": "No model artifact, inference, or trading authority"
+        }
+      ],
+      "direction_options": [
+        {
+          "order": 1,
+          "option": "Freeze a new independent development cohort before hypothesis selection",
+          "decision": "SELECT",
+          "evidence": "Creates new information while preserving closed Phase A/B results and final OOS",
+          "risk": "Requires exact source/calendar planning and may still fail completeness",
+          "next_action": "Documentation-only acquisition proposal"
+        },
+        {
+          "order": 2,
+          "option": "Pause training and research",
+          "decision": "SAFE FALLBACK",
+          "evidence": "Preserves all evidence and eliminates further selection bias",
+          "risk": "No progress toward a trainable corpus",
+          "next_action": "Retain immutable artifacts; no execution"
+        },
+        {
+          "order": 3,
+          "option": "Choose another setup on the current development sample",
+          "decision": "REJECT",
+          "evidence": "The research budget on this sample is closed",
+          "risk": "Multiple-hypothesis selection bias and disguised rescue",
+          "next_action": "None"
+        },
+        {
+          "order": 4,
+          "option": "Repeat or relax the terminal resolver",
+          "decision": "REJECT",
+          "evidence": "Two deterministic workers already produced the admissible terminal UNKNOWN",
+          "risk": "Rule drift and outcome-seeking repair",
+          "next_action": "None"
+        },
+        {
+          "order": 5,
+          "option": "Start model training now",
+          "decision": "REJECT",
+          "evidence": "Candidate, features, labels, partitions, and corpus are absent",
+          "risk": "Unidentified grain, leakage, irreproducible labels, and invalid OOS claims",
+          "next_action": "None"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "gate_chart_sql",
+      "label": "Readiness gate chart snapshot query",
+      "query": {
+        "engine": "artifact-snapshot",
+        "sql": "SELECT gate, evidence_score, status, meaning FROM readiness_gate_scores ORDER BY evidence_score DESC, gate",
+        "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+        "executed_at": "2026-08-31T08:17:34Z"
+      }
+    },
+    {
+      "id": "readiness_table_sql",
+      "label": "Readiness gate table snapshot query",
+      "query": {
+        "engine": "artifact-snapshot",
+        "sql": "SELECT \"order\", stage, required, current, status, severity, impact FROM readiness_gates ORDER BY \"order\"",
+        "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+        "executed_at": "2026-08-31T08:17:34Z"
+      }
+    },
+    {
+      "id": "direction_table_sql",
+      "label": "Next-direction table snapshot query",
+      "query": {
+        "engine": "artifact-snapshot",
+        "sql": "SELECT \"order\", option, decision, evidence, risk, next_action FROM direction_options ORDER BY \"order\"",
+        "description": "Exact projection over the immutable report snapshot assembled from the accepted readiness decisions.",
+        "executed_at": "2026-08-31T08:17:34Z"
+      }
+    },
+    {
+      "id": "post_resolver_readiness",
+      "label": "Post-resolver pretraining readiness decision",
+      "path": "docs/gc_futures_independent_pretraining_post_resolver_readiness_decision.md"
+    },
+    {
+      "id": "terminal_resolver",
+      "label": "Terminal cross-segment resolver outcome",
+      "path": "docs/gc_futures_phase_a_cross_segment_candidate_resolver_terminal_outcome_decision.md"
+    },
+    {
+      "id": "phase_b_closure",
+      "label": "Phase-B sweep-reclaim closure decision",
+      "path": "docs/gc_futures_phase_b_ny_am_opening_range_sweep_reclaim_reversion_closure_decision.md"
+    },
+    {
+      "id": "training_authority",
+      "label": "GC AI strategy and training authority decision",
+      "path": "docs/gc_futures_ai_strategy_training_decision.md"
+    },
+    {
+      "id": "source_notes",
+      "label": "Readiness analysis source notes",
+      "path": "reports/gc_ai_training_readiness_2026_08_31/source_notes.md"
+    }
+  ],
+  "package_info": {
+    "originUrl": "artifact://gc-ai-training-readiness-2026-08-31",
+    "controls": {
+      "edit": false,
+      "refresh": false,
+      "share": false
+    }
+  }
+}
